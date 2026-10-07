@@ -8,12 +8,14 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 21
       - uses: gradle/actions/setup-gradle@v3
       - name: Create gradlew if missing
         run: |
           if [ ! -f "./gradlew" ]; then
-            gradle wrapper --gradle-version 8.5
+            gradle wrapper --gradle-version 9.3.1
+          else
+            gradle wrapper --gradle-version 9.3.1
           fi
           chmod +x gradlew
       - name: Build APK
