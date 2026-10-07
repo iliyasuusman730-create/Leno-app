@@ -1,4 +1,4 @@
-name: Build Leno APK
+concurrency: name: Build Leno APK
 on: [push, workflow_dispatch]
 jobs:
   build:
@@ -15,9 +15,9 @@ jobs:
           gradle wrapper --gradle-version 9.3.1
           chmod +x gradlew
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          ls -la
-      - name: Build APK
-        run: ./gradlew assembleDebug --stacktrace
+      - name: Build APK - show error clearly
+        run: |
+          ./gradlew assembleDebug --stacktrace || (echo "--- FAILED LOGS ---" && ./gradlew assembleDebug --info | grep -A 20 "What went wrong" && exit 1)
       - name: Upload APK
         if: always()
         uses: actions/upload-artifact@v4
