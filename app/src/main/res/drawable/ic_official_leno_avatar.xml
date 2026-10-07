@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="200dp"
+    android:height="200dp"
+    android:viewportWidth="200"
+    android:viewportHeight="200">
+
+    <!-- 1. Pure Solid Black Background (#000000) -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M 100,0 A 100,100 0 1,1 99.9,0 Z" />
+
+    <!-- 2. Vibrant Electric Neon Green Outer Ring (#00E676) -->
+    <path
+        android:strokeColor="#00E676"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:pathData="M 100,18 A 82,82 0 1,1 99.9,18 Z" />
+
+    <!-- 3. Bold Crisp White Speech Bubble Outline with Bottom-Right Tail (#FFFFFF) -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#000000"
+        android:pathData="M 100,44 A 52,52 0 1,0 138,128 L 148,148 L 126,140 A 52,52 0 0,0 100,44 Z" />
+
+    <!-- 4. Dimensionally Faceted 4-Pointed Sparkle Star (Left Facet - Bright Mint/Neon #00FF7F) -->
+    <path
+        android:fillColor="#00FF7F"
+        android:pathData="M 100,64 C 100,96 100,96 68,96 C 100,96 100,96 100,128 Z" />
+
+    <!-- 5. Dimensionally Faceted 4-Pointed Sparkle Star (Right Facet - Emerald #00B359) -->
+    <path
+        android:fillColor="#00B359"
+        android:pathData="M 100,64 C 100,96 100,96 132,96 C 100,96 100,96 100,128 Z" />
+
+    <!-- 6. Brilliant Sparkle Core Center Highlight (#B9F6CA) -->
+    <path
+        android:fillColor="#B9F6CA"
+        android:pathData="M 100,88 L 108,96 L 100,104 L 92,96 Z" />
+
+</vector>

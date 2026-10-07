@@ -1,0 +1,6 @@
+{
+  "name": "Leno",
+  "description": "A modern, simple, and fast real-time social private messaging app.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

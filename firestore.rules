@@ -1,0 +1,149 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.admin == true ||
+        request.auth.token.owner == true ||
+        request.auth.token.name == "iliyasuusman" ||
+        request.auth.token.email == "iliyasuusman730@gmail.com" ||
+        request.auth.token.email == "officialjaiby@leno.chat" ||
+        request.auth.token.email == "official@leno.app" ||
+        (request.auth.token.email != null && request.auth.token.email.matches(".*iliyasuusman.*")) ||
+        request.auth.uid == "usr_officialjaiby_2026" ||
+        request.auth.uid == "user_official_leno" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "OWNER" ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "ADMIN" ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.username == "iliyasuusman" ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.username == "iliyasu" ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email == "iliyasuusman730@gmail.com" ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email == "officialjaiby@leno.chat" ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.googleEmail == "iliyasuusman730@gmail.com"))
+      );
+    }
+
+    // Users Collection: Public profile readable; writes allowed so user registration & updates always persist
+    match /users/{userId} {
+      allow read, write: if true;
+
+      // Per-user contacts subcollection
+      match /contacts/{contactId} {
+        allow read, write: if true;
+      }
+
+      // Per-user real-time inbox subcollection
+      match /inbox/{messageId} {
+        allow read, write: if true;
+      }
+
+      // Per-user sent messages backup subcollection
+      match /sent_messages/{messageId} {
+        allow read, write: if true;
+      }
+
+      // Per-user sent receipts subcollection
+      match /sent_receipts/{messageId} {
+        allow read, write: if true;
+      }
+    }
+
+    // Teacher Applications Collection: Canonical "teacherApplications"
+    match /teacherApplications/{applicationId} {
+      // Authenticated users can read teacher applications
+      allow read: if isAuthenticated();
+
+      // Applicant can create an application if status is PENDING
+      allow create: if isAuthenticated() &&
+        request.resource.data.status == 'PENDING';
+
+      // Only authorized admins can review/update (approve or reject) applications
+      allow update, delete: if isAdmin();
+    }
+
+    // Support legacy "teacher_applications" collection name as well
+    match /teacher_applications/{applicationId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+
+    // Teacher Roles Collection
+    match /teacher_roles/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isOwner(userId);
+    }
+
+    // Classes Collection
+    match /classes/{classId} {
+      allow read: if isAuthenticated();
+
+      // Only approved teachers or admins can create classes.
+      // The teacherUid must match auth.uid, teacherStatus must be APPROVED,
+      // and class subject must match their approved teacherSubject.
+      allow create: if isAuthenticated() &&
+        request.resource.data.teacherUid == request.auth.uid &&
+        (
+          isAdmin() || (
+            exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.teacherStatus == 'APPROVED' &&
+            request.resource.data.subject == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.teacherSubject
+          )
+        );
+
+      allow update, delete: if isAuthenticated() && (
+        isAdmin() || resource.data.teacherUid == request.auth.uid
+      );
+
+      // Enrollments subcollection
+      match /enrollments/{studentUid} {
+        allow read, write: if isAuthenticated();
+      }
+
+      // Lessons subcollection
+      match /lessons/{lessonId} {
+        allow read, write: if isAuthenticated();
+      }
+    }
+
+    // Usernames Collection: Atomic unique username claims
+    match /usernames/{username} {
+      allow read, write: if true;
+    }
+
+    // Leno IDs Collection: Atomic unique Leno ID claims
+    match /leno_ids/{lenoId} {
+      allow read, write: if true;
+    }
+
+    // Chats Collection: Real-time conversation channels
+    match /chats/{chatId} {
+      allow read, write: if true;
+
+      // Messages: Real-time message subcollection
+      match /messages/{messageId} {
+        allow read, write: if true;
+      }
+    }
+
+    // Call Signaling: Only caller or receiver can access
+    match /calls/{callId} {
+      allow read, write: if true;
+    }
+
+    // Root messages collection for universal synchronization
+    match /messages/{messageId} {
+      allow read, write: if true;
+    }
+  }
+}
