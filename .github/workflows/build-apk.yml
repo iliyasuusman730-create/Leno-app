@@ -24,41 +24,26 @@ jobs:
           gradle wrapper --gradle-version 9.3.1
           chmod +x gradlew
 
-      - name: Create dummy google-services.json for CI
+      - name: Create dummy google-services.json
         run: |
           cat > app/google-services.json << 'EOF'
           {
-            "project_info": {
-              "project_number": "1234567890",
-              "project_id": "leno-app-dummy",
-              "storage_bucket": "leno-app-dummy.appspot.com"
-            },
+            "project_info": {"project_number": "1234567890","project_id": "leno-app-dummy","storage_bucket": "leno-app-dummy.appspot.com"},
             "client": [
-              {
-                "client_info": {
-                  "mobilesdk_app_id": "1:1234567890:android:dummy123",
-                  "android_client_info": {
-                    "package_name": "com.leno.chat"
-                  }
-                },
-                "oauth_client": [],
-                "api_key": [
-                  {
-                    "current_key": "AIzaSyDummyKeyForCIBuildOnly123"
-                  }
-                ],
-                "services": {
-                  "appinvite_service": {
-                    "other_platform_oauth_client": []
-                  }
-                }
-              }
+              {"client_info": {"mobilesdk_app_id": "1:1234567890:android:a1","android_client_info": {"package_name": "com.leno.chat"}},"oauth_client": [],"api_key": [{"current_key": "AIzaSyDummy"}],"services": {"appinvite_service": {"other_platform_oauth_client": []}}},
+              {"client_info": {"mobilesdk_app_id": "1:1234567890:android:b2","android_client_info": {"package_name": "com.leno.chat.debug"}},"oauth_client": [],"api_key": [{"current_key": "AIzaSyDummy"}],"services": {"appinvite_service": {"other_platform_oauth_client": []}}}
             ],
             "configuration_version": "1"
           }
           EOF
-          echo "Created for package com.leno.chat"
-          cat app/google-services.json
+
+      - name: Create debug.keystore that your app needs
+        run: |
+          echo "Creating debug.keystore in root..."
+          keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Debug, OU=Debug, O=Debug, L=Debug, S=Debug, C=US"
+          keytool -genkey -v -keystore app/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Debug, OU=Debug, O=Debug, L=Debug, S=Debug, C=US" || true
+          ls -l debug.keystore app/debug.keystore || true
+          echo "Keystore created!"
 
       - name: Build APK
         run: ./gradlew assembleDebug --stacktrace --no-daemon
