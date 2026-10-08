@@ -4,42 +4,30 @@ on:
   push:
     branches:
       - main
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Create Gradle wrapper (because you don't have gradlew)
+      - uses: gradle/actions/setup-gradle@v3
+      - uses: android-actions/setup-android@v3
+      - name: Create gradlew
         run: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
           gradle wrapper --gradle-version 8.10
           chmod +x gradlew
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-          ls -la
-          ls -la gradle/wrapper/ || true
-
-      - name: Install Android packages
+      - name: Install SDK
         run: |
           yes | sdkmanager --licenses || true
-          sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "platform-tools" || true
-
+          sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "platform-tools"
       - name: Build APK
-        run: ./gradlew assembleDebug --stacktrace
-
-      - name: Upload APK
+        run: ./gradlew assembleDebug --stacktrace --no-daemon
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
         with:
           name: Leno-debug-apk
           path: "**/*.apk"
