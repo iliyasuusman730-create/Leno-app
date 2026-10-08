@@ -18,12 +18,48 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v3
 
-      - name: Fix SDK and create gradlew with Gradle 9.3.1
+      - name: Fix SDK and create gradlew
         run: |
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           gradle wrapper --gradle-version 9.3.1
           chmod +x gradlew
-          ./gradlew --version
+
+      - name: Create dummy google-services.json for CI
+        run: |
+          mkdir -p app
+          cat > app/google-services.json << 'EOF'
+          {
+            "project_info": {
+              "project_number": "1234567890",
+              "project_id": "leno-app-dummy",
+              "storage_bucket": "leno-app-dummy.appspot.com"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:1234567890:android:dummy123",
+                  "android_client_info": {
+                    "package_name": "com.leno.app"
+                  }
+                },
+                "oauth_client": [],
+                "api_key": [
+                  {
+                    "current_key": "AIzaSyDummyKeyForCIBuildOnly123"
+                  }
+                ],
+                "services": {
+                  "appinvite_service": {
+                    "other_platform_oauth_client": []
+                  }
+                }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          EOF
+          cat app/google-services.json
+          ls -l app/google-services.json
 
       - name: Build APK
         run: ./gradlew assembleDebug --stacktrace --no-daemon
