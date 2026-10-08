@@ -14,14 +14,14 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - uses: gradle/actions/setup-gradle@v3
 
-      - name: Fix SDK and create gradlew with CORRECT Gradle version
+      - name: Fix SDK and create gradlew with Gradle 9.3.1
         run: |
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          gradle wrapper --gradle-version 8.13
+          gradle wrapper --gradle-version 9.3.1
           chmod +x gradlew
           ./gradlew --version
 
