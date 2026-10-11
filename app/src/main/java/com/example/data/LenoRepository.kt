@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
@@ -65,6 +66,7 @@ class LenoRepository(
     val accountBackupStore = context?.let { AccountBackupStore(it) }
     val messageBackupStore = context?.let { com.example.util.MessageBackupStore(it) }
     private val friendService = FriendService()
+    private val syncChatsMutex = Mutex()
 
     var activeChatPartnerIdSupplier: (() -> String?)? = null
 
@@ -93,8 +95,8 @@ class LenoRepository(
             val combined = (allList + backupAccounts).distinctBy { it.userId }
             combined.filter { 
                 it.userId != user.userId && 
-                !it.username.equals(user.username, ignoreCase = true) &&
-                !it.linoId.equals(user.linoId, ignoreCase = true) &&
+                (user.username.isBlank() || it.username.isBlank() || !it.username.equals(user.username, ignoreCase = true)) &&
+                (user.linoId.isBlank() || it.linoId.isBlank() || !it.linoId.equals(user.linoId, ignoreCase = true)) &&
                 it.userId != OFFICIAL_LENO_ID && 
                 !it.isOfficial &&
                 it.userId != "user_len_50638964"
@@ -171,69 +173,60 @@ class LenoRepository(
                 ensureOfficialLenoAccountCreated()
                 ensureStandardInstructorsCreated()
 
-                val savedUserId = sessionManager?.getActiveUserId()
                 val currentLocalUser = userDao.getCurrentUserSync()
-                val targetActiveUid = when {
-                    !savedUserId.isNullOrBlank() -> savedUserId
-                    currentLocalUser != null -> currentLocalUser.userId
-                    else -> null
-                }
+                val savedUserId = sessionManager?.getActiveUserId()
 
-                if (!targetActiveUid.isNullOrBlank()) {
-                    var existing = userDao.getUserByIdSync(targetActiveUid)
-                        ?: accountBackupStore?.findAccount(targetActiveUid)
-                        ?: remoteAccountService.findRemoteUserById(targetActiveUid)
+                if (currentLocalUser != null) {
+                    sessionManager?.saveActiveUserId(currentLocalUser.userId)
+                    syncRemoteContactsIntoRoom(currentLocalUser.userId)
+                    syncAllUserChatsAndMessages(currentLocalUser.userId)
+                } else if (!savedUserId.isNullOrBlank()) {
+                    val existing = userDao.getUserByIdSync(savedUserId)
+                        ?: accountBackupStore?.findAccount(savedUserId)
+                        ?: remoteAccountService.findRemoteUserById(savedUserId)
 
-                    if (existing != null) {
+                    if (existing != null && sessionManager?.getActiveUserId() == savedUserId) {
                         userDao.clearCurrentUser()
-                        val restored = existing.copy(userId = targetActiveUid, isCurrentUser = true, isOnline = true)
+                        val restored = existing.copy(userId = savedUserId, isCurrentUser = true, isOnline = true)
                         userDao.insertUser(restored)
-                        userDao.setCurrentUser(targetActiveUid)
-                        sessionManager?.saveActiveUserId(targetActiveUid)
-                        userDao.updateOnlineStatus(targetActiveUid, true)
+                        userDao.setCurrentUser(savedUserId)
+                        userDao.updateOnlineStatus(savedUserId, true)
                         accountBackupStore?.saveAccount(restored)
-                        syncRemoteContactsIntoRoom(targetActiveUid)
-                        syncAllUserChatsAndMessages(targetActiveUid)
-                    } else if (currentLocalUser != null) {
-                        userDao.setCurrentUser(currentLocalUser.userId)
-                        sessionManager?.saveActiveUserId(currentLocalUser.userId)
-                        syncRemoteContactsIntoRoom(currentLocalUser.userId)
-                        syncAllUserChatsAndMessages(currentLocalUser.userId)
+                        syncRemoteContactsIntoRoom(savedUserId)
+                        syncAllUserChatsAndMessages(savedUserId)
                     }
                 } else {
-                    var fbUser = remoteAccountService.getCurrentAuthUser()
-                    if (fbUser == null) {
-                        val authEmail = sessionManager?.getAuthEmail()
-                        val authPass = sessionManager?.getAuthPass()
-                        if (!authEmail.isNullOrBlank() && !authPass.isNullOrBlank()) {
-                            try {
-                                val authRes = remoteAccountService.signInWithFirebaseAuth(authEmail, authPass)
-                                if (authRes.isSuccess) {
-                                    fbUser = remoteAccountService.getCurrentAuthUser()
-                                }
-                            } catch (e: Exception) {
-                                Log.w("LenoRepository", "Auto re-auth notice: ${e.message}")
+                    val authEmail = sessionManager?.getAuthEmail()
+                    val authPass = sessionManager?.getAuthPass()
+                    if (!authEmail.isNullOrBlank() && !authPass.isNullOrBlank()) {
+                        var fbUser: com.google.firebase.auth.FirebaseUser? = null
+                        try {
+                            val authRes = remoteAccountService.signInWithFirebaseAuth(authEmail, authPass)
+                            if (authRes.isSuccess) {
+                                fbUser = remoteAccountService.getCurrentAuthUser()
                             }
+                        } catch (e: Exception) {
+                            Log.w("LenoRepository", "Auto re-auth notice: ${e.message}")
                         }
-                    }
 
-                    if (fbUser != null) {
-                        var existing = remoteAccountService.findRemoteUserById(fbUser.uid)
-                            ?: (if (!fbUser.email.isNullOrBlank()) remoteAccountService.findRemoteUser(fbUser.email!!) else null)
-                            ?: userDao.getUserByIdSync(fbUser.uid)
-                            ?: accountBackupStore?.findAccount(fbUser.uid)
+                        if (fbUser != null && sessionManager?.getAuthEmail() == authEmail) {
+                            val existing = remoteAccountService.findRemoteUserById(fbUser.uid)
+                                ?: (if (!fbUser.email.isNullOrBlank()) remoteAccountService.findRemoteUser(fbUser.email!!) else null)
+                                ?: userDao.getUserByIdSync(fbUser.uid)
+                                ?: accountBackupStore?.findAccount(fbUser.uid)
 
-                        if (existing != null) {
-                            userDao.clearCurrentUser()
-                            val restored = existing.copy(userId = fbUser.uid, isCurrentUser = true, isOnline = true)
-                            userDao.insertUser(restored)
-                            userDao.setCurrentUser(fbUser.uid)
-                            sessionManager?.saveActiveUserId(fbUser.uid)
-                            userDao.updateOnlineStatus(fbUser.uid, true)
-                            accountBackupStore?.saveAccount(restored)
-                            remoteAccountService.saveUserToRemote(restored.copy(lastSeen = System.currentTimeMillis()))
-                            syncRemoteContactsIntoRoom(fbUser.uid)
-                            syncAllUserChatsAndMessages(fbUser.uid)
+                            if (existing != null && sessionManager?.getAuthEmail() == authEmail) {
+                                userDao.clearCurrentUser()
+                                val restored = existing.copy(userId = fbUser.uid, isCurrentUser = true, isOnline = true)
+                                userDao.insertUser(restored)
+                                userDao.setCurrentUser(fbUser.uid)
+                                sessionManager?.saveActiveUserId(fbUser.uid)
+                                userDao.updateOnlineStatus(fbUser.uid, true)
+                                accountBackupStore?.saveAccount(restored)
+                                remoteAccountService.saveUserToRemote(restored.copy(lastSeen = System.currentTimeMillis()))
+                                syncRemoteContactsIntoRoom(fbUser.uid)
+                                syncAllUserChatsAndMessages(fbUser.uid)
+                            }
                         }
                     }
                 }
@@ -383,12 +376,33 @@ class LenoRepository(
                 }.orEmpty()
 
                 if (remoteMessages.isNotEmpty()) {
-                    messageDao.insertMessages(remoteMessages)
-                    messageBackupStore?.saveMessages(remoteMessages)
+                    val activePartner = activeChatPartnerIdSupplier?.invoke()
+                    val partnerAliases = getUserAliasesSync(otherUserId).toSet()
+                    val isChatActive = activePartner != null && (activePartner == otherUserId || activePartner in partnerAliases)
+
+                    val adjustedMessages = if (isChatActive) {
+                        remoteMessages.map { msg ->
+                            if (msg.receiverId == current.userId || msg.senderId == otherUserId || msg.senderId in partnerAliases) {
+                                msg.copy(status = "READ")
+                            } else {
+                                msg
+                            }
+                        }
+                    } else {
+                        remoteMessages
+                    }
+
+                    messageDao.insertMessages(adjustedMessages)
+                    messageBackupStore?.saveMessages(adjustedMessages)
                     remoteMessages.forEach { msg ->
                         if (msg.receiverId == current.userId && msg.status == "SENT") {
-                            messageDao.updateMessageStatus(msg.messageId, "DELIVERED")
-                            remoteAccountService.markMessageDeliveredInRemote(chatId, msg.messageId, msg.senderId)
+                            if (isChatActive) {
+                                messageDao.updateMessageStatus(msg.messageId, "READ")
+                                remoteAccountService.markMessageReadInRemote(chatId, msg.messageId, msg.senderId)
+                            } else {
+                                messageDao.updateMessageStatus(msg.messageId, "DELIVERED")
+                                remoteAccountService.markMessageDeliveredInRemote(chatId, msg.messageId, msg.senderId)
+                            }
                         }
                     }
                 }
@@ -417,6 +431,9 @@ class LenoRepository(
 
     suspend fun syncAllUserChatsAndMessages(myUserId: String) {
         if (myUserId.isBlank()) return
+        if (!syncChatsMutex.tryLock()) {
+            return
+        }
         try {
             // 1. Restore all saved chat partner profiles and account records into Room first
             val activeUid = myUserId.ifBlank { sessionManager?.getActiveUserId().orEmpty() }
@@ -485,18 +502,41 @@ class LenoRepository(
 
                 val remoteMessages = remoteAccountService.getChatMessagesFromRemote(chatId)
                 if (remoteMessages.isNotEmpty()) {
-                    messageDao.insertMessages(remoteMessages)
-                    messageBackupStore?.saveMessages(remoteMessages)
+                    val activePartner = activeChatPartnerIdSupplier?.invoke()
+                    val partnerAliases = getUserAliasesSync(otherUserId).toSet()
+                    val isChatActive = activePartner != null && (activePartner == otherUserId || activePartner in partnerAliases)
+
+                    val adjustedMessages = if (isChatActive) {
+                        remoteMessages.map { msg ->
+                            if (msg.receiverId == myUserId || msg.senderId == otherUserId || msg.senderId in partnerAliases) {
+                                msg.copy(status = "READ")
+                            } else {
+                                msg
+                            }
+                        }
+                    } else {
+                        remoteMessages
+                    }
+
+                    messageDao.insertMessages(adjustedMessages)
+                    messageBackupStore?.saveMessages(adjustedMessages)
                     remoteMessages.forEach { msg ->
                         if (msg.receiverId == myUserId && msg.status == "SENT") {
-                            messageDao.updateMessageStatus(msg.messageId, "DELIVERED")
-                            remoteAccountService.markMessageDeliveredInRemote(chatId, msg.messageId, msg.senderId)
+                            if (isChatActive) {
+                                messageDao.updateMessageStatus(msg.messageId, "READ")
+                                remoteAccountService.markMessageReadInRemote(chatId, msg.messageId, msg.senderId)
+                            } else {
+                                messageDao.updateMessageStatus(msg.messageId, "DELIVERED")
+                                remoteAccountService.markMessageDeliveredInRemote(chatId, msg.messageId, msg.senderId)
+                            }
                         }
                     }
                 }
             }
         } catch (e: Exception) {
             Log.w("LenoRepository", "Error in syncAllUserChatsAndMessages: ${e.message}")
+        } finally {
+            syncChatsMutex.unlock()
         }
     }
 
@@ -752,23 +792,7 @@ class LenoRepository(
                         )
                     }
                     userDao.insertUsers(placeholders)
-                    // Asynchronously fetch and enrich profiles in background so the UI never hangs
-                    CoroutineScope(Dispatchers.IO).launch {
-                        for (mId in missing) {
-                            try {
-                                val p = fetchAndSyncUserProfile(mId)
-                                p?.let { messageBackupStore?.saveChatPartnerProfile(it) }
-                            } catch (_: Exception) {}
-                        }
-                    }
                 }
-            }
-
-            // In background, ensure full remote sync of all chats & messages
-            CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    syncAllUserChatsAndMessages(userId)
-                } catch (_: Exception) {}
             }
         } catch (_: Exception) {}
 
@@ -783,22 +807,32 @@ class LenoRepository(
                 .toSet()
 
             val extraFromBackup = backupProfiles.filter { 
-                it.userId in relevantPartnerIds || it.username in relevantPartnerIds || it.linoId in relevantPartnerIds
+                it.userId in relevantPartnerIds || 
+                (it.username.isNotBlank() && it.username in relevantPartnerIds) || 
+                (it.linoId.isNotBlank() && it.linoId in relevantPartnerIds)
             }
             val extraFromAccounts = accountBackupStore?.getAllAccounts().orEmpty()
                 .filter { 
-                    (it.userId in relevantPartnerIds || it.username in relevantPartnerIds || it.linoId in relevantPartnerIds)
+                    (it.userId in relevantPartnerIds || 
+                     (it.username.isNotBlank() && it.username in relevantPartnerIds) || 
+                     (it.linoId.isNotBlank() && it.linoId in relevantPartnerIds))
                     && it.userId != activeUid && it.userId !in aliases 
                 }
 
             // Synthesize any partner ID that has sent or received messages so conversations NEVER disappear
             val knownPartnerIds = (roomPartners.map { it.userId } + extraFromBackup.map { it.userId } + extraFromAccounts.map { it.userId }).toSet()
             val missingPartnerIds = relevantPartnerIds.filter { pId ->
-                pId !in knownPartnerIds && extraFromBackup.none { it.username.equals(pId, true) || it.linoId.equals(pId, true) }
+                pId !in knownPartnerIds && extraFromBackup.none { 
+                    it.userId == pId || 
+                    (it.username.isNotBlank() && it.username.equals(pId, true)) || 
+                    (it.linoId.isNotBlank() && it.linoId.equals(pId, true)) 
+                }
             }
             val synthesized = missingPartnerIds.map { pId ->
                 val fromBackup = messageBackupStore?.getAllChatPartnerProfiles()?.firstOrNull {
-                    it.userId == pId || it.username.equals(pId, true) || it.linoId.equals(pId, true)
+                    it.userId == pId || 
+                    (it.username.isNotBlank() && it.username.equals(pId, true)) || 
+                    (it.linoId.isNotBlank() && it.linoId.equals(pId, true))
                 } ?: accountBackupStore?.findAccount(pId)
 
                 fromBackup?.copy(isCurrentUser = false) ?: UserEntity(
@@ -809,19 +843,19 @@ class LenoRepository(
                     isCurrentUser = false
                 )
             }
-            if (synthesized.isNotEmpty()) {
-                CoroutineScope(Dispatchers.IO).launch {
-                    try {
-                        userDao.insertUsers(synthesized)
-                        synthesized.forEach {
-                            accountBackupStore?.saveAccount(it)
-                            messageBackupStore?.saveChatPartnerProfile(it)
-                        }
-                    } catch (_: Exception) {}
-                }
-            }
 
-            (roomPartners + extraFromBackup + extraFromAccounts + synthesized).distinctBy { it.userId }
+            val partnerTimestamps = allMessages
+                .filter { (it.senderId in aliases && it.receiverId !in aliases) || (it.receiverId in aliases && it.senderId !in aliases) }
+                .groupBy { if (it.senderId in aliases) it.receiverId else it.senderId }
+                .mapValues { entry -> entry.value.maxOfOrNull { m -> m.timestamp } ?: 0L }
+
+            val allPartners = (roomPartners + extraFromBackup + extraFromAccounts + synthesized).distinctBy { it.userId }
+            allPartners.sortedByDescending { partner ->
+                partnerTimestamps[partner.userId]
+                    ?: (if (partner.username.isNotBlank()) partnerTimestamps[partner.username] else null)
+                    ?: (if (partner.linoId.isNotBlank()) partnerTimestamps[partner.linoId] else null)
+                    ?: partner.lastSeen
+            }
         }
         emitAll(combinedPartnersFlow)
     }
@@ -833,11 +867,11 @@ class LenoRepository(
         }
         val u1Known = getUserAliasesSync(user1Id)
         val u2Known = getUserAliasesSync(user2Id)
+        val myIds = u1Known.toSet()
+        val partnerIds = u2Known.toSet()
 
         try {
             messageBackupStore?.getMessagesForUser(user1Id, u1Known)?.let { backedUp ->
-                val myIds = u1Known.toSet()
-                val partnerIds = u2Known.toSet()
                 val relevant = backedUp.filter {
                     (it.senderId in myIds && it.receiverId in partnerIds) ||
                     (it.senderId in partnerIds && it.receiverId in myIds)
@@ -847,17 +881,81 @@ class LenoRepository(
                 }
             }
         } catch (_: Exception) {}
-        emitAll(messageDao.getMessagesBetweenUserAliases(u1Known, u2Known))
+
+        emitAll(messageDao.getMessagesBetweenUserAliases(u1Known, u2Known).map { roomMsgs ->
+            val backedUp = messageBackupStore?.getMessagesForUser(user1Id, u1Known).orEmpty()
+                .filter {
+                    (it.senderId in myIds && it.receiverId in partnerIds) ||
+                    (it.senderId in partnerIds && it.receiverId in myIds)
+                }
+            (roomMsgs + backedUp).distinctBy { it.messageId }.sortedBy { it.timestamp }
+        })
     }
 
     fun getLastMessageBetween(user1Id: String, user2Id: String): Flow<MessageEntity?> = flow {
+        if (user1Id.isBlank() || user2Id.isBlank()) {
+            emit(null)
+            return@flow
+        }
         val u1Known = getUserAliasesSync(user1Id)
         val u2Known = getUserAliasesSync(user2Id)
-        emitAll(messageDao.getLastMessageBetweenAliases(u1Known, u2Known))
+        val myIds = u1Known.toSet()
+        val partnerIds = u2Known.toSet()
+
+        try {
+            messageBackupStore?.getMessagesForUser(user1Id, u1Known)?.let { backedUp ->
+                val relevant = backedUp.filter {
+                    (it.senderId in myIds && it.receiverId in partnerIds) ||
+                    (it.senderId in partnerIds && it.receiverId in myIds)
+                }
+                if (relevant.isNotEmpty()) {
+                    messageDao.insertMessages(relevant)
+                }
+            }
+        } catch (_: Exception) {}
+
+        emitAll(messageDao.getLastMessageBetweenAliases(u1Known, u2Known).map { roomMsg ->
+            if (roomMsg != null) roomMsg
+            else {
+                messageBackupStore?.getMessagesForUser(user1Id, u1Known).orEmpty()
+                    .filter {
+                        (it.senderId in myIds && it.receiverId in partnerIds) ||
+                        (it.senderId in partnerIds && it.receiverId in myIds)
+                    }
+                    .maxByOrNull { it.timestamp }
+            }
+        })
     }
 
-    fun getUnreadCount(currentUserId: String, otherUserId: String): Flow<Int> =
-        messageDao.getUnreadCountFromUser(currentUserId, otherUserId)
+    fun getUnreadCount(currentUserId: String, otherUserId: String): Flow<Int> = flow {
+        if (currentUserId.isBlank() || otherUserId.isBlank()) {
+            emit(0)
+            return@flow
+        }
+        val myAliases = (getUserAliasesSync(currentUserId) + currentUserId).filter { it.isNotBlank() }.distinct()
+        val partnerAliases = (getUserAliasesSync(otherUserId) + otherUserId).filter { it.isNotBlank() }.distinct()
+        val partnerSet = partnerAliases.toSet()
+
+        val activePartner = activeChatPartnerIdSupplier?.invoke()
+        if (activePartner != null && (activePartner in partnerSet || activePartner == otherUserId)) {
+            emit(0)
+            return@flow
+        }
+
+        emitAll(
+            messageDao.getUnreadCountFromUserAliases(
+                currentUserIds = myAliases,
+                otherUserIds = partnerAliases
+            ).map { count ->
+                val currentActive = activeChatPartnerIdSupplier?.invoke()
+                if (currentActive != null && (currentActive in partnerSet || currentActive == otherUserId)) {
+                    0
+                } else {
+                    count
+                }
+            }
+        )
+    }
 
     fun getFriendships(userId: String): Flow<List<FriendshipEntity>> =
         friendshipDao.getFriendshipsForUser(userId)
@@ -1297,11 +1395,13 @@ class LenoRepository(
                 } else if (candidateUser != null) {
                     val oldUid = candidateUser.userId
                     val linked = candidateUser.copy(userId = authenticatedUid)
-                    messageDao.migrateSenderId(oldUid, authenticatedUid)
-                    messageDao.migrateReceiverId(oldUid, authenticatedUid)
-                    messageBackupStore?.migrateUserId(oldUid, authenticatedUid)
-                    userDao.deleteUser(oldUid)
-                    accountBackupStore?.deleteAccount(oldUid)
+                    if (oldUid != authenticatedUid && oldUid.isNotBlank()) {
+                        messageDao.migrateSenderId(oldUid, authenticatedUid)
+                        messageDao.migrateReceiverId(oldUid, authenticatedUid)
+                        messageBackupStore?.migrateUserId(oldUid, authenticatedUid)
+                        userDao.deleteUser(oldUid)
+                        accountBackupStore?.deleteAccount(oldUid)
+                    }
                     userDao.insertUser(linked)
                     accountBackupStore?.saveAccount(linked)
                     remoteAccountService.saveUserToRemote(linked)
@@ -1352,13 +1452,16 @@ class LenoRepository(
                 }
             }
 
-            if (profile != null && profile.userId.isBlank()) {
-                profile = profile.copy(userId = authenticatedUid)
-            }
+            val currentProfile = profile ?: return Result.failure(Exception("No Leno user profile found for this account. Please register first."))
+            val effectiveProfile = if (currentProfile.userId.isBlank()) currentProfile.copy(userId = authenticatedUid) else currentProfile
 
-            if (profile == null) {
-                return Result.failure(Exception("No Leno user profile found for this account. Please register first."))
-            }
+            // Sync Firebase Auth session
+            try {
+                val emailToAuth = effectiveProfile.email.ifBlank { "${effectiveProfile.username.lowercase()}@leno.chat" }
+                remoteAccountService.signInWithFirebaseAuth(emailToAuth, cleanPassword)
+            } catch (_: Exception) {}
+
+            profile = effectiveProfile
 
             // 3. Clear local state from any previous account for complete isolation
             userDao.clearCurrentUser()
@@ -1382,16 +1485,17 @@ class LenoRepository(
             userDao.updateOnlineStatus(authenticatedUid, true)
             accountBackupStore?.saveAccount(loggedIn)
 
-            // 5. Consolidate any duplicate local records matching same username or Leno ID, and migrate their messages
+            // 5. Consolidate any duplicate local records matching same non-blank username or Leno ID, and migrate their messages
             val duplicates = userDao.getAllUsersSync().filter {
                 it.userId != authenticatedUid && (
-                    (candidateUser != null && it.userId == candidateUser.userId) ||
-                    it.username.equals(loggedIn.username, ignoreCase = true) ||
-                    it.linoId.equals(loggedIn.linoId, ignoreCase = true) ||
+                    (candidateUser != null && candidateUser.userId.isNotBlank() && it.userId == candidateUser.userId) ||
+                    (loggedIn.username.isNotBlank() && it.username.isNotBlank() && it.username.equals(loggedIn.username, ignoreCase = true)) ||
+                    (loggedIn.linoId.isNotBlank() && it.linoId.isNotBlank() && it.linoId.equals(loggedIn.linoId, ignoreCase = true)) ||
                     (loggedIn.isOwner && (it.userId == "usr_officialjaiby_2026" || it.username.equals("officialjaiby", ignoreCase = true)))
                 )
             }
             for (dup in duplicates) {
+                if (dup.userId.isBlank() || dup.userId == authenticatedUid) continue
                 userDao.deleteUser(dup.userId)
                 accountBackupStore?.deleteAccount(dup.userId)
                 messageDao.migrateSenderId(dup.userId, authenticatedUid)
@@ -1973,14 +2077,28 @@ class LenoRepository(
     }
 
     suspend fun markMessagesAsRead(currentUserId: String, otherUserId: String) {
+        if (currentUserId.isBlank() || otherUserId.isBlank()) return
+        val myAliases = (getUserAliasesSync(currentUserId) + currentUserId).filter { it.isNotBlank() }.distinct()
+        val partnerAliases = (getUserAliasesSync(otherUserId) + otherUserId).filter { it.isNotBlank() }.distinct()
+
+        messageDao.markMessagesAsReadWithAliases(myAliases, partnerAliases)
         messageDao.markMessagesAsRead(currentUserId, otherUserId)
-        if (otherUserId == OFFICIAL_LENO_ID || currentUserId.isBlank() || otherUserId.isBlank()) return
+        messageBackupStore?.markMessagesAsRead(myAliases, partnerAliases)
+
+        if (otherUserId == OFFICIAL_LENO_ID) return
         try {
             val chatId = remoteAccountService.getChatId(currentUserId, otherUserId)
-            remoteAccountService.markAllChatMessagesAsReadInRemote(chatId, currentUserId, otherUserId)
+            remoteAccountService.markAllChatMessagesAsReadInRemote(
+                chatId = chatId,
+                currentUserId = currentUserId,
+                otherUserId = otherUserId,
+                currentUserAliases = myAliases,
+                otherUserAliases = partnerAliases
+            )
             val remoteMsgs = remoteAccountService.getChatMessagesFromRemote(chatId)
+            val myAliasesSet = myAliases.toSet()
             remoteMsgs.forEach { msg ->
-                if (msg.receiverId == currentUserId && msg.status != "READ") {
+                if ((msg.receiverId in myAliasesSet || msg.senderId !in myAliasesSet) && msg.status != "READ") {
                     remoteAccountService.markMessageReadInRemote(chatId, msg.messageId, msg.senderId)
                 }
             }
@@ -2255,7 +2373,7 @@ class LenoRepository(
         val isLenoEmail = existing.email.isBlank() || existing.email.endsWith("@leno.chat", ignoreCase = true)
         val newEmail = if (isUsernameChanged && isLenoEmail) "${cleanUsername}@leno.chat" else existing.email
         if (isUsernameChanged && isLenoEmail) {
-            remoteAccountService.updateFirebaseEmail(newEmail)
+            remoteAccountService.updateFirebaseEmail(newEmail, userId)
         }
 
         val finalDisplayName = displayName.trim().ifBlank { existing.displayName.ifBlank { cleanUsername } }
@@ -2343,11 +2461,11 @@ class LenoRepository(
         } catch (e: Exception) {
             Log.w("LenoRepository", "Logout remote status sync: ${e.message}")
         }
+        sessionManager?.clearSession()
         remoteAccountService.signOutFromFirebase()
         userDao.clearCurrentUser()
         userDao.purgeDemoAccounts()
         accountBackupStore?.purgeDemoAccounts()
-        sessionManager?.clearSession()
         ensureOfficialLenoAccountCreated()
     }
 
@@ -2566,22 +2684,25 @@ class LenoRepository(
                 val existing = userDao.getUserByIdSync(t.userId)
                     ?: userDao.getUserByUsernameSync(t.username)
                     ?: userDao.getUserByLinoIdSync(t.linoId)
-                if (existing == null) {
-                    userDao.insertUser(t)
-                    accountBackupStore?.saveAccount(t)
-                    messageBackupStore?.saveChatPartnerProfile(t)
-                } else if (!existing.isCurrentUser) {
-                    val updated = existing.copy(
+                val targetToSave = if (existing == null) {
+                    t.copy(isCurrentUser = false)
+                } else {
+                    existing.copy(
+                        userId = t.userId,
+                        username = t.username,
+                        displayName = t.displayName,
+                        linoId = t.linoId,
                         role = "TEACHER",
                         teacherStatus = "APPROVED",
                         teacherSubject = t.teacherSubject.ifBlank { existing.teacherSubject },
                         assignedSubject = t.assignedSubject.ifBlank { existing.assignedSubject },
-                        isVerified = true
+                        isVerified = true,
+                        isCurrentUser = false
                     )
-                    userDao.insertUser(updated)
-                    accountBackupStore?.saveAccount(updated)
-                    messageBackupStore?.saveChatPartnerProfile(updated)
                 }
+                userDao.insertUser(targetToSave)
+                accountBackupStore?.saveAccount(targetToSave)
+                messageBackupStore?.saveChatPartnerProfile(targetToSave)
             }
         } catch (e: Exception) {
             Log.w("LenoRepository", "Error ensuring standard instructors: ${e.message}")
@@ -2595,12 +2716,13 @@ class LenoRepository(
             if (current != null) {
                 val duplicates = userDao.getAllUsersSync().filter {
                     it.userId != current.userId && (
-                        it.username.equals(current.username, ignoreCase = true) ||
-                        it.linoId.equals(current.linoId, ignoreCase = true) ||
+                        (current.username.isNotBlank() && it.username.isNotBlank() && it.username.equals(current.username, ignoreCase = true)) ||
+                        (current.linoId.isNotBlank() && it.linoId.isNotBlank() && it.linoId.equals(current.linoId, ignoreCase = true)) ||
                         (current.isOwner && (it.userId == "usr_officialjaiby_2026" || it.username.equals("officialjaiby", ignoreCase = true)))
                     )
                 }
                 for (legacy in duplicates) {
+                    if (legacy.userId.isBlank() || legacy.userId == current.userId) continue
                     messageDao.migrateSenderId(legacy.userId, current.userId)
                     messageDao.migrateReceiverId(legacy.userId, current.userId)
                     messageBackupStore?.migrateUserId(legacy.userId, current.userId)
@@ -2899,29 +3021,31 @@ class LenoRepository(
 
     suspend fun submitTeacherApplication(application: TeacherRoleEntity): Result<Unit> {
         val existingRole = teacherRoleDao.getTeacherRoleSync(application.userId)
-        if (existingRole != null) {
+        if (existingRole != null && !existingRole.isNotApplied) {
             if (existingRole.isPending || existingRole.status.equals("PENDING", ignoreCase = true)) {
                 return Result.failure(Exception("You already have an application under review (Pending). You cannot submit another application."))
             }
             if (existingRole.isApprovedTeacher || existingRole.status.equals("APPROVED", ignoreCase = true)) {
-                return Result.failure(Exception("You are already an approved teacher for ${existingRole.effectiveApprovedSubject}."))
+                return Result.failure(Exception("You are already an approved teacher for ${existingRole.effectiveApprovedSubject}. Each teacher is restricted to one subject."))
             }
-            if (existingRole.status.equals("REJECTED", ignoreCase = true)) {
-                return Result.failure(Exception("You have already applied. Applications can only be submitted once."))
+            if (existingRole.status.equals("REJECTED", ignoreCase = true) || existingRole.isRejected) {
+                return Result.failure(Exception("You have already applied. Teacher applications can only be submitted one time."))
             }
+            return Result.failure(Exception("Teacher applications can only be submitted one time per teacher."))
         }
 
         val existingUser = userDao.getUserByIdSync(application.userId)
-        if (existingUser != null && !existingUser.teacherStatus.isNullOrBlank()) {
+        if (existingUser != null && !existingUser.teacherStatus.isNullOrBlank() && !existingUser.teacherStatus.equals("NOT APPLIED", ignoreCase = true)) {
             if (existingUser.teacherStatus.equals("PENDING", ignoreCase = true)) {
                 return Result.failure(Exception("You already have an application under review."))
             }
             if (existingUser.teacherStatus.equals("REJECTED", ignoreCase = true)) {
-                return Result.failure(Exception("You have already applied. Applications can only be submitted once."))
+                return Result.failure(Exception("You have already applied. Teacher applications can only be submitted one time."))
             }
             if (existingUser.teacherStatus.equals("APPROVED", ignoreCase = true) || existingUser.isTeacher) {
                 return Result.failure(Exception("You are already an approved teacher for ${existingUser.assignedSubject}."))
             }
+            return Result.failure(Exception("Teacher applications can only be submitted one time per teacher."))
         }
 
         // STRICT ENFORCEMENT: ONE TEACHER = ONE SUBJECT

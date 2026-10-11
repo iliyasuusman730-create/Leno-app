@@ -14,6 +14,8 @@ import org.json.JSONObject
  */
 class AccountBackupStore(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+    @Volatile
+    private var cachedAccounts: List<UserEntity>? = null
 
     init {
         purgeDemoAccounts()
@@ -35,7 +37,8 @@ class AccountBackupStore(context: Context) {
                 updatedArray.put(obj)
             }
             if (modified) {
-                prefs.edit().putString(KEY_ACCOUNTS, updatedArray.toString()).apply()
+                prefs.edit().putString(KEY_ACCOUNTS, updatedArray.toString()).commit()
+                cachedAccounts = null
                 Log.i(TAG, "Purged dummy test accounts from AccountBackupStore.")
             }
         } catch (e: Exception) {
@@ -93,7 +96,8 @@ class AccountBackupStore(context: Context) {
             }
 
             updatedArray.put(userObj)
-            prefs.edit().putString(KEY_ACCOUNTS, updatedArray.toString()).apply()
+            prefs.edit().putString(KEY_ACCOUNTS, updatedArray.toString()).commit()
+            cachedAccounts = null
             Log.i(TAG, "Account @${user.username} saved to resilient backup store.")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to save account to backup store: ${e.message}")
@@ -112,7 +116,8 @@ class AccountBackupStore(context: Context) {
                     updatedArray.put(obj)
                 }
             }
-            prefs.edit().putString(KEY_ACCOUNTS, updatedArray.toString()).apply()
+            prefs.edit().putString(KEY_ACCOUNTS, updatedArray.toString()).commit()
+            cachedAccounts = null
             Log.i(TAG, "Account $userId deleted from backup store.")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to delete account from backup store: ${e.message}")
@@ -197,6 +202,9 @@ class AccountBackupStore(context: Context) {
     }
 
     fun getAllAccounts(): List<UserEntity> {
+        val cached = cachedAccounts
+        if (cached != null) return cached
+
         val list = mutableListOf<UserEntity>()
         try {
             val accountsJson = prefs.getString(KEY_ACCOUNTS, "[]") ?: "[]"
@@ -240,12 +248,14 @@ class AccountBackupStore(context: Context) {
         } catch (e: Exception) {
             Log.w(TAG, "Failed to get all backup accounts: ${e.message}")
         }
+        cachedAccounts = list
         return list
     }
 
     fun clearAll() {
         try {
-            prefs.edit().clear().apply()
+            prefs.edit().clear().commit()
+            cachedAccounts = emptyList()
         } catch (e: Exception) {
             Log.w(TAG, "Failed to clear backup accounts: ${e.message}")
         }

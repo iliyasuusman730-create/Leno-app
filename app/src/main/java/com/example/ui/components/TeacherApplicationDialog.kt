@@ -109,6 +109,12 @@ fun TeacherApplicationDialog(
             (!currentUser?.assignedSubject.isNullOrBlank()) ||
             (existingApplication?.isApproved == true)
 
+    val isRejected = (teacherRole?.isRejected == true) ||
+            (teacherRole?.status?.equals("REJECTED", ignoreCase = true) == true) ||
+            (currentUser?.teacherStatus?.equals("REJECTED", ignoreCase = true) == true) ||
+            (existingApplication?.isRejected == true) ||
+            (existingApplication?.status?.equals("REJECTED", ignoreCase = true) == true)
+
     val displayedSubject = when {
         !currentUser?.assignedSubject.isNullOrBlank() -> currentUser?.assignedSubject.orEmpty()
         teacherRole?.effectiveApprovedSubject?.isNotBlank() == true -> teacherRole.effectiveApprovedSubject
@@ -221,7 +227,7 @@ fun TeacherApplicationDialog(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "You can only apply one time. Your application is currently under review by Leno administrators. You will be notified once a decision has been made.",
+                                text = "Teacher applications can only be submitted one time for one subject per teacher. Your application to teach $displayedSubject is currently under review by Leno administrators.",
                                 fontSize = 12.sp,
                                 color = Color(0xFF5D4037),
                                 lineHeight = 17.sp,
@@ -304,7 +310,7 @@ fun TeacherApplicationDialog(
                         }
                     }
                     Text(
-                        text = "You can only apply one time. You are already an approved teacher for $displayedSubject. You can create and publish lessons under your approved subject directly in the Class tab.",
+                        text = "You can only apply one time. You are already an approved teacher for $displayedSubject. In Leno, each teacher is accredited for strictly one subject. You can create and publish lessons under your approved subject directly in the Class tab.",
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 18.sp
@@ -324,7 +330,123 @@ fun TeacherApplicationDialog(
         return
     }
 
-    // CASE 3: Normal Form - User can apply
+    // CASE 3: Application was REJECTED - One time application policy applies
+    if (isRejected) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "Teacher Application",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                        Text(
+                            text = "Status: NOT APPROVED",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "Application Details:",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Subject Applied: $displayedSubject",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            val reason = teacherRole?.rejectionReason?.ifBlank { null }
+                                ?: existingApplication?.rejectionReason?.ifBlank { null }
+                            if (!reason.isNullOrBlank()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Note: $reason",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Teacher applications can only be submitted one time for one subject per teacher. Your application was reviewed and not approved. Resubmissions are not permitted.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                lineHeight = 17.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Understood", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+        return
+    }
+
+    // CASE 4: Normal Form - User can apply (First time only)
     var selectedSubject by remember { mutableStateOf(allowedSubjects[0]) }
     var subjectMenuExpanded by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -387,14 +509,15 @@ fun TeacherApplicationDialog(
                 Spacer(modifier = Modifier.width(10.dp))
                 Column {
                     Text(
-                        text = "Become a Teacher",
+                        text = "Apply to Become Teacher",
                         fontWeight = FontWeight.Bold,
                         fontSize = 19.sp
                     )
                     Text(
-                        text = "Share your knowledge on Leno",
+                        text = "One-Time Application • 1 Subject per Teacher",
                         fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = LenoPrimaryDark,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
             }
@@ -443,7 +566,7 @@ fun TeacherApplicationDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // STRICT RULE: ONE TEACHER = ONE SUBJECT CALLOUT
+                // STRICT RULE: ONE TIME APPLICATION & ONE TEACHER = ONE SUBJECT CALLOUT
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = LenoPrimaryVeryLight,
@@ -463,13 +586,14 @@ fun TeacherApplicationDialog(
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
                             Text(
-                                text = "Rule: One Teacher = One Subject",
+                                text = "Strict Policy: One Time • One Subject Per Teacher",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = LenoPrimaryDark
                             )
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "Select the single subject you specialize in. Once approved, you can publish classes exclusively for this subject.",
+                                text = "You can only apply one time. Choose the single subject you specialize in. Once submitted, your subject is locked and additional applications cannot be submitted.",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 lineHeight = 15.sp
@@ -482,7 +606,7 @@ fun TeacherApplicationDialog(
 
                 // Subject Selection Dropdown
                 Text(
-                    text = "Specialized Subject *",
+                    text = "Specialized Subject (Choose 1 Subject) *",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
@@ -706,7 +830,7 @@ fun TeacherApplicationDialog(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "I agree to Leno's Teacher Code of Conduct and Low-Data Teaching Guidelines.",
+                        text = "I understand that I can only apply one time for this single subject, and I agree to Leno's Teacher Guidelines.",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurface,
                         lineHeight = 16.sp
@@ -763,7 +887,7 @@ fun TeacherApplicationDialog(
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.testTag("submit_teacher_app_btn")
             ) {
-                Text("Submit Application", fontWeight = FontWeight.Bold)
+                Text("Submit One-Time Application", fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {

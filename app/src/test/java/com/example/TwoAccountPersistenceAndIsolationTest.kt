@@ -132,9 +132,9 @@ class FakeRemoteAccountService : RemoteAccountService() {
         return Result.success(Unit)
     }
 
-    override suspend fun updateFirebaseEmail(newEmail: String): Result<Unit> {
+    override suspend fun updateFirebaseEmail(newEmail: String, targetUid: String?): Result<Unit> {
         val clean = newEmail.trim().lowercase()
-        val uid = currentSessionUid
+        val uid = targetUid ?: currentSessionUid
         if (uid != null) {
             authAccounts.entries.removeIf { it.value == uid }
             authAccounts[clean] = uid
@@ -188,6 +188,8 @@ class TwoAccountPersistenceAndIsolationTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext<Context>()
+        com.example.util.AccountBackupStore(context).clearAll()
+        com.example.util.SessionManager(context).clearSession()
         database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
             .allowMainThreadQueries()
             .build()
@@ -198,6 +200,8 @@ class TwoAccountPersistenceAndIsolationTest {
     @After
     @Throws(IOException::class)
     fun tearDown() {
+        com.example.util.AccountBackupStore(context).clearAll()
+        com.example.util.SessionManager(context).clearSession()
         database.close()
     }
 

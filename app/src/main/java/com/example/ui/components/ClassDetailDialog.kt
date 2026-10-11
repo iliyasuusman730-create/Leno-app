@@ -463,14 +463,15 @@ fun ClassDetailDialog(
                         Text("Enter Classroom 👥", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 } else {
-                    val displayFee = if (classItem.price.isNotBlank() && classItem.price != "Free") classItem.price else "₦1,500"
                     Button(
                         onClick = onJoin,
                         colors = ButtonDefaults.buttonColors(containerColor = LenoPrimary),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.testTag("dialog_join_class_btn")
                     ) {
-                        Text("Pay to Join ($displayFee)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Icon(Icons.Default.School, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Join Free (Launch Offer)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
             }

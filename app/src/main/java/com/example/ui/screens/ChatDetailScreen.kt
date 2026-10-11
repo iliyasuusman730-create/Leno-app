@@ -85,6 +85,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -172,6 +173,7 @@ fun ChatDetailScreen(
 
     DisposableEffect(partnerId) {
         viewModel.openChat(partnerId)
+        viewModel.markChatRead(partnerId)
         onDispose {
             viewModel.activeChatPartnerId.value = null
         }
@@ -187,8 +189,8 @@ fun ChatDetailScreen(
     // Ensure that when the recipient opens the chat screen or new messages arrive,
     // all unread messages from partner are updated with 'read' = true in Firestore
     LaunchedEffect(messages, partnerId) {
-        val myId = currentUser?.userId ?: return@LaunchedEffect
-        val hasUnreadFromPartner = messages.any { it.receiverId == myId && it.senderId == partnerId && it.status != "READ" }
+        val myId = currentUser?.userId ?: viewModel.repository.getCurrentUserIdSync()
+        val hasUnreadFromPartner = messages.any { it.status != "READ" && (myId == null || it.senderId != myId) }
         if (hasUnreadFromPartner) {
             viewModel.markChatRead(partnerId)
         }
@@ -346,7 +348,8 @@ fun ChatDetailScreen(
         if (isImeVisible) {
             val totalItems = messages.size + (if (isPartnerTyping) 1 else 0)
             if (totalItems > 0) {
-                listState.scrollToItem(totalItems - 1)
+                delay(80)
+                listState.animateScrollToItem(totalItems - 1)
             }
         }
     }
@@ -533,6 +536,7 @@ fun ChatDetailScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .consumeWindowInsets(padding)
+                .navigationBarsPadding()
                 .imePadding()
                 .background(LenoChatBackground)
         ) {
@@ -739,6 +743,8 @@ fun ChatDetailScreen(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .imePadding()
                         .padding(8.dp),
                     shape = RoundedCornerShape(24.dp),
                     colors = CardDefaults.cardColors(containerColor = LenoChatInputBg),

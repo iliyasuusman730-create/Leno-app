@@ -80,6 +80,7 @@ fun LenoNavGraph(
             MainScreenContainer(
                 viewModel = viewModel,
                 onOpenChat = { partnerId ->
+                    viewModel.markChatRead(partnerId)
                     navController.navigate(Screen.ChatDetail.createRoute(partnerId))
                 },
                 onOpenProfile = { targetUserId ->
@@ -132,6 +133,7 @@ fun LenoNavGraph(
                 userId = userId,
                 onBack = { navController.popBackStack() },
                 onOpenChat = { partnerId ->
+                    viewModel.markChatRead(partnerId)
                     navController.navigate(Screen.ChatDetail.createRoute(partnerId))
                 }
             )

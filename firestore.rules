@@ -136,6 +136,15 @@ service cloud.firestore {
       }
     }
 
+    // Conversations Collection: WhatsApp style conversation channels
+    match /conversations/{conversationId} {
+      allow read, write: if true;
+
+      match /messages/{messageId} {
+        allow read, write: if true;
+      }
+    }
+
     // Call Signaling: Only caller or receiver can access
     match /calls/{callId} {
       allow read, write: if true;

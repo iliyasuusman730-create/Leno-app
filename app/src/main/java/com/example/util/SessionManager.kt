@@ -13,7 +13,7 @@ class SessionManager(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
 
     fun saveActiveUserId(userId: String) {
-        prefs.edit().putString(KEY_ACTIVE_USER_ID, userId).apply()
+        prefs.edit().putString(KEY_ACTIVE_USER_ID, userId).commit()
     }
 
     fun getActiveUserId(): String? {
@@ -24,7 +24,7 @@ class SessionManager(context: Context) {
         prefs.edit()
             .putString(KEY_AUTH_EMAIL, email)
             .putString(KEY_AUTH_PASS, pass)
-            .apply()
+            .commit()
     }
 
     fun getAuthEmail(): String? = prefs.getString(KEY_AUTH_EMAIL, null)
@@ -35,7 +35,7 @@ class SessionManager(context: Context) {
         prefs.edit()
             .remove(KEY_AUTH_EMAIL)
             .remove(KEY_AUTH_PASS)
-            .apply()
+            .commit()
     }
 
     fun clearSession() {
@@ -43,7 +43,7 @@ class SessionManager(context: Context) {
             .remove(KEY_ACTIVE_USER_ID)
             .remove(KEY_AUTH_EMAIL)
             .remove(KEY_AUTH_PASS)
-            .apply()
+            .commit()
     }
 
     fun getThemeMode(): ThemeMode {

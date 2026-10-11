@@ -505,7 +505,7 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun markChatRead(partnerId: String) {
-        val myId = currentUser.value?.userId ?: return
+        val myId = currentUser.value?.userId ?: repository.getCurrentUserIdSync() ?: return
         viewModelScope.launch {
             repository.markMessagesAsRead(myId, partnerId)
         }
@@ -517,6 +517,12 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
         activeChatMessagesListener?.remove()
         val myId = currentUser.value?.userId ?: repository.getCurrentUserIdSync()
 
+        if (myId != null) {
+            viewModelScope.launch {
+                repository.markMessagesAsRead(myId, partnerId)
+            }
+        }
+
         viewModelScope.launch {
             repository.fetchAndSyncUserProfile(partnerId)
         }
@@ -526,9 +532,12 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
             activeChatMessagesListener = repository.remoteAccountService.listenToChatMessages(chatId) { remoteMsgs ->
                 viewModelScope.launch {
                     if (remoteMsgs.isNotEmpty()) {
-                        repository.insertMessages(remoteMsgs)
+                        val readMsgs = remoteMsgs.map { msg ->
+                            if (msg.senderId != myId) msg.copy(status = "READ") else msg
+                        }
+                        repository.insertMessages(readMsgs)
                         remoteMsgs.forEach { msg ->
-                            if (msg.receiverId == myId && msg.status != "READ") {
+                            if (msg.senderId != myId && msg.status != "READ") {
                                 repository.updateMessageStatus(msg.messageId, "READ")
                                 repository.remoteAccountService.markMessageReadInRemote(chatId, msg.messageId, msg.senderId)
                             }
@@ -544,6 +553,7 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
                     kotlinx.coroutines.withTimeoutOrNull(2500L) {
                         repository.syncRemoteChatMessages(partnerId)
                     }
+                    repository.markMessagesAsRead(myId, partnerId)
                 }
             } catch (e: Exception) {
                 Log.w("LenoViewModel", "Notice syncing chat: ${e.message}")
@@ -1425,24 +1435,36 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
             onResult(false, "Your account has been restricted by platform administration.")
             return
         }
+        val cleanSubject = subject.trim().split(",").firstOrNull()?.trim().orEmpty()
+        if (cleanSubject.isBlank()) {
+            onResult(false, "Please select one subject (One Teacher = One Subject).")
+            return
+        }
+
         val currentRole = currentUserTeacherRole.value
         val hasPendingInList = _teacherApplications.value.any { it.userId == user.userId && it.isPending }
         if ((currentRole != null && currentRole.isPending) || hasPendingInList) {
-            onResult(false, "You already have an application under review (Pending). You can only apply one time.")
+            onResult(false, "You already have an application under review. You can only apply one time.")
             return
         }
         val isApprovedInList = _teacherApplications.value.any { it.userId == user.userId && it.isApproved }
         if ((currentRole != null && currentRole.isApprovedTeacher) || user.isTeacher || !user.assignedSubject.isNullOrBlank() || isApprovedInList) {
             val approvedSubj = user.effectiveSubject.ifBlank { currentRole?.effectiveApprovedSubject ?: "your approved subject" }
-            onResult(false, "You are already an approved teacher for $approvedSubj. You can only apply one time.")
+            onResult(false, "You are already an approved teacher for $approvedSubj. Each teacher is limited to one subject and one application.")
+            return
+        }
+        val hasRejectedInList = _teacherApplications.value.any { it.userId == user.userId && (it.isRejected || it.status.equals("REJECTED", ignoreCase = true)) }
+        if ((currentRole != null && (currentRole.isRejected || currentRole.status.equals("REJECTED", ignoreCase = true))) || hasRejectedInList || user.teacherStatus.equals("REJECTED", ignoreCase = true)) {
+            onResult(false, "Teacher applications can only be submitted one time. Your previous application was already reviewed.")
+            return
+        }
+        val hasAnyAppInList = _teacherApplications.value.any { it.userId == user.userId }
+        if (hasAnyAppInList || (currentRole != null && !currentRole.isNotApplied)) {
+            onResult(false, "You have already applied. Teacher applications are strictly limited to one time per teacher.")
             return
         }
         if (!agreedToGuidelines) {
             onResult(false, "You must agree to Leno's teacher guidelines.")
-            return
-        }
-        if (subject.isBlank()) {
-            onResult(false, "Please select your teaching subject (One Teacher = One Subject).")
             return
         }
         if (educationQualification.isBlank()) {
@@ -1455,7 +1477,6 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
-            val cleanSubject = subject.trim()
             val application = TeacherRoleEntity(
                 userId = user.userId,
                 status = "PENDING",

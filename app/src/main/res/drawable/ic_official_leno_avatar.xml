@@ -8,37 +8,60 @@
     <!-- 1. Pure Solid Black Background (#000000) -->
     <path
         android:fillColor="#000000"
-        android:pathData="M 100,0 A 100,100 0 1,1 99.9,0 Z" />
+        android:pathData="M 0,0 L 200,0 L 200,200 L 0,200 Z" />
 
-    <!-- 2. Vibrant Electric Neon Green Outer Ring (#00E676) -->
+    <!-- 2. Thin Green Outer Circle (#00C853) -->
     <path
-        android:strokeColor="#00E676"
-        android:strokeWidth="6"
+        android:strokeColor="#00C853"
+        android:strokeWidth="3.5"
         android:strokeLineCap="round"
-        android:pathData="M 100,18 A 82,82 0 1,1 99.9,18 Z" />
+        android:pathData="M 100,17 A 83,83 0 1,1 99.9,17 Z" />
 
-    <!-- 3. Bold Crisp White Speech Bubble Outline with Bottom-Right Tail (#FFFFFF) -->
+    <!-- 3. Inner White Circular Chat Bubble Outline with Tail (#FFFFFF) -->
     <path
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="8"
+        android:strokeWidth="5.5"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:fillColor="#000000"
-        android:pathData="M 100,44 A 52,52 0 1,0 138,128 L 148,148 L 126,140 A 52,52 0 0,0 100,44 Z" />
+        android:pathData="M 100,45 A 51,51 0 1,0 137.2,126.8 L 149,149 L 126.4,139.6 A 51,51 0 0,0 100,45 Z" />
 
-    <!-- 4. Dimensionally Faceted 4-Pointed Sparkle Star (Left Facet - Bright Mint/Neon #00FF7F) -->
+    <!-- 4. Skull cap under the mortarboard (#00C853) -->
     <path
-        android:fillColor="#00FF7F"
-        android:pathData="M 100,64 C 100,96 100,96 68,96 C 100,96 100,96 100,128 Z" />
+        android:fillColor="#00C853"
+        android:strokeColor="#00C853"
+        android:strokeWidth="1"
+        android:pathData="M 80,95 L 80,102 C 80,115 120,115 120,102 L 120,95 C 114,100 107,102 100,102 C 93,102 86,100 80,95 Z" />
 
-    <!-- 5. Dimensionally Faceted 4-Pointed Sparkle Star (Right Facet - Emerald #00B359) -->
+    <!-- 5. Graduation Cap Top Diamond (Mortarboard #00C853) -->
     <path
-        android:fillColor="#00B359"
-        android:pathData="M 100,64 C 100,96 100,96 132,96 C 100,96 100,96 100,128 Z" />
+        android:fillColor="#00C853"
+        android:strokeColor="#00C853"
+        android:strokeWidth="1.5"
+        android:strokeLineJoin="round"
+        android:pathData="M 100,73 L 135,88 L 100,103 L 65,88 Z" />
 
-    <!-- 6. Brilliant Sparkle Core Center Highlight (#B9F6CA) -->
+    <!-- 6. Center Button of Mortarboard -->
     <path
-        android:fillColor="#B9F6CA"
-        android:pathData="M 100,88 L 108,96 L 100,104 L 92,96 Z" />
+        android:fillColor="#00C853"
+        android:pathData="M 100,85.5 A 2.5,2.5 0 1,1 99.9,85.5 Z" />
+
+    <!-- 7. Tassel Cord -->
+    <path
+        android:strokeColor="#00C853"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M 100,88 C 84,88 69,93 67,101 L 67,117" />
+
+    <!-- 8. Tassel Ring -->
+    <path
+        android:fillColor="#00C853"
+        android:pathData="M 65.5,117 L 68.5,117 L 68.5,119 L 65.5,119 Z" />
+
+    <!-- 9. Tassel Brush / Fringe -->
+    <path
+        android:fillColor="#00C853"
+        android:pathData="M 65.5,119 L 68.5,119 L 70,127 C 70,128 64,128 64,127 Z" />
 
 </vector>

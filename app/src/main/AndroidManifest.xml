@@ -21,6 +21,10 @@
         android:supportsRtl="true"
         android:enableOnBackInvokedCallback="true"
         android:theme="@style/Theme.MyApplication">
+        <property
+            android:name="android.window.PROPERTY_COMPAT_ALLOW_SYNCHRONIZED_INSETS_ANIMATION"
+            android:value="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

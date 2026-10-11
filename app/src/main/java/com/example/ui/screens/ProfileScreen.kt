@@ -816,8 +816,13 @@ fun ProfileScreen(
         Spacer(modifier = Modifier.height(20.dp))
 
         // Teacher Role & Dashboard Card
-        val isTeacherProfile = user?.isTeacher == true || userTeacherRole?.isApprovedTeacher == true || userTeacherRole?.status == "Teacher" || userTeacherRole?.status == "Trusted Teacher" || userTeacherRole?.status == "APPROVED"
-        val teacherStatus = if (userTeacherRole?.isTrustedTeacher == true) "Trusted Teacher" else if (isTeacherProfile) "Approved Teacher" else (userTeacherRole?.status ?: "Normal User")
+        val existingUserApp = teacherApplications.firstOrNull { it.userId == currentUser?.userId }
+        val isTeacherProfile = user?.isTeacher == true || userTeacherRole?.isApprovedTeacher == true || userTeacherRole?.status == "Teacher" || userTeacherRole?.status == "Trusted Teacher" || userTeacherRole?.status == "APPROVED" || existingUserApp?.isApproved == true
+        val teacherStatus = if (userTeacherRole?.isTrustedTeacher == true) "Trusted Teacher"
+            else if (isTeacherProfile) "Approved Teacher"
+            else if (existingUserApp?.isPending == true || userTeacherRole?.isPending == true || userTeacherRole?.status == "PENDING") "Pending"
+            else if (existingUserApp?.isRejected == true || userTeacherRole?.isRejected == true || userTeacherRole?.status.equals("REJECTED", ignoreCase = true)) "REJECTED"
+            else (userTeacherRole?.status ?: "Normal User")
         if (isTeacherProfile) {
             // Full Teacher Dashboard
             Card(
@@ -1313,9 +1318,9 @@ fun ProfileScreen(
                                 fontSize = 15.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                            val appliedSubj = userTeacherRole?.effectiveApprovedSubject?.ifBlank { userTeacherRole?.subjects ?: "" } ?: (userTeacherRole?.subjects ?: "Maths")
+                            val appliedSubj = userTeacherRole?.effectiveApprovedSubject?.ifBlank { userTeacherRole?.subjects ?: "" } ?: (existingUserApp?.effectiveSubject ?: "Maths")
                             Text(
-                                text = "Your application to teach $appliedSubj is under review by administrator. Only one application is permitted. Teacher roles are never automatically granted.",
+                                text = "Your application to teach $appliedSubj is under review by administrator. Only one application is permitted (1 subject per teacher). Teacher roles are never automatically granted.",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 lineHeight = 16.sp
@@ -1334,7 +1339,7 @@ fun ProfileScreen(
                     }
                 }
             }
-        } else if (teacherStatus.equals("REJECTED", ignoreCase = true) || userTeacherRole?.status.equals("REJECTED", ignoreCase = true)) {
+        } else if (teacherStatus.equals("REJECTED", ignoreCase = true) || userTeacherRole?.status.equals("REJECTED", ignoreCase = true) || existingUserApp?.isRejected == true) {
             // Rejected application card - no re-apply
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1363,6 +1368,7 @@ fun ProfileScreen(
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
+                            val rejectedSubj = userTeacherRole?.effectiveApprovedSubject?.ifBlank { userTeacherRole?.subjects ?: "" } ?: (existingUserApp?.effectiveSubject ?: "")
                             Text(
                                 text = "Teacher Application: Not Approved",
                                 fontWeight = FontWeight.Bold,
@@ -1370,7 +1376,7 @@ fun ProfileScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Your application to become a teacher was reviewed and was not approved. Applications can only be submitted once.",
+                                text = "Your application to become a teacher${if (rejectedSubj.isNotBlank()) " for $rejectedSubj" else ""} was reviewed and was not approved. Teacher applications can only be submitted once for one subject per teacher.",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 lineHeight = 16.sp
@@ -1415,13 +1421,13 @@ fun ProfileScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "Become a Teacher",
+                                text = "Apply to Become Teacher",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 15.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Share your knowledge with the Leno community.",
+                                text = "One-time application • 1 subject per teacher",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

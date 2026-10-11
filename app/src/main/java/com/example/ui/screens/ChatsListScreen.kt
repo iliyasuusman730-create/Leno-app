@@ -2,6 +2,9 @@ package com.example.ui.screens
 
 import com.example.ui.components.AddContactDialog
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -100,34 +103,15 @@ fun ChatsListScreen(
     var chatFilterQuery by remember { mutableStateOf("") }
 
     val myId = currentUser?.userId ?: ""
-    val chatPartners = remember(chatPartnersList, contactsList, chatFilterQuery, myId) {
-        val backupPartners = viewModel.repository.messageBackupStore?.getAllChatPartnerProfiles().orEmpty()
-            .filter { it.userId.isNotBlank() && it.userId != myId && !it.isCurrentUser }
-        val backupAccounts = viewModel.repository.accountBackupStore?.getAllAccounts().orEmpty()
-            .filter { it.userId.isNotBlank() && it.userId != myId && !it.isCurrentUser }
-        val allMessages = viewModel.repository.messageBackupStore?.getAllMessages().orEmpty()
-        val partnersFromMessages = allMessages
-            .filter { (it.senderId == myId || it.receiverId == myId) && it.senderId != it.receiverId }
-            .map { if (it.senderId == myId) it.receiverId else it.senderId }
-            .filter { it.isNotBlank() && it != myId && it != LenoRepository.OFFICIAL_LENO_ID }
-            .map { pId ->
-                backupPartners.firstOrNull { it.userId == pId || it.username.equals(pId, true) || it.linoId.equals(pId, true) }
-                    ?: backupAccounts.firstOrNull { it.userId == pId || it.username.equals(pId, true) || it.linoId.equals(pId, true) }
-                    ?: UserEntity(
-                        userId = pId,
-                        username = if (pId.startsWith("usr_")) pId.removePrefix("usr_").take(10) else if (pId.startsWith("LEN-")) pId.removePrefix("LEN-").take(10) else pId.take(12),
-                        displayName = if (pId.startsWith("usr_")) "User ${pId.takeLast(4)}" else if (pId.startsWith("LEN-")) "User $pId" else "User ${pId.take(6)}",
-                        bio = "Connecting on Leno ✨",
-                        isCurrentUser = false
-                    )
-            }
-        val combined = (chatPartnersList + contactsList + backupPartners + backupAccounts + partnersFromMessages)
+    val chatPartners = remember(chatPartnersList, chatFilterQuery, myId) {
+        val filtered = chatPartnersList
             .distinctBy { it.userId }
             .filter { it.userId != myId && it.userId.isNotBlank() }
+
         if (chatFilterQuery.isBlank()) {
-            combined
+            filtered
         } else {
-            combined.filter {
+            filtered.filter {
                 it.displayName.contains(chatFilterQuery, ignoreCase = true) ||
                 it.username.contains(chatFilterQuery, ignoreCase = true) ||
                 it.linoId.contains(chatFilterQuery, ignoreCase = true)
@@ -280,7 +264,7 @@ fun ChatsListScreen(
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = "No conversations found",
+                            text = "No chats yet. Start a new conversation",
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -326,11 +310,7 @@ fun ChatsListScreen(
     if (showNewChatDialog) {
         var pickerQuery by remember { mutableStateOf("") }
         val searchResults by viewModel.repository.searchUsers(pickerQuery, myId).collectAsState(initial = emptyList())
-        val backupPartnersForPicker = viewModel.repository.messageBackupStore?.getAllChatPartnerProfiles().orEmpty()
-            .filter { it.userId.isNotBlank() && it.userId != myId && !it.isCurrentUser }
-        val backupAccountsForPicker = viewModel.repository.accountBackupStore?.getAllAccounts().orEmpty()
-            .filter { it.userId.isNotBlank() && it.userId != myId && !it.isCurrentUser }
-        val allKnownUsers = (contactsList + chatPartnersList + backupPartnersForPicker + backupAccountsForPicker + chatPartners).distinctBy { it.userId }.filter { it.userId != myId }
+        val allKnownUsers = (contactsList + chatPartnersList).distinctBy { it.userId }.filter { it.userId != myId }
         val displayUsers = if (pickerQuery.isBlank()) allKnownUsers else searchResults
 
         AlertDialog(
@@ -425,6 +405,7 @@ fun ChatsListScreen(
                                         .fillMaxWidth()
                                         .clickable {
                                             showNewChatDialog = false
+                                            viewModel.markChatRead(u.userId)
                                             onOpenChat(u.userId)
                                         },
                                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -507,7 +488,10 @@ fun ChatItemRow(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onOpenChat(partner.userId) }
+            .clickable {
+                viewModel.markChatRead(partner.userId)
+                onOpenChat(partner.userId)
+            }
             .testTag("chat_row_${partner.username}"),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),

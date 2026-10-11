@@ -142,11 +142,11 @@ fun AuthScreen(
     // Automatic safety watchdog to guarantee loading spinner never hangs indefinitely
     LaunchedEffect(isLoading) {
         if (isLoading) {
-            kotlinx.coroutines.delay(12000)
+            kotlinx.coroutines.delay(20000)
             if (isLoading) {
                 isLoading = false
                 if (errorMessage == null) {
-                    errorMessage = "Connection is taking longer than expected. Please check your connection and tap again."
+                    errorMessage = "Unable to connect to server. Please check your internet connection."
                 }
             }
         }
@@ -818,6 +818,27 @@ fun AuthScreen(
                                     )
 
                                     val cleanId = loginIdentifierInput.trim().removePrefix("@")
+                                    val isCredentialErr = errorMessage!!.contains("Incorrect credentials", ignoreCase = true) ||
+                                            errorMessage!!.contains("expired", ignoreCase = true) ||
+                                            errorMessage!!.contains("invalid", ignoreCase = true)
+                                    if (isCredentialErr && cleanId.isNotBlank()) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        TextButton(
+                                            onClick = {
+                                                errorMessage = null
+                                                recoverIdentifierInput = cleanId
+                                                currentStep = OnboardingStep.FORGOT_PASSWORD
+                                            }
+                                        ) {
+                                            Text(
+                                                text = "Reset password for @$cleanId →",
+                                                color = brandOrange,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp
+                                            )
+                                        }
+                                    }
+
                                     if (errorMessage!!.contains("Account not found", ignoreCase = true) && cleanId.isNotBlank()) {
                                         Spacer(modifier = Modifier.height(10.dp))
                                         OutlinedButton(

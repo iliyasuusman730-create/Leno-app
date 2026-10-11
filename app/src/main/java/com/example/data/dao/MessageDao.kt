@@ -148,6 +148,12 @@ interface MessageDao {
     """)
     fun getUnreadCountFromUser(currentUserId: String, otherUserId: String): Flow<Int>
 
+    @Query("""
+        SELECT COUNT(*) FROM messages 
+        WHERE receiverId IN (:currentUserIds) AND senderId IN (:otherUserIds) AND status != 'READ'
+    """)
+    fun getUnreadCountFromUserAliases(currentUserIds: List<String>, otherUserIds: List<String>): Flow<Int>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: MessageEntity)
 
@@ -156,6 +162,9 @@ interface MessageDao {
 
     @Query("UPDATE messages SET status = 'READ' WHERE receiverId = :currentUserId AND senderId = :otherUserId")
     suspend fun markMessagesAsRead(currentUserId: String, otherUserId: String)
+
+    @Query("UPDATE messages SET status = 'READ' WHERE receiverId IN (:currentUserIds) AND senderId IN (:otherUserIds) AND status != 'READ'")
+    suspend fun markMessagesAsReadWithAliases(currentUserIds: List<String>, otherUserIds: List<String>)
 
     @Query("SELECT * FROM messages WHERE messageId = :messageId LIMIT 1")
     suspend fun getMessageByIdSync(messageId: String): MessageEntity?

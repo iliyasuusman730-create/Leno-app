@@ -458,7 +458,62 @@ fun ClassScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        // Early Launch 100% Free Access Banner
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = LenoPrimaryVeryLight,
+            border = androidx.compose.foundation.BorderStroke(1.dp, LenoPrimary.copy(alpha = 0.5f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(LenoPrimary),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = "Free Access",
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "🎉 Early Launch — All Classes Free!",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = LenoPrimaryDark
+                    )
+                    Text(
+                        text = "Join any class at zero cost while Leno is new. Learn freely!",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 15.sp
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = LenoPrimary,
+                    contentColor = Color.White
+                ) {
+                    Text(
+                        text = "FREE",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
 
         // Categories: All | Maths | Quran | JAMB | Skills | Online Skills | Content Creator
         Row(
@@ -591,8 +646,15 @@ fun ClassScreen(
                         isEnrolled = isEnrolled,
                         isAdmin = isAdmin,
                         onJoin = {
-                            // Join class is not free - students must pay to join class
-                            classForPaymentCheckout = classItem
+                            // Free joining during app launch! Direct enrollment
+                            viewModel.enrollInClass(classItem.classId, classItem.instructorUserId) { success ->
+                                if (success) {
+                                    joinedClassConfirmation = classItem
+                                    Toast.makeText(context, "Successfully joined ${classItem.title} for free! 🎉", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Could not join class. Please try again.", Toast.LENGTH_SHORT).show()
+                                }
+                            }
                         },
                         onViewDetails = {
                             if (isEnrolled || isAdmin) {
@@ -665,10 +727,17 @@ fun ClassScreen(
                 selectedClassForGroupRoom = currentClass
             },
             onJoin = {
-                // Join class is not free - students must pay to join class
-                val currentPayClass = detailClass
+                // Free joining during app launch! Direct enrollment
+                val currentFreeClass = detailClass
                 selectedClassForDetail = null
-                classForPaymentCheckout = currentPayClass
+                viewModel.enrollInClass(currentFreeClass.classId, currentFreeClass.instructorUserId) { success ->
+                    if (success) {
+                        joinedClassConfirmation = currentFreeClass
+                        Toast.makeText(context, "Successfully joined ${currentFreeClass.title} for free! 🎉", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "Could not join class. Please try again.", Toast.LENGTH_SHORT).show()
+                    }
+                }
             },
             onChatWithInstructor = {
                 selectedClassForDetail = null
@@ -861,18 +930,29 @@ fun ClassCard(
                         )
                     }
                 } else {
-                    val displayFee = if (classItem.price.isNotBlank() && classItem.price != "Free") classItem.price else "₦1,500"
                     Surface(
                         shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFFFFF3E0)
+                        color = LenoPrimaryVeryLight,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, LenoPrimary.copy(alpha = 0.5f))
                     ) {
-                        Text(
-                            text = displayFee,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFFE65100),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "FREE",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = LenoPrimary
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "• Launch Promo",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = LenoPrimaryDark
+                            )
+                        }
                     }
                 }
             }
@@ -1047,8 +1127,14 @@ fun ClassCard(
                             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                             modifier = Modifier.testTag("join_class_button_${classItem.classId}")
                         ) {
-                            val displayFee = if (classItem.price.isNotBlank() && classItem.price != "Free") classItem.price else "₦1,500"
-                            Text("Pay $displayFee & Join", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Icon(
+                                imageVector = Icons.Default.School,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Join Free", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     } else {
                         Button(

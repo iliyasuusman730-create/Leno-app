@@ -96,15 +96,23 @@ fun DiscoverScreen(
                 .map { if (it.senderId == myId) it.receiverId else it.senderId }
                 .filter { it.isNotBlank() && it != myId && it != LenoRepository.OFFICIAL_LENO_ID }
                 .map { pId ->
-                    backupPartners.firstOrNull { it.userId == pId || it.username.equals(pId, true) || it.linoId.equals(pId, true) }
-                        ?: backupAccounts.firstOrNull { it.userId == pId || it.username.equals(pId, true) || it.linoId.equals(pId, true) }
-                        ?: UserEntity(
-                            userId = pId,
-                            username = if (pId.startsWith("usr_")) pId.removePrefix("usr_").take(10) else if (pId.startsWith("LEN-")) pId.removePrefix("LEN-").take(10) else pId.take(12),
-                            displayName = if (pId.startsWith("usr_")) "User ${pId.takeLast(4)}" else if (pId.startsWith("LEN-")) "User $pId" else "User ${pId.take(6)}",
-                            bio = "Connecting on Leno ✨",
-                            isCurrentUser = false
-                        )
+                    backupPartners.firstOrNull { 
+                        it.userId == pId || 
+                        (it.username.isNotBlank() && it.username.equals(pId, true)) || 
+                        (it.linoId.isNotBlank() && it.linoId.equals(pId, true)) 
+                    }
+                    ?: backupAccounts.firstOrNull { 
+                        it.userId == pId || 
+                        (it.username.isNotBlank() && it.username.equals(pId, true)) || 
+                        (it.linoId.isNotBlank() && it.linoId.equals(pId, true)) 
+                    }
+                    ?: UserEntity(
+                        userId = pId,
+                        username = if (pId.startsWith("usr_")) pId.removePrefix("usr_").take(10) else if (pId.startsWith("LEN-")) pId.removePrefix("LEN-").take(10) else pId.take(12),
+                        displayName = if (pId.startsWith("usr_")) "User ${pId.takeLast(4)}" else if (pId.startsWith("LEN-")) "User $pId" else "User ${pId.take(6)}",
+                        bio = "Connecting on Leno ✨",
+                        isCurrentUser = false
+                    )
                 }
             (contactsList + chatPartnersList + backupPartners + backupAccounts + partnersFromMessages + allUsersList)
                 .distinctBy { it.userId }

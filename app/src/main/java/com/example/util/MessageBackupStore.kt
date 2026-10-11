@@ -15,6 +15,10 @@ import org.json.JSONObject
  */
 class MessageBackupStore(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+    @Volatile
+    private var cachedMessages: List<MessageEntity>? = null
+    @Volatile
+    private var cachedPartners: List<UserEntity>? = null
 
     companion object {
         private const val TAG = "MessageBackupStore"
@@ -65,6 +69,34 @@ class MessageBackupStore(context: Context) {
             Log.d(TAG, "Batch saved ${messages.size} messages to backup store")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to batch backup messages: ${e.message}")
+        }
+    }
+
+    /**
+     * Marks backed up messages as read between user aliases and partner aliases.
+     */
+    @Synchronized
+    fun markMessagesAsRead(userAliases: List<String>, partnerAliases: List<String>) {
+        if (userAliases.isEmpty() || partnerAliases.isEmpty()) return
+        try {
+            val uSet = userAliases.toSet()
+            val pSet = partnerAliases.toSet()
+            val current = getAllMessagesInternal()
+            var modified = false
+            val updated = current.map { msg ->
+                if (msg.receiverId in uSet && msg.senderId in pSet && msg.status != "READ") {
+                    modified = true
+                    msg.copy(status = "READ")
+                } else {
+                    msg
+                }
+            }
+            if (modified) {
+                saveMessagesInternal(updated)
+                Log.d(TAG, "Marked messages as read in resilient backup store")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to mark messages as read in backup: ${e.message}")
         }
     }
 
@@ -154,7 +186,8 @@ class MessageBackupStore(context: Context) {
                 put("assignedSubject", partner.assignedSubject)
             }
             updated.put(pObj)
-            prefs.edit().putString(KEY_PARTNERS, updated.toString()).apply()
+            prefs.edit().putString(KEY_PARTNERS, updated.toString()).commit()
+            cachedPartners = null
         } catch (e: Exception) {
             Log.w(TAG, "Failed to save partner profile: ${e.message}")
         }
@@ -173,7 +206,8 @@ class MessageBackupStore(context: Context) {
                     updated.put(obj)
                 }
             }
-            prefs.edit().putString(KEY_PARTNERS, updated.toString()).apply()
+            prefs.edit().putString(KEY_PARTNERS, updated.toString()).commit()
+            cachedPartners = null
         } catch (e: Exception) {
             Log.w(TAG, "Failed to remove partner profile: ${e.message}")
         }
@@ -183,6 +217,9 @@ class MessageBackupStore(context: Context) {
      * Retrieves all saved chat partner profiles.
      */
     fun getAllChatPartnerProfiles(): List<UserEntity> {
+        val cached = cachedPartners
+        if (cached != null) return cached
+
         val result = mutableListOf<UserEntity>()
         try {
             val partnersJson = prefs.getString(KEY_PARTNERS, "[]") ?: "[]"
@@ -210,10 +247,14 @@ class MessageBackupStore(context: Context) {
         } catch (e: Exception) {
             Log.w(TAG, "Failed to read saved partner profiles: ${e.message}")
         }
+        cachedPartners = result
         return result
     }
 
     private fun getAllMessagesInternal(): List<MessageEntity> {
+        val cached = cachedMessages
+        if (cached != null) return cached
+
         val result = mutableListOf<MessageEntity>()
         try {
             val json = prefs.getString(KEY_MESSAGES, "[]") ?: "[]"
@@ -238,6 +279,7 @@ class MessageBackupStore(context: Context) {
         } catch (e: Exception) {
             Log.w(TAG, "Error parsing backup messages: ${e.message}")
         }
+        cachedMessages = result
         return result
     }
 
@@ -258,6 +300,7 @@ class MessageBackupStore(context: Context) {
             }
             array.put(obj)
         }
-        prefs.edit().putString(KEY_MESSAGES, array.toString()).apply()
+        prefs.edit().putString(KEY_MESSAGES, array.toString()).commit()
+        cachedMessages = messages
     }
 }
