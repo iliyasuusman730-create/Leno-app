@@ -89,6 +89,12 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.TextButton
 
+import com.example.util.isSmallScreen
+import com.example.util.responsiveHorizontalPadding
+import com.example.util.responsiveTitleSize
+import com.example.util.MaxContentWidth
+import androidx.compose.foundation.layout.widthIn
+
 @Composable
 fun ChatsListScreen(
     viewModel: LenoViewModel,
@@ -101,6 +107,7 @@ fun ChatsListScreen(
     val contactsList by viewModel.contactsList.collectAsState()
     val isFetchingUsers by viewModel.isFetchingUserData.collectAsState()
     var chatFilterQuery by remember { mutableStateOf("") }
+    val isSmall = isSmallScreen()
 
     val myId = currentUser?.userId ?: ""
     val chatPartners = remember(chatPartnersList, chatFilterQuery, myId) {
@@ -137,12 +144,14 @@ fun ChatsListScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(MaterialTheme.colorScheme.background),
+        contentAlignment = Alignment.TopCenter
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp)
+                .widthIn(max = MaxContentWidth)
+                .padding(horizontal = responsiveHorizontalPadding(), vertical = 12.dp)
         ) {
             // Screen Header with Refresh, Add Contact & Find People Buttons
             Row(
@@ -153,14 +162,14 @@ fun ChatsListScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = "Chats",
-                        style = MaterialTheme.typography.displayLarge.copy(fontSize = 28.sp, fontWeight = FontWeight.Bold),
+                        style = MaterialTheme.typography.displayLarge.copy(fontSize = responsiveTitleSize(22.sp, 28.sp), fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onBackground
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(if (isSmall) 4.dp else 8.dp))
                     if (isFetchingUsers) {
                         CircularProgressIndicator(
                             modifier = Modifier
-                                .size(20.dp)
+                                .size(if (isSmall) 16.dp else 20.dp)
                                 .testTag("chats_fetching_indicator"),
                             strokeWidth = 2.dp,
                             color = MaterialTheme.colorScheme.primary
@@ -169,32 +178,33 @@ fun ChatsListScreen(
                         IconButton(
                             onClick = { viewModel.refreshUserData() },
                             modifier = Modifier
-                                .size(32.dp)
+                                .size(if (isSmall) 28.dp else 32.dp)
                                 .testTag("chats_refresh_button")
                         ) {
                             Icon(
                                 Icons.Default.Refresh,
                                 contentDescription = "Refresh User Data",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(if (isSmall) 18.dp else 20.dp)
                             )
                         }
                     }
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Button(
                         onClick = { showAddContactDialog = true },
                         shape = RoundedCornerShape(12.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = if (isSmall) 8.dp else 14.dp, vertical = 6.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary
                         ),
                         modifier = Modifier.testTag("chats_add_contact_button")
                     ) {
-                        Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Add Contact", fontWeight = FontWeight.SemiBold)
+                        Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(if (isSmall) 16.dp else 18.dp))
+                        Spacer(modifier = Modifier.width(if (isSmall) 2.dp else 4.dp))
+                        Text(if (isSmall) "Add" else "Add Contact", fontWeight = FontWeight.SemiBold, fontSize = if (isSmall) 12.sp else 14.sp)
                     }
                 }
             }

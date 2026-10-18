@@ -39,6 +39,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -112,18 +115,21 @@ fun AddContactDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(decorFitsSystemWindows = false)
     ) {
+        val isSmall = com.example.util.isSmallScreen()
         Surface(
             shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp,
             modifier = Modifier
                 .fillMaxWidth()
+                .widthIn(max = com.example.util.MaxDialogWidth)
                 .imePadding()
         ) {
             Column(
                 modifier = Modifier
-                    .padding(24.dp)
+                    .padding(if (isSmall) 16.dp else 24.dp)
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
             ) {
                 // Header
                 Row(

@@ -49,7 +49,7 @@ import kotlinx.coroutines.launch
         LessonEntity::class,
         ClassQuestionEntity::class
     ],
-    version = 17,
+    version = 18,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -303,6 +303,24 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                val database = db
+                try {
+                    database.execSQL("ALTER TABLE class_questions ADD COLUMN audioUrl TEXT DEFAULT NULL")
+                } catch (_: Exception) {}
+                try {
+                    database.execSQL("ALTER TABLE class_questions ADD COLUMN audioDurationSeconds INTEGER NOT NULL DEFAULT 0")
+                } catch (_: Exception) {}
+                try {
+                    database.execSQL("ALTER TABLE class_questions ADD COLUMN answerAudioUrl TEXT DEFAULT NULL")
+                } catch (_: Exception) {}
+                try {
+                    database.execSQL("ALTER TABLE class_questions ADD COLUMN answerAudioDurationSeconds INTEGER NOT NULL DEFAULT 0")
+                } catch (_: Exception) {}
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -310,7 +328,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "leno_database.db"
                 )
-                .addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17)
+                .addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18)
                 .fallbackToDestructiveMigration(dropAllTables = false)
                 .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = false)
                 .addCallback(DatabaseCallback())

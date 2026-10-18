@@ -25,6 +25,14 @@ class FirebaseStorageService(
     companion object {
         private const val TAG = "FirebaseStorageService"
 
+        /**
+         * Global flag tracking if Firebase Cloud Storage is provisioned on the backend.
+         * Default is false to prevent StorageException 404 (Object does not exist at location)
+         * when Cloud Storage is unprovisioned on this Firebase project.
+         */
+        @Volatile
+        var isStorageProvisioned: Boolean = false
+
         private fun logW(msg: String) {
             try {
                 Log.w(TAG, msg)
@@ -42,12 +50,14 @@ class FirebaseStorageService(
         }
     }
 
-    private val storage: FirebaseStorage? = storageInstance ?: try {
-        FirebaseStorage.getInstance()
-    } catch (e: Throwable) {
-        logW("Firebase Storage not initialized: ${e.message}")
-        null
-    }
+    private val storage: FirebaseStorage? = storageInstance ?: if (isStorageProvisioned) {
+        try {
+            FirebaseStorage.getInstance()
+        } catch (e: Throwable) {
+            logW("Firebase Storage not initialized: ${e.message}")
+            null
+        }
+    } else null
 
     /**
      * Uploads an image from an Android content Uri to Firebase Storage.
@@ -108,7 +118,7 @@ class FirebaseStorageService(
         bytes: ByteArray,
         path: String
     ): Result<String> = withContext(Dispatchers.IO) {
-        val storageRef = storage?.reference?.child(path)
+        val storageRef = if (isStorageProvisioned) storage?.reference?.child(path) else null
         if (storageRef != null) {
             try {
                 val metadata = StorageMetadata.Builder()
@@ -119,13 +129,13 @@ class FirebaseStorageService(
                 val downloadUrl = uploadTask.storage.downloadUrl.await().toString()
                 return@withContext Result.success(downloadUrl)
             } catch (e: Exception) {
-                Log.w(TAG, "Firebase Storage upload error, using resilient fallback: ${e.message}")
-                // Fallback to data URL
+                isStorageProvisioned = false
+                Log.w(TAG, "Firebase Storage upload error, using resilient data URL fallback: ${e.message}")
                 val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
                 return@withContext Result.success("data:image/jpeg;base64,$base64")
             }
         } else {
-            // Storage unavailable, create data URL
+            // Storage unprovisioned or unavailable, generate compact data URL
             val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
             Result.success("data:image/jpeg;base64,$base64")
         }
@@ -133,14 +143,14 @@ class FirebaseStorageService(
 
     /**
      * Uploads a voice note audio file to Firebase Storage.
-     * If Firebase Storage is unavailable or offline, returns a compact base64 data URL.
+     * If Firebase Storage is unavailable or unprovisioned, returns a compact base64 data URL.
      */
     suspend fun uploadVoiceNoteFile(
         file: File,
         chatId: String = ""
     ): Result<String> = withContext(Dispatchers.IO) {
-        val storageRef = storage?.reference
         val mime = if (file.name.endsWith(".wav", ignoreCase = true)) "audio/wav" else "audio/mp4"
+        val storageRef = if (isStorageProvisioned) storage?.reference else null
         val fileName = "voice_${UUID.randomUUID().toString().take(12)}_${file.name}"
         val path = if (chatId.isNotBlank()) "chats/$chatId/voice_notes/$fileName" else "voice_notes/$fileName"
 
@@ -153,7 +163,8 @@ class FirebaseStorageService(
                 val downloadUrl = uploadTask.storage.downloadUrl.await().toString()
                 return@withContext Result.success(downloadUrl)
             } catch (e: Exception) {
-                Log.w(TAG, "Firebase Storage voice note upload error, using resilient fallback: ${e.message}")
+                isStorageProvisioned = false
+                Log.w(TAG, "Firebase Storage voice note upload error, using resilient data URL fallback: ${e.message}")
             }
         }
         return@withContext try {
@@ -165,7 +176,7 @@ class FirebaseStorageService(
         }
     }
 
-    private fun compressImageBytes(bytes: ByteArray, maxDimension: Int = 1280, quality: Int = 80): ByteArray {
+    private fun compressImageBytes(bytes: ByteArray, maxDimension: Int = 1024, quality: Int = 75): ByteArray {
         return try {
             val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return bytes
             val width = bitmap.width

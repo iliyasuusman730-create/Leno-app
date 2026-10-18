@@ -20,6 +20,8 @@ import com.example.data.entity.TeacherRoleEntity
 import com.example.data.entity.UserEntity
 import com.example.data.entity.UserSettingsEntity
 import com.example.data.model.TeacherApplicationItem
+import com.example.data.model.SupportChatItem
+import com.example.data.model.SupportMessageItem
 import com.example.data.service.RemoteAccountService
 import com.example.util.CallAudioHelper
 import com.example.util.ThemeMode
@@ -198,6 +200,14 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
     // Admin directory of all users for role management
     private val _adminDirectoryUsers = MutableStateFlow<List<UserEntity>>(emptyList())
     val adminDirectoryUsers: StateFlow<List<UserEntity>> = _adminDirectoryUsers.asStateFlow()
+
+    // Real-time open support chats for Owner Console
+    val openSupportChats: StateFlow<List<SupportChatItem>> = repository.listenToOpenSupportChats()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
 
     init {
         repository.activeChatPartnerIdSupplier = { activeChatPartnerId.value }
@@ -571,6 +581,7 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
             if (myId != null) {
                 repository.syncAllUserChatsAndMessages(myId)
                 repository.syncRemoteContactsIntoRoom(myId)
+                repository.syncAllRemoteUsersIntoRoom()
             }
             delay(600)
             _isFetchingUserData.value = false
@@ -1495,6 +1506,30 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
             )
             val res = repository.submitTeacherApplication(application)
             if (res.isSuccess) {
+                val newAppItem = TeacherApplicationItem(
+                    applicationId = user.userId,
+                    applicantUid = user.userId,
+                    lenoId = user.linoId,
+                    fullName = user.displayName.ifBlank { user.username },
+                    username = user.username,
+                    subject = cleanSubject,
+                    qualification = educationQualification.trim(),
+                    experience = teachingExperience.trim(),
+                    status = "PENDING",
+                    submittedAt = application.submittedAt,
+                    userId = user.userId,
+                    applicantName = user.displayName.ifBlank { user.username },
+                    applicantEmail = user.email,
+                    applicantUsername = user.username,
+                    applicantAvatarUrl = user.avatarUrl,
+                    approvedSubject = cleanSubject,
+                    teachingLevel = teachingLevel.trim().ifBlank { "All Levels" },
+                    educationQualification = educationQualification.trim(),
+                    teachingExperience = teachingExperience.trim(),
+                    teacherIntro = teacherIntro.trim()
+                )
+                _teacherApplications.value = listOf(newAppItem) + _teacherApplications.value.filter { it.userId != user.userId }
+                refreshTeacherApplications()
                 onResult(true, "Teacher application submitted! Status: PENDING review.")
             } else {
                 onResult(false, res.exceptionOrNull()?.message ?: "Failed to submit application.")
@@ -1989,7 +2024,13 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
     fun getEnrolledStudentsForClass(classId: String): Flow<List<UserEntity>> =
         repository.getEnrolledStudentsForClass(classId)
 
-    fun askQuestionInClass(classId: String, questionText: String, onResult: (Boolean, String) -> Unit = { _, _ -> }) {
+    fun askQuestionInClass(
+        classId: String,
+        questionText: String,
+        audioUrl: String? = null,
+        audioDurationSeconds: Int = 0,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
         val user = currentUser.value ?: run {
             onResult(false, "User not signed in")
             return
@@ -2000,7 +2041,9 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
                 senderUserId = user.userId,
                 senderName = user.displayName.ifBlank { user.linoId },
                 senderLinoId = user.linoId,
-                questionText = questionText
+                questionText = questionText,
+                audioUrl = audioUrl,
+                audioDurationSeconds = audioDurationSeconds
             )
             if (res.isSuccess) {
                 onResult(true, "Question submitted successfully.")
@@ -2010,9 +2053,22 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun answerQuestionInClass(questionId: String, answerText: String, onResult: (Boolean, String) -> Unit = { _, _ -> }) {
+    fun answerQuestionInClass(
+        classId: String = "",
+        questionId: String,
+        answerText: String,
+        audioUrl: String? = null,
+        audioDurationSeconds: Int = 0,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
         viewModelScope.launch {
-            val res = repository.answerQuestionInClass(questionId, answerText)
+            val res = repository.answerQuestionInClass(
+                classId = classId,
+                questionId = questionId,
+                answerText = answerText,
+                audioUrl = audioUrl,
+                audioDurationSeconds = audioDurationSeconds
+            )
             if (res.isSuccess) {
                 onResult(true, "Answer posted successfully.")
             } else {
@@ -2042,6 +2098,44 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 onResult(false, res.exceptionOrNull()?.message ?: "Failed to broadcast announcement.")
             }
+        }
+    }
+
+    fun getOrCreateSupportChat(
+        userId: String,
+        userName: String,
+        onResult: (chatId: String) -> Unit
+    ) {
+        viewModelScope.launch {
+            val result = repository.getOrCreateSupportChat(userId, userName)
+            result.onSuccess { chat ->
+                onResult(chat.chatId)
+            }.onFailure {
+                onResult("support_$userId")
+            }
+        }
+    }
+
+    fun listenToSupportMessages(chatId: String): Flow<List<SupportMessageItem>> {
+        return repository.listenToSupportChatMessages(chatId)
+    }
+
+    fun sendSupportMessage(
+        chatId: String,
+        text: String,
+        senderId: String,
+        senderRole: String,
+        onComplete: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            repository.sendSupportMessage(chatId, text, senderId, senderRole)
+            onComplete()
+        }
+    }
+
+    fun updateSupportChatStatus(chatId: String, status: String) {
+        viewModelScope.launch {
+            repository.updateSupportChatStatus(chatId, status)
         }
     }
 

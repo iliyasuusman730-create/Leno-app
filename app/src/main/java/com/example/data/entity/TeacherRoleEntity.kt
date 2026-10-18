@@ -47,6 +47,7 @@ data class TeacherRoleEntity(
 
     val isNotApplied: Boolean
         get() = status.equals("NOT APPLIED", ignoreCase = true) ||
+                status.equals("NOT_APPLIED", ignoreCase = true) ||
                 status.equals("Normal User", ignoreCase = true) ||
                 status.isBlank()
 

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -77,10 +78,12 @@ import com.example.data.entity.ClassEntity
 import com.example.data.entity.ClassQuestionEntity
 import com.example.data.entity.LessonEntity
 import com.example.data.entity.UserEntity
+import androidx.compose.material.icons.filled.HeadsetMic
 import com.example.ui.components.AddLessonDialog
 import com.example.ui.components.AdminTeacherApplicationsDialog
 import com.example.ui.components.ClassDetailDialog
 import com.example.ui.components.ClassRoomGroupDialog
+import com.example.ui.components.ContactSupportDialog
 import com.example.ui.components.CreateClassDialog
 import com.example.ui.components.JoinConfirmationDialog
 import com.example.ui.components.LessonViewerDialog
@@ -95,7 +98,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun ClassScreen(
     viewModel: LenoViewModel,
-    onOpenChat: (String) -> Unit
+    onOpenChat: (String) -> Unit,
+    onOpenSupportChat: (String) -> Unit = onOpenChat
 ) {
     val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
@@ -142,6 +146,7 @@ fun ClassScreen(
     var selectedLessonForView by remember { mutableStateOf<Pair<LessonEntity, ClassEntity>?>(null) }
     var classForAddingLesson by remember { mutableStateOf<ClassEntity?>(null) }
     var joinedClassConfirmation by remember { mutableStateOf<ClassEntity?>(null) }
+    var showContactSupportDialog by remember { mutableStateOf(false) }
 
     val enrolledClassIds = remember(enrolledClasses) {
         enrolledClasses.map { it.classId }.toSet()
@@ -197,190 +202,139 @@ fun ClassScreen(
         }
     }
 
-    Column(
+    val isSmall = com.example.util.isSmallScreen()
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 16.dp)
-            .testTag("class_screen_root")
+            .background(MaterialTheme.colorScheme.background),
+        contentAlignment = Alignment.TopCenter
     ) {
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // Top Header: Class title + Action buttons
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .widthIn(max = com.example.util.MaxContentWidth)
+                .padding(horizontal = com.example.util.responsiveHorizontalPadding())
+                .testTag("class_screen_root")
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(LenoPrimaryLight),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.School,
-                        contentDescription = "Class",
-                        tint = LenoPrimaryDark,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Column {
-                    Text(
-                        text = "Class",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                    Text(
-                        text = "Low Data • Chat + Image Lessons",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
+            Spacer(modifier = Modifier.height(14.dp))
 
-            // Header Action Buttons
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (isAdmin) {
-                    OutlinedButton(
-                        onClick = { showAdminTeacherApplicationsDialog = true },
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                        modifier = Modifier.testTag("top_admin_portal_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.AdminPanelSettings,
-                            contentDescription = "Admin Portal",
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Admin",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-
-                // Create Class button (Conditionally shown ONLY for approved teachers based on user's 'role' in Firestore, or admins)
-                if (isApprovedTeacher) {
-                    Button(
-                        onClick = {
-                            showCreateClassDialog = true
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = LenoPrimary),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                        modifier = Modifier.testTag("top_create_class_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Create Class",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Quick action chips: [Content Creator] [JAMB Lesson] as requested
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            val isContentCreatorActive = selectedFilter == "Content Creator"
-            val isJambActive = selectedFilter == "JAMB Lesson"
-
-            // Content Creator chip
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = if (isContentCreatorActive) LenoPrimary else LenoPrimaryVeryLight,
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    if (isContentCreatorActive) LenoPrimary else LenoPrimaryLight
-                ),
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable {
-                        selectedFilter = if (isContentCreatorActive) "All" else "Content Creator"
-                    }
-                    .testTag("chip_content_creator")
+            // Top Header: Class title + Action buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
+                    modifier = Modifier.weight(1f, fill = false)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Star,
-                        contentDescription = "Content Creator",
-                        tint = if (isContentCreatorActive) Color.White else LenoPrimaryDark,
-                        modifier = Modifier.size(15.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Content Creator",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isContentCreatorActive) Color.White else LenoPrimaryDark
-                    )
-                }
-            }
-
-            // JAMB Lesson chip
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = if (isJambActive) LenoPrimary else LenoPrimaryVeryLight,
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    if (isJambActive) LenoPrimary else LenoPrimaryLight
-                ),
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable {
-                        selectedFilter = if (isJambActive) "All" else "JAMB Lesson"
+                    Box(
+                        modifier = Modifier
+                            .size(if (isSmall) 34.dp else 40.dp)
+                            .clip(CircleShape)
+                            .background(LenoPrimaryLight),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.School,
+                            contentDescription = "Class",
+                            tint = LenoPrimaryDark,
+                            modifier = Modifier.size(if (isSmall) 20.dp else 24.dp)
+                        )
                     }
-                    .testTag("chip_jamb_lesson")
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Book,
-                        contentDescription = "JAMB Lesson",
-                        tint = if (isJambActive) Color.White else LenoPrimaryDark,
-                        modifier = Modifier.size(15.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "JAMB Lesson",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isJambActive) Color.White else LenoPrimaryDark
-                    )
+                    Spacer(modifier = Modifier.width(if (isSmall) 6.dp else 10.dp))
+                    Column {
+                        Text(
+                            text = "Class",
+                            style = MaterialTheme.typography.headlineSmall.copy(fontSize = if (isSmall) 20.sp else 24.sp),
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Text(
+                            text = if (isSmall) "Lessons" else "Low Data • Chat + Image Lessons",
+                            fontSize = if (isSmall) 11.sp else 12.sp,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(4.dp))
+
+                // Header Action Buttons
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // Contact Support Quick Access
+                    IconButton(
+                        onClick = { showContactSupportDialog = true },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(LenoPrimaryVeryLight)
+                            .testTag("class_top_support_btn")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.HeadsetMic,
+                            contentDescription = "Contact Support",
+                            tint = LenoPrimaryDark,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    if (isAdmin) {
+                        OutlinedButton(
+                            onClick = { showAdminTeacherApplicationsDialog = true },
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = if (isSmall) 6.dp else 10.dp, vertical = 6.dp),
+                            modifier = Modifier.testTag("top_admin_portal_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AdminPanelSettings,
+                                contentDescription = "Admin Portal",
+                                modifier = Modifier.size(16.dp)
+                            )
+                            if (!isSmall) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Admin",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    // Create Class button (Conditionally shown ONLY for approved teachers based on user's 'role' in Firestore, or admins)
+                    if (isApprovedTeacher) {
+                        Button(
+                            onClick = {
+                                showCreateClassDialog = true
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = LenoPrimary),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = if (isSmall) 8.dp else 12.dp, vertical = 6.dp),
+                            modifier = Modifier.testTag("top_create_class_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(if (isSmall) 2.dp else 4.dp))
+                            Text(
+                                text = if (isSmall) "Create" else "Create Class",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
             }
-        }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        // Search Bar: "Search lessons, subjects or skills..."
+        // Clean, rounded Search Bar
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
@@ -421,97 +375,6 @@ fun ClassScreen(
                 .fillMaxWidth()
                 .testTag("class_search_input")
         )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Low Data Indicator Banner
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surface,
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Image,
-                    contentDescription = "Low data",
-                    tint = LenoPrimary,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "Low Data • Chat + Image only",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                Text(
-                    text = "Lightweight",
-                    fontSize = 11.sp,
-                    color = LenoPrimaryDark,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-
-        // Early Launch 100% Free Access Banner
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = LenoPrimaryVeryLight,
-            border = androidx.compose.foundation.BorderStroke(1.dp, LenoPrimary.copy(alpha = 0.5f)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(30.dp)
-                        .clip(CircleShape)
-                        .background(LenoPrimary),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = "Free Access",
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "🎉 Early Launch — All Classes Free!",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = LenoPrimaryDark
-                    )
-                    Text(
-                        text = "Join any class at zero cost while Leno is new. Learn freely!",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        lineHeight = 15.sp
-                    )
-                }
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = LenoPrimary,
-                    contentColor = Color.White
-                ) {
-                    Text(
-                        text = "FREE",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                }
-            }
-        }
 
         Spacer(modifier = Modifier.height(10.dp))
 
@@ -675,6 +538,7 @@ fun ClassScreen(
             }
         }
     }
+}
 
     // Dialogs & Modals
 
@@ -788,13 +652,24 @@ fun ClassScreen(
             lessons = groupLessons,
             questions = groupQuestions,
             enrolledStudents = enrolledStudents,
-            onAskQuestion = { qText ->
-                viewModel.askQuestionInClass(groupClass.classId, qText) { success, msg ->
+            onAskQuestion = { qText, audioUrl, durationSec ->
+                viewModel.askQuestionInClass(
+                    classId = groupClass.classId,
+                    questionText = qText,
+                    audioUrl = audioUrl,
+                    audioDurationSeconds = durationSec
+                ) { success, msg ->
                     Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                 }
             },
-            onAnswerQuestion = { qId, ansText ->
-                viewModel.answerQuestionInClass(qId, ansText) { success, msg ->
+            onAnswerQuestion = { qId, ansText, audioUrl, durationSec ->
+                viewModel.answerQuestionInClass(
+                    classId = groupClass.classId,
+                    questionId = qId,
+                    answerText = ansText,
+                    audioUrl = audioUrl,
+                    audioDurationSeconds = durationSec
+                ) { success, msg ->
                     Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                 }
             },
@@ -859,6 +734,18 @@ fun ClassScreen(
         AdminTeacherApplicationsDialog(
             viewModel = viewModel,
             onDismiss = { showAdminTeacherApplicationsDialog = false }
+        )
+    }
+
+    if (showContactSupportDialog) {
+        ContactSupportDialog(
+            viewModel = viewModel,
+            currentUser = currentUser,
+            onDismiss = { showContactSupportDialog = false },
+            onOpenSupportChat = { chatId ->
+                showContactSupportDialog = false
+                onOpenSupportChat(chatId)
+            }
         )
     }
 }

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -121,65 +122,87 @@ fun DiscoverScreen(
     }
 
     var showAddContactDialog by remember { mutableStateOf(false) }
+    val isSmall = com.example.util.isSmallScreen()
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(16.dp)
+            .background(MaterialTheme.colorScheme.background),
+        contentAlignment = Alignment.TopCenter
     ) {
-        // Header
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .widthIn(max = com.example.util.MaxContentWidth)
+                .padding(horizontal = com.example.util.responsiveHorizontalPadding(), vertical = 12.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = if (isSearching) "Search Results" else "Contacts & Connections",
-                    style = MaterialTheme.typography.displayLarge.copy(fontSize = 26.sp, fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                if (isFetchingUsers) {
-                    CircularProgressIndicator(
-                        modifier = Modifier
-                            .size(20.dp)
-                            .testTag("discover_fetching_indicator"),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.primary
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f, fill = false)
+                ) {
+                    Text(
+                        text = if (isSearching) {
+                            if (isSmall) "Results" else "Search Results"
+                        } else {
+                            if (isSmall) "Contacts" else "Contacts & Connections"
+                        },
+                        style = MaterialTheme.typography.displayLarge.copy(
+                            fontSize = if (isSmall) 20.sp else 26.sp,
+                            fontWeight = FontWeight.Bold
+                        ),
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onBackground
                     )
-                } else {
-                    IconButton(
-                        onClick = { viewModel.refreshUserData() },
-                        modifier = Modifier
-                            .size(32.dp)
-                            .testTag("discover_refresh_button")
-                    ) {
-                        Icon(
-                            Icons.Default.Refresh,
-                            contentDescription = "Refresh Users",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
+                    Spacer(modifier = Modifier.width(if (isSmall) 4.dp else 8.dp))
+                    if (isFetchingUsers) {
+                        CircularProgressIndicator(
+                            modifier = Modifier
+                                .size(if (isSmall) 16.dp else 20.dp)
+                                .testTag("discover_fetching_indicator"),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary
                         )
+                    } else {
+                        IconButton(
+                            onClick = { viewModel.refreshUserData() },
+                            modifier = Modifier
+                                .size(if (isSmall) 28.dp else 32.dp)
+                                .testTag("discover_refresh_button")
+                        ) {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = "Refresh Users",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(if (isSmall) 18.dp else 20.dp)
+                            )
+                        }
                     }
                 }
-            }
 
-            Button(
-                onClick = { showAddContactDialog = true },
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                ),
-                modifier = Modifier.testTag("discover_add_contact_btn")
-            ) {
-                Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Add Contact", fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.width(6.dp))
+
+                Button(
+                    onClick = { showAddContactDialog = true },
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = if (isSmall) 8.dp else 14.dp, vertical = 6.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    modifier = Modifier.testTag("discover_add_contact_btn")
+                ) {
+                    Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(if (isSmall) 16.dp else 18.dp))
+                    Spacer(modifier = Modifier.width(if (isSmall) 2.dp else 4.dp))
+                    Text(if (isSmall) "Add" else "Add Contact", fontWeight = FontWeight.SemiBold, fontSize = if (isSmall) 12.sp else 14.sp)
+                }
             }
-        }
 
         Text(
             text = if (isSearching) "Showing users matching \"$searchQuery\"" else "Your chats, connections, and discovered contacts on Leno",
@@ -192,7 +215,7 @@ fun DiscoverScreen(
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { viewModel.searchQuery.value = it },
-            placeholder = { Text("Search by Leno ID, @username, or phone...") },
+            placeholder = { Text("Search by name, @username, or Leno ID...") },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
             trailingIcon = {
                 if (searchQuery.isNotEmpty()) {
@@ -363,6 +386,7 @@ fun DiscoverScreen(
             }
         }
     }
+}
 
     if (showAddContactDialog) {
         AddContactDialog(

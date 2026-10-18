@@ -142,7 +142,7 @@ fun LessonViewerDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Lesson Content Card
+                // Lesson Content Card with Rich Blocks
                 Card(
                     shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -150,11 +150,9 @@ fun LessonViewerDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
-                        Text(
-                            text = lesson.content,
-                            fontSize = 13.sp,
-                            lineHeight = 20.sp,
-                            color = MaterialTheme.colorScheme.onSurface
+                        com.example.ui.components.lesson.LessonContentRenderer(
+                            content = lesson.content,
+                            isInteractive = true
                         )
                     }
                 }

@@ -50,6 +50,12 @@ data class UserEntity(
     val isApprovedTeacher: Boolean
         get() = isTeacher
 
+    val isPendingTeacher: Boolean
+        get() = teacherStatus.equals("PENDING", ignoreCase = true)
+
+    val isRejectedTeacher: Boolean
+        get() = teacherStatus.equals("REJECTED", ignoreCase = true)
+
     val isStudent: Boolean
         get() = !isTeacher && !isAdmin && !isOwner
 

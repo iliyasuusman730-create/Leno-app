@@ -484,5 +484,18 @@ class AudioRecorderHelper(private val context: Context) {
                 false
             }
         }
+
+        fun convertAudioFileToBase64DataUrl(file: File): String {
+            return try {
+                if (!file.exists() || file.length() <= 0L) return file.absolutePath
+                val bytes = file.readBytes()
+                val mime = if (file.name.endsWith(".wav", ignoreCase = true)) "audio/wav" else "audio/mp4"
+                val base64String = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                "data:$mime;base64,$base64String"
+            } catch (e: Exception) {
+                Log.e("AudioRecorderHelper", "Error encoding audio to base64: ${e.message}")
+                file.absolutePath
+            }
+        }
     }
 }

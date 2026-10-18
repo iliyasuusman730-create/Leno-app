@@ -29,8 +29,21 @@ class AccountBackupStore(context: Context) {
             var modified = false
             for (i in 0 until array.length()) {
                 val obj = array.getJSONObject(i)
-                val uid = obj.optString("userId", "")
-                if (uid == "test_dummy_user_to_purge") {
+                val uid = obj.optString("userId", "").trim()
+                val uname = obj.optString("username", "").trim().lowercase()
+                val email = obj.optString("email", "").trim().lowercase()
+                val isMock = uid.startsWith("user_len_") ||
+                    uid.startsWith("applicant_") ||
+                    uid.startsWith("demo_") ||
+                    uid.startsWith("mock_") ||
+                    uid == "test_dummy_user_to_purge" ||
+                    uname in listOf("bello_maths", "ibrahim_quran", "fatima_english", "usman_skills") ||
+                    (email.startsWith("demo") && email.endsWith("@leno.chat")) ||
+                    email.startsWith("instructor@") ||
+                    email.startsWith("quran@") ||
+                    email.startsWith("english@") ||
+                    email.startsWith("skills@")
+                if (isMock && uid != "official_leno_account") {
                     modified = true
                     continue
                 }
@@ -39,7 +52,7 @@ class AccountBackupStore(context: Context) {
             if (modified) {
                 prefs.edit().putString(KEY_ACCOUNTS, updatedArray.toString()).commit()
                 cachedAccounts = null
-                Log.i(TAG, "Purged dummy test accounts from AccountBackupStore.")
+                Log.i(TAG, "Purged mock test accounts from AccountBackupStore.")
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to purge dummy accounts: ${e.message}")

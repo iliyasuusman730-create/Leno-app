@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -46,6 +47,7 @@ import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.HeadsetMic
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoCamera
@@ -103,6 +105,7 @@ import com.example.data.entity.ClassEntity
 import com.example.data.entity.LessonEntity
 import com.example.ui.components.AdminTeacherApplicationsDialog
 import com.example.ui.components.ClassDetailDialog
+import com.example.ui.components.ContactSupportDialog
 import com.example.ui.components.CreateClassDialog
 import com.example.ui.components.LenoAvatar
 import com.example.ui.components.TeacherApplicationDialog
@@ -116,7 +119,8 @@ fun ProfileScreen(
     viewModel: LenoViewModel,
     onNavigateToProtectAccount: () -> Unit = {},
     onLogout: () -> Unit = {},
-    onOpenChat: (String) -> Unit = {}
+    onOpenChat: (String) -> Unit = {},
+    onOpenSupportChat: (String) -> Unit = onOpenChat
 ) {
     val currentUser by viewModel.currentUser.collectAsState()
     val isFetchingUsers by viewModel.isFetchingUserData.collectAsState()
@@ -142,6 +146,7 @@ fun ProfileScreen(
     var showTeacherAppDialog by remember { mutableStateOf(false) }
     var showAdminApplicationsDialog by remember { mutableStateOf(false) }
     var showCreateClassDialog by remember { mutableStateOf(false) }
+    var showContactSupportDialog by remember { mutableStateOf(false) }
     var manageClassesExpanded by remember { mutableStateOf(false) }
     var selectedClassForDetail by remember { mutableStateOf<ClassEntity?>(null) }
     var showBankSettlementDialog by remember { mutableStateOf(false) }
@@ -248,62 +253,71 @@ fun ProfileScreen(
         }
     }
 
-    Column(
+    val isSmallScreenProfile = com.example.util.isSmallScreen()
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .verticalScroll(scrollState)
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .background(MaterialTheme.colorScheme.background),
+        contentAlignment = Alignment.TopCenter
     ) {
-        // Header Title
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .widthIn(max = com.example.util.MaxContentWidth)
+                .verticalScroll(scrollState)
+                .padding(horizontal = com.example.util.responsiveHorizontalPadding(), vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "My Profile",
-                    style = MaterialTheme.typography.displayLarge.copy(fontSize = 28.sp, fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                if (isFetchingUsers) {
-                    CircularProgressIndicator(
-                        modifier = Modifier
-                            .size(20.dp)
-                            .testTag("profile_fetching_indicator"),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.primary
+            // Header Title
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "My Profile",
+                        style = MaterialTheme.typography.displayLarge.copy(fontSize = com.example.util.responsiveTitleSize(22.sp, 28.sp), fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onBackground
                     )
-                } else {
-                    IconButton(
-                        onClick = { viewModel.refreshUserData() },
-                        modifier = Modifier
-                            .size(32.dp)
-                            .testTag("profile_refresh_button")
-                    ) {
-                        Icon(
-                            Icons.Default.Refresh,
-                            contentDescription = "Refresh Profile",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
+                    Spacer(modifier = Modifier.width(if (isSmallScreenProfile) 4.dp else 8.dp))
+                    if (isFetchingUsers) {
+                        CircularProgressIndicator(
+                            modifier = Modifier
+                                .size(if (isSmallScreenProfile) 16.dp else 20.dp)
+                                .testTag("profile_fetching_indicator"),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary
                         )
+                    } else {
+                        IconButton(
+                            onClick = { viewModel.refreshUserData() },
+                            modifier = Modifier
+                                .size(if (isSmallScreenProfile) 28.dp else 32.dp)
+                                .testTag("profile_refresh_button")
+                        ) {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = "Refresh Profile",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(if (isSmallScreenProfile) 18.dp else 20.dp)
+                            )
+                        }
                     }
                 }
-            }
 
-            OutlinedButton(
-                onClick = { showEditDialog = true },
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.testTag("profile_edit_button")
-            ) {
-                Icon(Icons.Default.Edit, contentDescription = "Edit Profile", modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Edit Profile")
+                OutlinedButton(
+                    onClick = { showEditDialog = true },
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = if (isSmallScreenProfile) 8.dp else 16.dp, vertical = 8.dp),
+                    modifier = Modifier.testTag("profile_edit_button")
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = "Edit Profile", modifier = Modifier.size(if (isSmallScreenProfile) 16.dp else 18.dp))
+                    Spacer(modifier = Modifier.width(if (isSmallScreenProfile) 3.dp else 6.dp))
+                    Text(if (isSmallScreenProfile) "Edit" else "Edit Profile")
+                }
             }
-        }
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -820,8 +834,8 @@ fun ProfileScreen(
         val isTeacherProfile = user?.isTeacher == true || userTeacherRole?.isApprovedTeacher == true || userTeacherRole?.status == "Teacher" || userTeacherRole?.status == "Trusted Teacher" || userTeacherRole?.status == "APPROVED" || existingUserApp?.isApproved == true
         val teacherStatus = if (userTeacherRole?.isTrustedTeacher == true) "Trusted Teacher"
             else if (isTeacherProfile) "Approved Teacher"
-            else if (existingUserApp?.isPending == true || userTeacherRole?.isPending == true || userTeacherRole?.status == "PENDING") "Pending"
-            else if (existingUserApp?.isRejected == true || userTeacherRole?.isRejected == true || userTeacherRole?.status.equals("REJECTED", ignoreCase = true)) "REJECTED"
+            else if (existingUserApp?.isPending == true || userTeacherRole?.isPending == true || userTeacherRole?.status.equals("PENDING", ignoreCase = true) || user?.teacherStatus.equals("PENDING", ignoreCase = true)) "Pending"
+            else if (existingUserApp?.isRejected == true || userTeacherRole?.isRejected == true || userTeacherRole?.status.equals("REJECTED", ignoreCase = true) || user?.teacherStatus.equals("REJECTED", ignoreCase = true)) "REJECTED"
             else (userTeacherRole?.status ?: "Normal User")
         if (isTeacherProfile) {
             // Full Teacher Dashboard
@@ -1283,7 +1297,7 @@ fun ProfileScreen(
                     }
                 }
             }
-        } else if (teacherStatus == "Pending" || userTeacherRole?.status == "PENDING") {
+        } else if (teacherStatus.equals("Pending", ignoreCase = true) || teacherStatus.equals("PENDING", ignoreCase = true) || userTeacherRole?.isPending == true || userTeacherRole?.status.equals("PENDING", ignoreCase = true) || user?.teacherStatus.equals("PENDING", ignoreCase = true) || existingUserApp?.isPending == true) {
             // Pending application card with real-time verification and approval
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1608,6 +1622,67 @@ fun ProfileScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
+        // Help & Support Desk Card
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showContactSupportDialog = true }
+                .testTag("profile_contact_support_card"),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = androidx.compose.foundation.BorderStroke(1.dp, com.example.ui.theme.LenoPrimaryLight)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(com.example.ui.theme.LenoPrimaryVeryLight),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.HeadsetMic,
+                        contentDescription = "Contact Support",
+                        tint = com.example.ui.theme.LenoPrimary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(14.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Help & Contact Support",
+                            style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "24/7 Desk",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = com.example.ui.theme.LenoPrimary
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Submit tickets, get help with teacher applications, classes, FAQs, or chat with official Leno support.",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 16.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
         // Account & Logout Card
         var showLogoutConfirmDialog by remember { mutableStateOf(false) }
 
@@ -1675,6 +1750,7 @@ fun ProfileScreen(
             )
         }
     }
+}
 
     // Avatar Selection Options Dialog
     if (showAvatarOptionsDialog && user != null && user.isOfficial != true) {
@@ -2034,6 +2110,9 @@ fun ProfileScreen(
                     agreedToGuidelines = agreed
                 ) { success, msg ->
                     Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                    if (success) {
+                        showTeacherAppDialog = false
+                    }
                 }
             }
         )
@@ -2062,6 +2141,18 @@ fun ProfileScreen(
                 ) { success, msg ->
                     Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                 }
+            }
+        )
+    }
+
+    if (showContactSupportDialog) {
+        ContactSupportDialog(
+            viewModel = viewModel,
+            currentUser = currentUser,
+            onDismiss = { showContactSupportDialog = false },
+            onOpenSupportChat = { chatId ->
+                showContactSupportDialog = false
+                onOpenSupportChat(chatId)
             }
         )
     }

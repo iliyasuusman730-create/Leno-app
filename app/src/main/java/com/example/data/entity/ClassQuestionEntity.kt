@@ -12,7 +12,11 @@ data class ClassQuestionEntity(
     val senderLinoId: String,
     val senderRole: String = "STUDENT", // "STUDENT" or "TEACHER"
     val questionText: String,
+    val audioUrl: String? = null,
+    val audioDurationSeconds: Int = 0,
     val answerText: String = "",
+    val answerAudioUrl: String? = null,
+    val answerAudioDurationSeconds: Int = 0,
     val isAnswered: Boolean = false,
     val answeredAt: Long = 0L,
     val timestamp: Long = System.currentTimeMillis()

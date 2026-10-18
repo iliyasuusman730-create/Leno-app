@@ -14,6 +14,7 @@ import com.example.ui.screens.ChatScreen
 import com.example.ui.screens.MainScreenContainer
 import com.example.ui.screens.ProtectAccountScreen
 import com.example.ui.screens.SplashScreen
+import com.example.ui.screens.SupportChatScreen
 import com.example.ui.screens.UserProfileScreen
 import com.example.viewmodel.LenoViewModel
 
@@ -80,8 +81,15 @@ fun LenoNavGraph(
             MainScreenContainer(
                 viewModel = viewModel,
                 onOpenChat = { partnerId ->
-                    viewModel.markChatRead(partnerId)
-                    navController.navigate(Screen.ChatDetail.createRoute(partnerId))
+                    if (partnerId.startsWith("support") || partnerId.startsWith("local_support") || partnerId.startsWith("chat_")) {
+                        navController.navigate("support-chat/$partnerId")
+                    } else {
+                        viewModel.markChatRead(partnerId)
+                        navController.navigate(Screen.ChatDetail.createRoute(partnerId))
+                    }
+                },
+                onOpenSupportChat = { chatId ->
+                    navController.navigate("support-chat/$chatId")
                 },
                 onOpenProfile = { targetUserId ->
                     navController.navigate(Screen.UserProfile.createRoute(targetUserId))
@@ -142,6 +150,36 @@ fun LenoNavGraph(
         composable(route = Screen.LiveChat.route) {
             ChatScreen(
                 onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = "support-chat/{chatId}",
+            arguments = listOf(
+                navArgument("chatId") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
+            SupportChatScreen(
+                viewModel = viewModel,
+                chatId = chatId,
+                onBack = { navController.popBackStack() },
+                isOwnerMode = false
+            )
+        }
+
+        composable(
+            route = "/support-chat/{chatId}",
+            arguments = listOf(
+                navArgument("chatId") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
+            SupportChatScreen(
+                viewModel = viewModel,
+                chatId = chatId,
+                onBack = { navController.popBackStack() },
+                isOwnerMode = false
             )
         }
     }

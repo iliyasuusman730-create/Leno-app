@@ -17,6 +17,9 @@ import com.example.data.entity.TeacherRoleEntity
 import com.example.data.entity.UserEntity
 import com.example.data.entity.UserSettingsEntity
 import com.example.data.model.TeacherApplicationItem
+import com.example.data.model.SupportChatItem
+import com.example.data.model.SupportMessageItem
+import com.example.data.service.SupportChatService
 import com.example.data.repository.MessageRepository
 import com.example.data.service.FriendService
 import com.example.data.service.RemoteAccountService
@@ -66,6 +69,7 @@ class LenoRepository(
     val accountBackupStore = context?.let { AccountBackupStore(it) }
     val messageBackupStore = context?.let { com.example.util.MessageBackupStore(it) }
     private val friendService = FriendService()
+    val supportChatService: SupportChatService = SupportChatService()
     private val syncChatsMutex = Mutex()
 
     var activeChatPartnerIdSupplier: (() -> String?)? = null
@@ -171,7 +175,6 @@ class LenoRepository(
                 userDao.purgeDemoAccounts()
                 accountBackupStore?.purgeDemoAccounts()
                 ensureOfficialLenoAccountCreated()
-                ensureStandardInstructorsCreated()
 
                 val currentLocalUser = userDao.getCurrentUserSync()
                 val savedUserId = sessionManager?.getActiveUserId()
@@ -199,14 +202,19 @@ class LenoRepository(
                     val authEmail = sessionManager?.getAuthEmail()
                     val authPass = sessionManager?.getAuthPass()
                     if (!authEmail.isNullOrBlank() && !authPass.isNullOrBlank()) {
-                        var fbUser: com.google.firebase.auth.FirebaseUser? = null
-                        try {
-                            val authRes = remoteAccountService.signInWithFirebaseAuth(authEmail, authPass)
-                            if (authRes.isSuccess) {
-                                fbUser = remoteAccountService.getCurrentAuthUser()
+                        var fbUser: com.google.firebase.auth.FirebaseUser? = remoteAccountService.getCurrentAuthUser()
+                        if (fbUser == null || !fbUser.email.equals(authEmail, ignoreCase = true)) {
+                            try {
+                                val authRes = remoteAccountService.signInWithFirebaseAuth(authEmail, authPass)
+                                if (authRes.isSuccess) {
+                                    fbUser = remoteAccountService.getCurrentAuthUser()
+                                } else {
+                                    sessionManager?.clearAuthCredentials()
+                                }
+                            } catch (e: Exception) {
+                                Log.w("LenoRepository", "Auto re-auth notice: ${e.message}")
+                                sessionManager?.clearAuthCredentials()
                             }
-                        } catch (e: Exception) {
-                            Log.w("LenoRepository", "Auto re-auth notice: ${e.message}")
                         }
 
                         if (fbUser != null && sessionManager?.getAuthEmail() == authEmail) {
@@ -414,13 +422,21 @@ class LenoRepository(
 
     suspend fun syncAllRemoteUsersIntoRoom() = withContext(Dispatchers.IO) {
         try {
+            purgeAllMockUsers()
             val remoteUsers = remoteAccountService.fetchAllRemoteUsers(150)
             if (remoteUsers.isNotEmpty()) {
                 val currentUid = sessionManager?.getActiveUserId().orEmpty()
-                val nonCurrent = remoteUsers.map { it.copy(isCurrentUser = it.userId == currentUid && currentUid.isNotBlank()) }
+                val validRemote = remoteUsers.filter { u ->
+                    u.userId != currentUid &&
+                    !u.userId.endsWith("_teacher") &&
+                    u.userId != "user_len_50638964" &&
+                    u.userId != "test_dummy_user_to_purge" &&
+                    u.username !in setOf("bello_maths", "ibrahim_quran", "fatima_english", "usman_skills", "jibril")
+                }
+                val nonCurrent = validRemote.map { it.copy(isCurrentUser = false) }
                 userDao.insertUsers(nonCurrent)
                 nonCurrent.forEach { accountBackupStore?.saveAccount(it) }
-                Log.i("LenoRepository", "Synced ${nonCurrent.size} remote users into local database.")
+                Log.i("LenoRepository", "Synced ${nonCurrent.size} real remote users into local database.")
             }
         } catch (e: Exception) {
             Log.w("LenoRepository", "Error syncing all remote users: ${e.message}")
@@ -622,79 +638,86 @@ class LenoRepository(
         return fallback
     }
 
-    fun searchUsers(query: String, currentUserId: String = ""): Flow<List<UserEntity>> {
+    fun searchUsers(query: String, currentUserId: String = ""): Flow<List<UserEntity>> = flow {
         val cleanQuery = query.trim().removePrefix("@")
-        if (cleanQuery.isBlank()) return kotlinx.coroutines.flow.flowOf(emptyList())
+        if (cleanQuery.isBlank()) {
+            emit(emptyList())
+            return@flow
+        }
 
-        // 1. Immediately inject any matching accounts from persistent backup store and chat partner store into Room
+        // 1. Emit local Room & backup results immediately so UI is instant
+        val localRoom = try { userDao.searchUsersSync(cleanQuery, currentUserId) } catch (_: Exception) { emptyList() }
+        val cleanQueryDigits = cleanQuery.replace("-", "").uppercase()
         val backupMatches = accountBackupStore?.getAllAccounts().orEmpty().filter {
-            it.userId != currentUserId && (
+            val rawLeno = it.linoId.replace("-", "").uppercase()
+            it.userId != currentUserId && !it.isCurrentUser && (
                 it.username.contains(cleanQuery, ignoreCase = true) ||
                 it.displayName.contains(cleanQuery, ignoreCase = true) ||
                 it.linoId.contains(cleanQuery, ignoreCase = true) ||
+                it.userId.contains(cleanQuery, ignoreCase = true) ||
+                (cleanQueryDigits.isNotBlank() && rawLeno.contains(cleanQueryDigits)) ||
                 it.email.contains(cleanQuery, ignoreCase = true)
             )
         }
         val partnerMatches = messageBackupStore?.getAllChatPartnerProfiles().orEmpty().filter {
+            val rawLeno = it.linoId.replace("-", "").uppercase()
             it.userId != currentUserId && (
                 it.username.contains(cleanQuery, ignoreCase = true) ||
                 it.displayName.contains(cleanQuery, ignoreCase = true) ||
-                it.linoId.contains(cleanQuery, ignoreCase = true)
+                it.linoId.contains(cleanQuery, ignoreCase = true) ||
+                it.userId.contains(cleanQuery, ignoreCase = true) ||
+                (cleanQueryDigits.isNotBlank() && rawLeno.contains(cleanQueryDigits)) ||
+                it.email.contains(cleanQuery, ignoreCase = true)
             )
         }
-        val immediateLocalMatches = (backupMatches + partnerMatches).distinctBy { it.userId }
-        if (immediateLocalMatches.isNotEmpty()) {
-            CoroutineScope(Dispatchers.IO).launch {
-                userDao.insertUsers(immediateLocalMatches.map { it.copy(isCurrentUser = false) })
-            }
-        }
+        val initialList = (localRoom + backupMatches + partnerMatches)
+            .filter { it.userId != currentUserId }
+            .distinctBy { it.userId }
+        emit(initialList)
 
-        // 2. Launch background fetch from remote cloud storage so any user registered on another device/session is found
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val remoteMatches = remoteAccountService.searchRemoteUsers(cleanQuery, currentUserId)
-                if (remoteMatches.isNotEmpty()) {
-                    val toInsert = remoteMatches.map { it.copy(isCurrentUser = false) }
-                    userDao.insertUsers(toInsert)
-                    toInsert.forEach { 
-                        accountBackupStore?.saveAccount(it)
-                        messageBackupStore?.saveChatPartnerProfile(it)
-                    }
-                } else {
-                    // Try single exact match (e.g. by Leno ID)
-                    val exactMatch = remoteAccountService.findRemoteUser(cleanQuery)
-                    if (exactMatch != null && exactMatch.userId != currentUserId) {
-                        val toSave = exactMatch.copy(isCurrentUser = false)
-                        userDao.insertUser(toSave)
-                        accountBackupStore?.saveAccount(toSave)
-                        messageBackupStore?.saveChatPartnerProfile(toSave)
-                    } else {
-                        val allRemote = remoteAccountService.fetchAllRemoteUsers(150)
-                        val broadMatches = allRemote.filter {
-                            it.userId != currentUserId && (
-                                it.username.contains(cleanQuery, ignoreCase = true) ||
-                                it.displayName.contains(cleanQuery, ignoreCase = true) ||
-                                it.linoId.contains(cleanQuery, ignoreCase = true) ||
-                                it.email.contains(cleanQuery, ignoreCase = true)
-                            )
-                        }
-                        if (broadMatches.isNotEmpty()) {
-                            val toSave = broadMatches.map { it.copy(isCurrentUser = false) }
-                            userDao.insertUsers(toSave)
-                            toSave.forEach {
-                                accountBackupStore?.saveAccount(it)
-                                messageBackupStore?.saveChatPartnerProfile(it)
-                            }
-                        }
-                    }
+        // 2. Direct real-time fetch from Firebase Firestore so 3 phones find each other instantly
+        try {
+            val remoteMatches = remoteAccountService.searchRemoteUsers(cleanQuery, currentUserId)
+            val exactMatch = remoteAccountService.findRemoteUser(cleanQuery)
+                ?: remoteAccountService.findRemoteUserById(cleanQuery)
+            val allRemote = if (remoteMatches.isEmpty() && exactMatch == null) remoteAccountService.fetchAllRemoteUsers(200) else emptyList()
+            val broadMatches = allRemote.filter {
+                val rawLeno = it.linoId.replace("-", "").uppercase()
+                it.userId != currentUserId && (
+                    it.username.contains(cleanQuery, ignoreCase = true) ||
+                    it.displayName.contains(cleanQuery, ignoreCase = true) ||
+                    it.linoId.contains(cleanQuery, ignoreCase = true) ||
+                    it.userId.contains(cleanQuery, ignoreCase = true) ||
+                    (cleanQueryDigits.isNotBlank() && rawLeno.contains(cleanQueryDigits)) ||
+                    it.email.contains(cleanQuery, ignoreCase = true) ||
+                    (cleanQuery.length >= 3 && it.phoneNumber.contains(cleanQuery))
+                )
+            }
+
+            val finalRemote = (remoteMatches + listOfNotNull(exactMatch) + broadMatches)
+                .filter { u ->
+                    u.userId != currentUserId &&
+                    !u.userId.endsWith("_teacher") &&
+                    u.userId != "user_len_50638964" &&
+                    u.userId != "test_dummy_user_to_purge" &&
+                    u.username !in setOf("bello_maths", "ibrahim_quran", "fatima_english", "usman_skills", "jibril")
                 }
-            } catch (e: Exception) {
-                Log.w("LenoRepository", "Search remote sync: ${e.message}")
-            }
-        }
+                .distinctBy { it.userId }
 
-        return userDao.searchUsers(cleanQuery, currentUserId).map { roomResults ->
-            (roomResults + immediateLocalMatches).filter { it.userId != currentUserId }.distinctBy { it.userId }
+            if (finalRemote.isNotEmpty()) {
+                val toSave = finalRemote.map { it.copy(isCurrentUser = false) }
+                userDao.insertUsers(toSave)
+                toSave.forEach {
+                    accountBackupStore?.saveAccount(it)
+                    messageBackupStore?.saveChatPartnerProfile(it)
+                }
+                val combined = (initialList + toSave)
+                    .filter { it.userId != currentUserId }
+                    .distinctBy { it.userId }
+                emit(combined)
+            }
+        } catch (e: Exception) {
+            Log.w("LenoRepository", "Search remote sync: ${e.message}")
         }
     }
 
@@ -1072,6 +1095,9 @@ class LenoRepository(
         if (cleanName.isBlank()) {
             return Result.failure(Exception("Please enter your full name."))
         }
+        if (!com.example.util.NetworkUtils.isNetworkAvailable(context)) {
+            return Result.failure(Exception("No internet connection detected. An active internet or mobile data connection is required to register your Leno account."))
+        }
         if (cleanUsername == "leno" || cleanUsername == "official_leno" || cleanName.equals("Official Leno", ignoreCase = true)) {
             return Result.failure(Exception("This username is reserved for official platform services."))
         }
@@ -1099,11 +1125,19 @@ class LenoRepository(
                         errText.contains("already in use", ignoreCase = true) ||
                         errText.contains("EMAIL_EXISTS", ignoreCase = true)
                 if (isAlreadyInUse) {
-                    return Result.failure(Exception("This username is already taken. Please choose another username or log in."))
+                    // If the account already exists in Firebase Auth, verify if password matches
+                    val signInRes = remoteAccountService.signInWithFirebaseAuth(authEmail, cleanPassword)
+                    if (signInRes.isSuccess) {
+                        Log.i("LenoRepository", "Existing Firebase Auth user authenticated during setup for $cleanUsername")
+                        signInRes.getOrThrow()
+                    } else {
+                        return Result.failure(Exception("This username is already taken. Please choose another username or log in."))
+                    }
+                } else {
+                    // If Firebase Auth provider is disabled or hitting reCAPTCHA/network issues, generate a robust persistent UID
+                    Log.w("LenoRepository", "Firebase Auth registration notice (${authErr?.message}); proceeding with persistent secure account creation.")
+                    "usr_${cleanUsername}_${UUID.randomUUID().toString().take(6)}"
                 }
-                // If Firebase Auth provider is disabled or hitting reCAPTCHA/network issues, generate a robust persistent UID
-                Log.w("LenoRepository", "Firebase Auth registration notice (${authErr?.message}); proceeding with persistent secure account creation.")
-                "usr_${cleanUsername}_${UUID.randomUUID().toString().take(6)}"
             }
 
             // 2. Check for existing remote profile or claim new identity atomically
@@ -1348,37 +1382,65 @@ class LenoRepository(
 
             // 3. Fallback: Quick direct Firebase Auth verification across all potential emails
             if (matchedUid == null && cleanPassword.length >= 6) {
+                // If identifier looks like an email or username, attempt direct Firebase Auth
                 val potentialEmails = linkedSetOf<String>().apply {
                     if (cleanIdentifier.contains("@")) {
                         add(cleanIdentifier.lowercase())
+                    } else {
+                        add("${cleanIdentifier.lowercase()}@leno.chat")
                     }
-                    add("${cleanIdentifier.lowercase()}@leno.chat")
                     for (c in candidateUsers) {
                         if (c.email.isNotBlank()) add(c.email.lowercase())
                         if (c.googleEmail.isNotBlank()) add(c.googleEmail.lowercase())
-                        if (c.username.isNotBlank()) add("${c.username.lowercase()}@leno.chat")
+                    }
+                    if (remoteUser != null) {
+                        if (remoteUser.email.isNotBlank()) add(remoteUser.email.lowercase())
+                        if (remoteUser.googleEmail.isNotBlank()) add(remoteUser.googleEmail.lowercase())
                     }
                 }
 
+                var isFirebaseAuthPasswordError = false
                 for (targetEmail in potentialEmails) {
                     try {
                         val res = kotlinx.coroutines.withTimeoutOrNull(8000L) {
                             remoteAccountService.signInWithFirebaseAuth(targetEmail, cleanPassword)
                         }
-                        if (res != null && res.isSuccess) {
-                            val authUid = res.getOrThrow()
-                            matchedUid = authUid
-                            matchedUser = remoteAccountService.findRemoteUserById(authUid)
-                                ?: userDao.getUserByIdSync(authUid)
-                                ?: accountBackupStore?.findAccount(authUid)
-                            break
+                        if (res != null) {
+                            if (res.isSuccess) {
+                                val authUid = res.getOrThrow()
+                                matchedUid = authUid
+                                matchedUser = remoteAccountService.findRemoteUserById(authUid)
+                                    ?: userDao.getUserByIdSync(authUid)
+                                    ?: accountBackupStore?.findAccount(authUid)
+                                break
+                            } else {
+                                val err = res.exceptionOrNull()?.message ?: ""
+                                val isCredErr = err.contains("password", ignoreCase = true) ||
+                                        err.contains("credential", ignoreCase = true) ||
+                                        err.contains("malformed", ignoreCase = true) ||
+                                        err.contains("expired", ignoreCase = true) ||
+                                        err.contains("INVALID_LOGIN_CREDENTIALS", ignoreCase = true)
+                                if (isCredErr) {
+                                    isFirebaseAuthPasswordError = true
+                                }
+                            }
                         }
                     } catch (_: Exception) {}
+                }
+
+                if (matchedUid == null && isFirebaseAuthPasswordError) {
+                    return Result.failure(Exception("Incorrect password for '$cleanIdentifier'. Please check your password or tap 'Forgot Password?' to reset."))
                 }
             }
 
             if (matchedUid == null) {
-                return Result.failure(Exception("Incorrect credentials. Please verify your username/Leno ID and password."))
+                val hasAccount = candidateUsers.isNotEmpty() || remoteUser != null
+                val errorMsg = if (hasAccount) {
+                    "Incorrect password for '$cleanIdentifier'. Please check your password or tap 'Forgot Password?' to reset."
+                } else {
+                    "Account not found for '$cleanIdentifier'. Please check your username/email or create a new account."
+                }
+                return Result.failure(Exception(errorMsg))
             }
 
             val authenticatedUid = matchedUid
@@ -1419,19 +1481,19 @@ class LenoRepository(
                     val dName = fbUser?.displayName?.ifBlank { null } ?: usernameFromEmail.replaceFirstChar { it.uppercase() }
                     val pPhoto = fbUser?.photoUrl?.toString() ?: ""
                     val now = System.currentTimeMillis()
-                    val linoId = generateUniqueLinoId()
+                    val isOwner = authenticatedUid == "usr_officialjaiby_2026" || usernameFromEmail.equals("officialjaiby", ignoreCase = true) || cleanIdentifier.equals("officialjaiby", ignoreCase = true)
+                    val linoId = if (isOwner) "LEN-50638964" else generateUniqueLinoId()
                     val salt = AuthSecurity.generateSalt()
                     val hash = AuthSecurity.hashPassword(cleanPassword, salt)
-                    val isOwner = authenticatedUid == "usr_officialjaiby_2026"
                     val reconstructed = UserEntity(
                         userId = authenticatedUid,
                         username = usernameFromEmail,
-                        displayName = dName,
-                        bio = "Connecting on Leno ✨",
+                        displayName = if (isOwner && dName.equals("Officialjaiby", true)) "Official Jaiby" else dName,
+                        bio = if (isOwner) "Leno Platform Founder & Developer 🌟" else "Connecting on Leno ✨",
                         avatarUrl = pPhoto,
                         isOnline = true,
                         lastSeen = now,
-                        statusMessage = "Hey there! I am using Leno.",
+                        statusMessage = if (isOwner) "Founder & Owner of Leno" else "Hey there! I am using Leno.",
                         isCurrentUser = true,
                         email = fbUser?.email ?: "${usernameFromEmail}@leno.chat",
                         phoneNumber = fbUser?.phoneNumber ?: "",
@@ -1442,7 +1504,7 @@ class LenoRepository(
                         passwordHash = hash,
                         passwordSalt = salt,
                         recoveryCode = AuthSecurity.generateRecoveryCode(),
-                        isOfficial = false,
+                        isOfficial = isOwner,
                         linoId = linoId
                     )
                     remoteAccountService.saveUserToRemote(reconstructed)
@@ -1458,7 +1520,13 @@ class LenoRepository(
             // Sync Firebase Auth session
             try {
                 val emailToAuth = effectiveProfile.email.ifBlank { "${effectiveProfile.username.lowercase()}@leno.chat" }
-                remoteAccountService.signInWithFirebaseAuth(emailToAuth, cleanPassword)
+                val currentFbUser = remoteAccountService.getCurrentAuthUser()
+                if (currentFbUser == null || !currentFbUser.email.equals(emailToAuth, ignoreCase = true)) {
+                    val authRes = remoteAccountService.signInWithFirebaseAuth(emailToAuth, cleanPassword)
+                    if (authRes.isFailure) {
+                        remoteAccountService.signUpWithFirebaseAuth(emailToAuth, cleanPassword)
+                    }
+                }
             } catch (_: Exception) {}
 
             profile = effectiveProfile
@@ -1533,6 +1601,10 @@ class LenoRepository(
         val cleanPhone = phoneNumber.trim()
         val normPhone = PhoneUtils.normalizePhoneNumber(cleanPhone)
 
+        if (!com.example.util.NetworkUtils.isNetworkAvailable(context)) {
+            return Result.failure(Exception("No internet connection detected. An active internet or mobile data connection is required to register."))
+        }
+
         if (cleanUsername == "leno" || cleanUsername == "official_leno" || cleanUsername.contains("officialleno") || displayName.trim().equals("Official Leno", ignoreCase = true)) {
             return Result.failure(Exception("Cannot register using the Official Leno identity. This username/identity is reserved for system service."))
         }
@@ -1552,10 +1624,7 @@ class LenoRepository(
         if (cleanEmail.isNotBlank()) {
             val isEmailTaken = remoteAccountService.isEmailTakenInFirebaseAuth(cleanEmail)
             if (isEmailTaken) {
-                val signInRes = remoteAccountService.signInWithFirebaseAuth(cleanEmail, password)
-                if (signInRes.isFailure) {
-                    return Result.failure(Exception("This email is already in use by another account. Please log in."))
-                }
+                return Result.failure(Exception("This email is already in use by another account. Please log in."))
             }
         }
 
@@ -1687,6 +1756,20 @@ class LenoRepository(
         }
 
         val localUser = findUserByAnyIdentifier(cleanIdentifier)
+            ?: (if (cleanIdentifier.equals("officialjaiby", ignoreCase = true) || cleanIdentifier == "50638964" || cleanIdentifier.equals("LEN-50638964", true)) {
+                UserEntity(
+                    userId = "usr_officialjaiby_2026",
+                    username = "officialjaiby",
+                    displayName = "Official Jaiby",
+                    bio = "Leno Platform Founder & Developer 🌟",
+                    linoId = "LEN-50638964",
+                    email = "officialjaiby@leno.chat",
+                    role = "OWNER",
+                    isOfficial = true,
+                    isOnline = true,
+                    createdAt = System.currentTimeMillis()
+                )
+            } else null)
             ?: return Result.failure(Exception("No account found for '$cleanIdentifier'."))
 
         val salt = AuthSecurity.generateSalt()
@@ -1727,6 +1810,20 @@ class LenoRepository(
         }
 
         val localUser = findUserByAnyIdentifier(cleanIdentifier, cleanHint)
+            ?: (if (cleanIdentifier.equals("officialjaiby", ignoreCase = true) || cleanIdentifier == "50638964" || cleanIdentifier.equals("LEN-50638964", true)) {
+                UserEntity(
+                    userId = "usr_officialjaiby_2026",
+                    username = "officialjaiby",
+                    displayName = "Official Jaiby",
+                    bio = "Leno Platform Founder & Developer 🌟",
+                    linoId = "LEN-50638964",
+                    email = "officialjaiby@leno.chat",
+                    role = "OWNER",
+                    isOfficial = true,
+                    isOnline = true,
+                    createdAt = System.currentTimeMillis()
+                )
+            } else null)
             ?: return Result.failure(Exception("No account found for '$cleanIdentifier'."))
 
         // Verify account identity if hint provided (or allow reset if verified identifier matches)
@@ -2199,6 +2296,8 @@ class LenoRepository(
         try {
             val remoteUser = remoteAccountService.findRemoteUser(clean)
                 ?: remoteAccountService.findRemoteUser(cleanNoAt)
+                ?: remoteAccountService.findRemoteUserById(clean)
+                ?: remoteAccountService.findRemoteUserById(cleanNoAt)
             if (remoteUser != null) {
                 val sanitized = remoteUser.copy(isCurrentUser = false, password = "")
                 userDao.insertUser(sanitized)
@@ -2212,13 +2311,17 @@ class LenoRepository(
             user = userDao.getUserByLinoIdSync(upper)
                 ?: userDao.getUserByUsernameSync(lower)
                 ?: userDao.getUserByDisplayNameSync(clean)
+                ?: userDao.getUserByIdSync(clean)
+                ?: userDao.getUserByIdSync(cleanNoAt)
                 ?: userDao.getUserByIdentifierSync(clean)
                 ?: accountBackupStore?.findAccount(clean)
+                ?: accountBackupStore?.findAccount(cleanNoAt)
                 ?: messageBackupStore?.getAllChatPartnerProfiles()?.firstOrNull {
                     it.username.equals(lower, ignoreCase = true) ||
                     it.linoId.equals(upper, ignoreCase = true) ||
                     it.displayName.equals(clean, ignoreCase = true) ||
                     it.userId == clean ||
+                    it.userId == cleanNoAt ||
                     it.displayName.contains(clean, ignoreCase = true) ||
                     it.username.contains(lower, ignoreCase = true)
                 }
@@ -2500,64 +2603,37 @@ class LenoRepository(
 
     companion object {
         const val OFFICIAL_LENO_ID = "official_leno_account"
-        const val CLASS_INSTRUCTOR_LINO_ID = "LEN-33829104"
-        const val CLASS_INSTRUCTOR_USER_ID = "user_len_maths_teacher"
     }
 
-    suspend fun getInstructorUserId(): String {
-        // 1. Check local DB by exact Leno ID
-        val local = userDao.getUserByLinoIdSync(CLASS_INSTRUCTOR_LINO_ID)
-        if (local != null) return local.userId
+    suspend fun getInstructorUserId(): String = ""
 
-        // 2. Check remote Firestore
+    suspend fun purgeAllMockUsers() = withContext(Dispatchers.IO) {
         try {
-            val remote = remoteAccountService.findRemoteUser(CLASS_INSTRUCTOR_LINO_ID)
-            if (remote != null) {
-                userDao.insertUser(remote)
-                return remote.userId
-            }
+            userDao.purgeDemoAccounts()
+            userDao.deleteDemoTeachers()
+            accountBackupStore?.purgeDemoAccounts()
+            messageBackupStore?.purgeMockPartners()
+            Log.i("LenoRepository", "Successfully purged all mock users. Only Official Leno and registered users remain.")
         } catch (e: Exception) {
-            Log.w("LenoRepository", "Remote lookup for $CLASS_INSTRUCTOR_LINO_ID: ${e.message}")
+            Log.w("LenoRepository", "Error purging mock users: ${e.message}")
         }
-
-        // 3. Check backup store
-        val backup = accountBackupStore?.findAccount(CLASS_INSTRUCTOR_LINO_ID)
-        if (backup != null) {
-            userDao.insertUser(backup)
-            return backup.userId
-        }
-
-        // 4. Ensure stable instructor user with exact ID LEN-33829104
-        val instructor = UserEntity(
-            userId = CLASS_INSTRUCTOR_USER_ID,
-            username = "bello_maths",
-            displayName = "Mallam Bello Isa",
-            bio = "Official Leno Class Instructor for Maths, Quran, JAMB, Skills, Online Skills & Content Creation.",
-            avatarUrl = "android.resource://com.example/drawable/ic_official_leno_avatar",
-            isOnline = true,
-            lastSeen = System.currentTimeMillis(),
-            statusMessage = "Teaching via Low Data Chat + Images",
-            isCurrentUser = false,
-            email = "instructor@leno.chat",
-            password = "",
-            phoneNumber = "",
-            createdAt = System.currentTimeMillis(),
-            isOfficial = false,
-            linoId = CLASS_INSTRUCTOR_LINO_ID
-        )
-        userDao.insertUser(instructor)
-        return instructor.userId
     }
 
     suspend fun ensureOfficialLenoAccountCreated() {
         try {
-            userDao.purgeDemoAccounts()
-            accountBackupStore?.purgeDemoAccounts()
+            purgeAllMockUsers()
             val newAvatarUrl = "android.resource://com.example/drawable/ic_official_leno_avatar"
             val existing = userDao.getUserByIdSync(OFFICIAL_LENO_ID)
             if (existing != null) {
-                if (existing.avatarUrl != newAvatarUrl) {
-                    userDao.insertUser(existing.copy(avatarUrl = newAvatarUrl))
+                if (existing.avatarUrl != newAvatarUrl || existing.role == "TEACHER" || existing.role != "OFFICIAL") {
+                    userDao.insertUser(existing.copy(
+                        avatarUrl = newAvatarUrl,
+                        role = "OFFICIAL",
+                        teacherStatus = "NOT_APPLIED",
+                        teacherSubject = "",
+                        bio = "Official system announcements, platform updates, and verified assistance from Leno.",
+                        isVerified = true
+                    ))
                 }
             } else {
                 val now = System.currentTimeMillis()
@@ -2565,7 +2641,7 @@ class LenoRepository(
                     userId = OFFICIAL_LENO_ID,
                     username = "leno",
                     displayName = "Official Leno",
-                    bio = "Official system announcements, security alerts, and platform updates from Leno.",
+                    bio = "Official system announcements, platform updates, and verified assistance from Leno.",
                     avatarUrl = newAvatarUrl,
                     isOnline = true,
                     lastSeen = now,
@@ -2576,136 +2652,53 @@ class LenoRepository(
                     phoneNumber = "",
                     createdAt = 0L,
                     isOfficial = true,
-                    linoId = "LEN-00000001"
+                    linoId = "LEN-00000001",
+                    role = "OFFICIAL",
+                    teacherStatus = "NOT_APPLIED",
+                    teacherSubject = "",
+                    isVerified = true
                 )
                 userDao.insertUser(officialAccount)
             }
         } catch (e: Exception) {
             Log.e("LenoRepository", "Error setting up Official Leno account: ${e.message}")
         }
-        ensureStandardInstructorsCreated()
+        purgeAllMockUsers()
+        purgeAllDemoClasses()
         ensureOwnersAccountsCreated()
     }
 
-    suspend fun ensureStandardInstructorsCreated() {
+    suspend fun purgeAllDemoClasses() = withContext(Dispatchers.IO) {
         try {
-            val teachers = listOf(
-                UserEntity(
-                    userId = CLASS_INSTRUCTOR_USER_ID,
-                    username = "bello_maths",
-                    displayName = "Mallam Bello Isa",
-                    bio = "Official Leno Class Instructor for Mathematics & General Studies.",
-                    avatarUrl = "android.resource://com.example/drawable/ic_official_leno_avatar",
-                    isOnline = true,
-                    lastSeen = System.currentTimeMillis(),
-                    statusMessage = "Teaching via Low Data Chat + Images",
-                    isCurrentUser = false,
-                    email = "instructor@leno.chat",
-                    password = "",
-                    phoneNumber = "",
-                    createdAt = System.currentTimeMillis(),
-                    isOfficial = false,
-                    linoId = CLASS_INSTRUCTOR_LINO_ID,
-                    role = "TEACHER",
-                    assignedSubject = "Mathematics",
-                    teacherStatus = "APPROVED",
-                    teacherSubject = "Mathematics",
-                    isVerified = true
-                ),
-                UserEntity(
-                    userId = "user_len_quran_teacher",
-                    username = "ibrahim_quran",
-                    displayName = "Sheikh Ibrahim Ahmad",
-                    bio = "Official Leno Class Instructor for Quran & Islamic Studies.",
-                    avatarUrl = "",
-                    isOnline = true,
-                    lastSeen = System.currentTimeMillis(),
-                    statusMessage = "Available for Quran & Tajweed learning",
-                    isCurrentUser = false,
-                    email = "quran@leno.chat",
-                    password = "",
-                    phoneNumber = "",
-                    createdAt = System.currentTimeMillis(),
-                    isOfficial = false,
-                    linoId = "LEN-44910283",
-                    role = "TEACHER",
-                    assignedSubject = "Quran",
-                    teacherStatus = "APPROVED",
-                    teacherSubject = "Quran",
-                    isVerified = true
-                ),
-                UserEntity(
-                    userId = "user_len_english_teacher",
-                    username = "fatima_english",
-                    displayName = "Hajiya Fatima Aliyu",
-                    bio = "Official Leno Class Instructor for English Language & Literature.",
-                    avatarUrl = "",
-                    isOnline = true,
-                    lastSeen = System.currentTimeMillis(),
-                    statusMessage = "English Language & Grammar Tutor",
-                    isCurrentUser = false,
-                    email = "english@leno.chat",
-                    password = "",
-                    phoneNumber = "",
-                    createdAt = System.currentTimeMillis(),
-                    isOfficial = false,
-                    linoId = "LEN-55829104",
-                    role = "TEACHER",
-                    assignedSubject = "English",
-                    teacherStatus = "APPROVED",
-                    teacherSubject = "English",
-                    isVerified = true
-                ),
-                UserEntity(
-                    userId = "user_len_skills_teacher",
-                    username = "usman_skills",
-                    displayName = "Coach Usman Garba",
-                    bio = "Official Leno Class Instructor for Vocational Skills & Online Crafts.",
-                    avatarUrl = "",
-                    isOnline = true,
-                    lastSeen = System.currentTimeMillis(),
-                    statusMessage = "Vocational Skills & Practical Crafts",
-                    isCurrentUser = false,
-                    email = "skills@leno.chat",
-                    password = "",
-                    phoneNumber = "",
-                    createdAt = System.currentTimeMillis(),
-                    isOfficial = false,
-                    linoId = "LEN-66738291",
-                    role = "TEACHER",
-                    assignedSubject = "Vocational Skills",
-                    teacherStatus = "APPROVED",
-                    teacherSubject = "Vocational Skills",
-                    isVerified = true
-                )
+            classDao.deleteDemoClasses()
+            lessonDao.deleteDemoLessons()
+            val demoClassIds = listOf(
+                "class_quran_mastery",
+                "class_online_skills_dev",
+                "class_maths_core_algebra",
+                "class_jamb_intensive",
+                "class_secondary_maths",
+                "class_jamb_prep",
+                "class_science_biology",
+                "class_math_core_01",
+                "class_quran_tajweed_02",
+                "class_english_grammar_03",
+                "class_vocational_skills_04",
+                "class_general_science_05",
+                "class_digital_literacy_06",
+                "class_maths_1", "class_maths_2", "class_maths_3",
+                "class_quran_1", "class_english_1", "class_skills_1"
             )
-
-            for (t in teachers) {
-                val existing = userDao.getUserByIdSync(t.userId)
-                    ?: userDao.getUserByUsernameSync(t.username)
-                    ?: userDao.getUserByLinoIdSync(t.linoId)
-                val targetToSave = if (existing == null) {
-                    t.copy(isCurrentUser = false)
-                } else {
-                    existing.copy(
-                        userId = t.userId,
-                        username = t.username,
-                        displayName = t.displayName,
-                        linoId = t.linoId,
-                        role = "TEACHER",
-                        teacherStatus = "APPROVED",
-                        teacherSubject = t.teacherSubject.ifBlank { existing.teacherSubject },
-                        assignedSubject = t.assignedSubject.ifBlank { existing.assignedSubject },
-                        isVerified = true,
-                        isCurrentUser = false
-                    )
+            CoroutineScope(Dispatchers.IO).launch {
+                for (id in demoClassIds) {
+                    try {
+                        remoteAccountService.deleteClassFromRemote(id)
+                    } catch (_: Exception) {}
                 }
-                userDao.insertUser(targetToSave)
-                accountBackupStore?.saveAccount(targetToSave)
-                messageBackupStore?.saveChatPartnerProfile(targetToSave)
             }
+            Log.i("LenoRepository", "Successfully purged all demo classes and demo lessons.")
         } catch (e: Exception) {
-            Log.w("LenoRepository", "Error ensuring standard instructors: ${e.message}")
+            Log.w("LenoRepository", "Error purging demo classes: ${e.message}")
         }
     }
 
@@ -2912,16 +2905,21 @@ class LenoRepository(
 
     suspend fun purgeDemoClasses() = withContext(Dispatchers.IO) {
         try {
-            ensureStandardInstructorsCreated()
+            ensureOfficialLenoAccountCreated()
             userDao.clearDemoAvatars()
         } catch (e: Exception) {
             Log.w("LenoRepository", "Error purging demo data: ${e.message}")
         }
     }
 
+    suspend fun ensureOfficialStarterClasses() = withContext(Dispatchers.IO) {
+        // App is in production: do NOT seed demo classes or fake teachers.
+        purgeAllDemoClasses()
+    }
+
     suspend fun syncClassesFromRemote() = withContext(Dispatchers.IO) {
         try {
-            purgeDemoClasses()
+            purgeAllDemoClasses()
             val remoteClasses = remoteAccountService.fetchClassesFromRemote()
             if (remoteClasses.isNotEmpty()) {
                 classDao.insertClasses(remoteClasses)
@@ -2934,7 +2932,7 @@ class LenoRepository(
     fun listenToRemoteClasses(onClasses: (List<ClassEntity>) -> Unit): ListenerRegistration? =
         remoteAccountService.listenToRemoteClasses { list ->
             CoroutineScope(Dispatchers.IO).launch {
-                purgeDemoClasses()
+                purgeAllDemoClasses()
                 if (list.isNotEmpty()) {
                     classDao.insertClasses(list)
                 }
@@ -3035,15 +3033,21 @@ class LenoRepository(
         }
 
         val existingUser = userDao.getUserByIdSync(application.userId)
-        if (existingUser != null && !existingUser.teacherStatus.isNullOrBlank() && !existingUser.teacherStatus.equals("NOT APPLIED", ignoreCase = true)) {
+        val userTeacherStatus = existingUser?.teacherStatus?.trim().orEmpty()
+        val isUserNotApplied = userTeacherStatus.isBlank() ||
+                userTeacherStatus.equals("NOT APPLIED", ignoreCase = true) ||
+                userTeacherStatus.equals("NOT_APPLIED", ignoreCase = true) ||
+                userTeacherStatus.equals("Normal User", ignoreCase = true)
+
+        if (existingUser != null && !isUserNotApplied) {
             if (existingUser.teacherStatus.equals("PENDING", ignoreCase = true)) {
-                return Result.failure(Exception("You already have an application under review."))
+                return Result.failure(Exception("You already have an application under review (Pending). You can only apply one time."))
             }
             if (existingUser.teacherStatus.equals("REJECTED", ignoreCase = true)) {
-                return Result.failure(Exception("You have already applied. Teacher applications can only be submitted one time."))
+                return Result.failure(Exception("Teacher applications can only be submitted one time per user. Your previous application was already reviewed."))
             }
             if (existingUser.teacherStatus.equals("APPROVED", ignoreCase = true) || existingUser.isTeacher) {
-                return Result.failure(Exception("You are already an approved teacher for ${existingUser.assignedSubject}."))
+                return Result.failure(Exception("You are already an approved teacher for ${existingUser.assignedSubject}. Each teacher is restricted to one subject."))
             }
             return Result.failure(Exception("Teacher applications can only be submitted one time per teacher."))
         }
@@ -3087,8 +3091,50 @@ class LenoRepository(
     fun listenToTeacherApplications(onApplications: (List<TeacherApplicationItem>) -> Unit): ListenerRegistration? =
         remoteAccountService.listenToTeacherApplications(onApplications)
 
-    suspend fun fetchTeacherApplications(): List<TeacherApplicationItem> =
-        remoteAccountService.fetchTeacherApplicationsFromFirestore()
+    suspend fun fetchTeacherApplications(): List<TeacherApplicationItem> = withContext(Dispatchers.IO) {
+        val remoteList = try {
+            remoteAccountService.fetchTeacherApplicationsFromFirestore()
+        } catch (e: Exception) {
+            emptyList()
+        }
+        val map = LinkedHashMap<String, TeacherApplicationItem>()
+        remoteList.forEach { map[it.userId] = it }
+
+        // Also merge any applications in local Room teacher_roles
+        try {
+            val localPending = teacherRoleDao.getPendingTeacherApplicationsSync()
+            for (role in localPending) {
+                if (!map.containsKey(role.userId) || map[role.userId]?.isPending != true) {
+                    val user = userDao.getUserByIdSync(role.userId)
+                    map[role.userId] = TeacherApplicationItem(
+                        applicationId = role.userId,
+                        applicantUid = role.userId,
+                        lenoId = user?.linoId ?: "",
+                        fullName = user?.displayName?.ifBlank { user.username } ?: "Leno Member",
+                        username = user?.username ?: "",
+                        subject = role.effectiveApprovedSubject,
+                        qualification = role.educationQualification,
+                        experience = role.teachingExperience,
+                        status = role.status,
+                        submittedAt = role.submittedAt,
+                        userId = role.userId,
+                        applicantName = user?.displayName?.ifBlank { user.username } ?: "Leno Member",
+                        applicantEmail = user?.email ?: "",
+                        applicantUsername = user?.username ?: "",
+                        applicantAvatarUrl = user?.avatarUrl ?: "",
+                        approvedSubject = role.effectiveApprovedSubject,
+                        teachingLevel = role.teachingLevel,
+                        educationQualification = role.educationQualification,
+                        teachingExperience = role.teachingExperience,
+                        teacherIntro = role.teacherIntro
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("LenoRepository", "Error merging local teacher roles: ${e.message}")
+        }
+        map.values.sortedByDescending { it.submittedAt }
+    }
 
     /**
      * Admin approves teacher application:
@@ -3428,18 +3474,39 @@ class LenoRepository(
         enrollmentDao.getEnrolledStudentsForClass(classId)
 
     // Class Real-time Questions (Student can only ask questions, Teacher answers)
-    fun getQuestionsForClass(classId: String): Flow<List<ClassQuestionEntity>> =
-        classQuestionDao.getQuestionsForClass(classId)
+    fun getQuestionsForClass(classId: String): Flow<List<ClassQuestionEntity>> {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val remote = remoteAccountService.fetchQuestionsForClassFromRemote(classId)
+                if (remote.isNotEmpty()) {
+                    classQuestionDao.insertQuestions(remote)
+                }
+            } catch (_: Exception) {}
+        }
+        return classQuestionDao.getQuestionsForClass(classId)
+    }
+
+    fun listenToClassQuestions(classId: String, onQuestions: (List<ClassQuestionEntity>) -> Unit): ListenerRegistration? =
+        remoteAccountService.listenToClassQuestions(classId) { list ->
+            CoroutineScope(Dispatchers.IO).launch {
+                if (list.isNotEmpty()) {
+                    classQuestionDao.insertQuestions(list)
+                }
+            }
+            onQuestions(list)
+        }
 
     suspend fun askQuestionInClass(
         classId: String,
         senderUserId: String,
         senderName: String,
         senderLinoId: String,
-        questionText: String
+        questionText: String,
+        audioUrl: String? = null,
+        audioDurationSeconds: Int = 0
     ): Result<Unit> {
         val cleanText = questionText.trim()
-        if (cleanText.isBlank()) {
+        if (cleanText.isBlank() && audioUrl.isNullOrBlank()) {
             return Result.failure(Exception("Question cannot be empty."))
         }
         val q = ClassQuestionEntity(
@@ -3449,22 +3516,44 @@ class LenoRepository(
             senderName = senderName,
             senderLinoId = senderLinoId,
             senderRole = "STUDENT",
-            questionText = cleanText,
+            questionText = cleanText.ifBlank { "🎤 Voice Question ($audioDurationSeconds sec)" },
+            audioUrl = audioUrl,
+            audioDurationSeconds = audioDurationSeconds,
             timestamp = System.currentTimeMillis()
         )
         classQuestionDao.insertQuestion(q)
+        remoteAccountService.saveQuestionToRemote(classId, q)
         return Result.success(Unit)
     }
 
     suspend fun answerQuestionInClass(
+        classId: String = "",
         questionId: String,
-        answerText: String
+        answerText: String,
+        audioUrl: String? = null,
+        audioDurationSeconds: Int = 0
     ): Result<Unit> {
         val cleanAnswer = answerText.trim()
-        if (cleanAnswer.isBlank()) {
+        if (cleanAnswer.isBlank() && audioUrl.isNullOrBlank()) {
             return Result.failure(Exception("Answer cannot be empty."))
         }
-        classQuestionDao.answerQuestion(questionId, cleanAnswer)
+        val effectiveText = cleanAnswer.ifBlank { "🎤 Voice Answer ($audioDurationSeconds sec)" }
+        classQuestionDao.answerQuestionWithAudio(
+            questionId = questionId,
+            answerText = effectiveText,
+            answerAudioUrl = audioUrl,
+            answerAudioDurationSeconds = audioDurationSeconds,
+            answeredAt = System.currentTimeMillis()
+        )
+        if (classId.isNotBlank()) {
+            remoteAccountService.answerQuestionInRemote(
+                classId = classId,
+                questionId = questionId,
+                answerText = effectiveText,
+                answerAudioUrl = audioUrl,
+                answerAudioDurationSeconds = audioDurationSeconds
+            )
+        }
         return Result.success(Unit)
     }
 
@@ -3496,5 +3585,25 @@ class LenoRepository(
             Log.e("LenoRepository", "Error deleting user: ${e.message}")
             Result.success(Unit)
         }
+    }
+
+    suspend fun getOrCreateSupportChat(userId: String, userName: String): Result<SupportChatItem> {
+        return supportChatService.getOrCreateSupportChat(userId, userName, OFFICIAL_LENO_ID)
+    }
+
+    fun listenToSupportChatMessages(chatId: String): Flow<List<SupportMessageItem>> {
+        return supportChatService.listenToSupportChatMessages(chatId)
+    }
+
+    suspend fun sendSupportMessage(chatId: String, text: String, senderId: String, senderRole: String): Result<Unit> {
+        return supportChatService.sendSupportMessage(chatId, text, senderId, senderRole)
+    }
+
+    fun listenToOpenSupportChats(): Flow<List<SupportChatItem>> {
+        return supportChatService.listenToOpenSupportChats()
+    }
+
+    suspend fun updateSupportChatStatus(chatId: String, status: String): Result<Unit> {
+        return supportChatService.updateSupportChatStatus(chatId, status)
     }
 }

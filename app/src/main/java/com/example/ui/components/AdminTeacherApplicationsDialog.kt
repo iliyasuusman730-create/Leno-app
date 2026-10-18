@@ -48,10 +48,13 @@ import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.HeadsetMic
 import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
+import com.example.data.model.SupportChatItem
+import com.example.ui.screens.SupportChatScreen
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.School
@@ -136,14 +139,15 @@ fun AdminTeacherApplicationsDialog(
     val isMonitoring by viewModel.isMonitoringApplications.collectAsState()
 
     var selectedFilter by remember { mutableStateOf("PENDING") } // "PENDING", "APPROVED", "REJECTED", "ALL"
-    var showSeedDialog by remember { mutableStateOf(false) }
     var applicationToReject by remember { mutableStateOf<TeacherApplicationItem?>(null) }
     var processingUserId by remember { mutableStateOf<String?>(null) }
 
-    // Admin multi-tab view: 0 = Teacher Applications, 1 = All Users & Roles, 2 = Activities & Overview
+    // Admin multi-tab view: 0 = Teacher Applications, 1 = All Users & Roles, 2 = Activities & Overview, 3 = Support Inbox
     var activeAdminTab by remember { mutableStateOf(0) }
     val directoryUsers by viewModel.adminDirectoryUsers.collectAsState()
     val allClasses by viewModel.allClasses.collectAsState()
+    val openSupportChats by viewModel.openSupportChats.collectAsState()
+    var activeSupportChatToReply by remember { mutableStateOf<SupportChatItem?>(null) }
     var userSearchQuery by remember { mutableStateOf("") }
     var selectedUserRoleFilter by remember { mutableStateOf("ALL") } // "ALL", "TEACHERS", "USERS"
     var userToManageRole by remember { mutableStateOf<UserEntity?>(null) }
@@ -403,6 +407,36 @@ fun AdminTeacherApplicationsDialog(
                             }
                         }
                     )
+                    Tab(
+                        selected = activeAdminTab == 3,
+                        onClick = { activeAdminTab = 3 },
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.HeadsetMic, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Support Inbox",
+                                    fontWeight = if (activeAdminTab == 3) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = 12.sp
+                                )
+                                if (openSupportChats.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = LenoPrimary
+                                    ) {
+                                        Text(
+                                            text = "${openSupportChats.size}",
+                                            color = Color.White,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    )
                 }
 
                 when (activeAdminTab) {
@@ -490,21 +524,6 @@ fun AdminTeacherApplicationsDialog(
                                 )
                             }
                         }
-
-                        Spacer(modifier = Modifier.width(6.dp))
-
-                        TextButton(
-                            onClick = { showSeedDialog = true },
-                            colors = ButtonDefaults.textButtonColors(contentColor = LenoPrimary)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.AddCircleOutline,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("+ Test Sample", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -549,16 +568,6 @@ fun AdminTeacherApplicationsDialog(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                 )
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Button(
-                                    onClick = { showSeedDialog = true },
-                                    shape = RoundedCornerShape(10.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = LenoPrimary)
-                                ) {
-                                    Icon(Icons.Outlined.AddCircleOutline, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Generate Test Application", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                }
                             }
                         }
                     } else {
@@ -751,98 +760,62 @@ fun AdminTeacherApplicationsDialog(
                         }
                     }
                 }
-                else -> {
+                2 -> {
                     // TAB 2: Owner Activities, Approved Teachers & Platform Metrics
-                        OwnerActivitiesOverview(
-                            directoryUsers = directoryUsers,
-                            applications = applications,
-                            allClasses = allClasses,
-                            onManageUser = { u -> userToManageRole = u },
-                            onFilterApplications = { filter ->
-                                activeAdminTab = 0
-                                selectedFilter = filter
-                            },
-                            onRefreshData = {
-                                viewModel.refreshTeacherApplications()
-                                viewModel.loadAdminDirectoryUsers()
-                                Toast.makeText(context, "Refreshed platform data", Toast.LENGTH_SHORT).show()
-                            },
-                            onBroadcast = { title, body, cat, photo, onResult ->
-                                viewModel.broadcastOfficialAnnouncement(title, body, cat, photo, onResult)
-                            }
-                        )
-                    }
+                    OwnerActivitiesOverview(
+                        directoryUsers = directoryUsers,
+                        applications = applications,
+                        allClasses = allClasses,
+                        onManageUser = { u -> userToManageRole = u },
+                        onFilterApplications = { filter ->
+                            activeAdminTab = 0
+                            selectedFilter = filter
+                        },
+                        onRefreshData = {
+                            viewModel.refreshTeacherApplications()
+                            viewModel.loadAdminDirectoryUsers()
+                            Toast.makeText(context, "Refreshed platform data", Toast.LENGTH_SHORT).show()
+                        },
+                        onBroadcast = { title, body, cat, photo, onResult ->
+                            viewModel.broadcastOfficialAnnouncement(title, body, cat, photo, onResult)
+                        }
+                    )
+                }
+                else -> {
+                    // TAB 3: Support Inbox - Owner can view and reply to open support chats
+                    SupportInboxView(
+                        openChats = openSupportChats,
+                        onReplyChat = { chat ->
+                            activeSupportChatToReply = chat
+                        },
+                        onCloseChat = { chat ->
+                            viewModel.updateSupportChatStatus(chat.chatId, "closed")
+                            Toast.makeText(context, "Support ticket #${chat.chatId.takeLast(6)} marked as resolved.", Toast.LENGTH_SHORT).show()
+                        }
+                    )
                 }
             }
         }
     }
+}
 
-    // Dialog to generate a sample application
-    if (showSeedDialog) {
-        var sampleSubject by remember { mutableStateOf("Maths") }
-        val subjects = listOf("Maths", "Quran", "JAMB", "Skills", "Online Skills", "Content Creator")
-
-        AlertDialog(
-            onDismissRequest = { showSeedDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.School, contentDescription = null, tint = LenoPrimary)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Create Test Application", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                }
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "This will write a test applicant to the 'teacher_applications' collection in Firestore so you can test real-time monitoring and role elevation to 'teacher'.",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text("Select Subject:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(subjects) { subj ->
-                            val isSelected = sampleSubject == subj
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (isSelected) LenoPrimary else LenoPrimaryVeryLight,
-                                border = BorderStroke(1.dp, if (isSelected) LenoPrimary else LenoPrimaryLight),
-                                modifier = Modifier.clickable { sampleSubject = subj }
-                            ) {
-                                Text(
-                                    text = subj,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isSelected) Color.White else LenoPrimaryDark,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.seedSampleTeacherApplication(sampleSubject) { success, msg ->
-                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                            if (success) {
-                                showSeedDialog = false
-                            }
-                        }
-                    },
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = LenoPrimary)
-                ) {
-                    Text("Submit to teacher_applications", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showSeedDialog = false }) {
-                    Text("Cancel")
-                }
+    if (activeSupportChatToReply != null) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { activeSupportChatToReply = null },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                SupportChatScreen(
+                    viewModel = viewModel,
+                    chatId = activeSupportChatToReply!!.chatId,
+                    onBack = { activeSupportChatToReply = null },
+                    isOwnerMode = true
+                )
             }
-        )
+        }
     }
+
+
 
     // Dialog for rejection reason
     if (applicationToReject != null) {
@@ -2202,6 +2175,195 @@ private fun OfficialLenoBroadcastStudio(
                     Icon(Icons.Default.Campaign, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Publish Broadcast to All Users", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SupportInboxView(
+    openChats: List<SupportChatItem>,
+    onReplyChat: (SupportChatItem) -> Unit,
+    onCloseChat: (SupportChatItem) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "Open Support Inquiries",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "${openChats.size} user conversation(s) awaiting response",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        if (openChats.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 48.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = LenoPrimaryVeryLight,
+                        modifier = Modifier.size(56.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = LenoPrimary,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Inbox Zero! 🎉",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "No open support tickets at this time. When users open support chats, they will appear here.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 24.dp)
+                    )
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(openChats, key = { it.chatId }) { chat ->
+                    Card(
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("support_chat_item_${chat.chatId}")
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = LenoPrimary,
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(
+                                                text = chat.userName.take(1).uppercase(),
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = chat.userName.ifBlank { "Leno User" },
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = "ID: ${chat.userId.take(12)}",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFF059669).copy(alpha = 0.15f)
+                                ) {
+                                    Text(
+                                        text = "OPEN",
+                                        color = Color(0xFF059669),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Text(
+                                text = chat.lastMessage.ifBlank { "Support chat session" },
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 2
+                            )
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = { onReplyChat(chat) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = LenoPrimary),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(38.dp)
+                                        .testTag("reply_support_chat_btn_${chat.chatId}")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Send,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Reply to User", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                OutlinedButton(
+                                    onClick = { onCloseChat(chat) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.height(38.dp)
+                                ) {
+                                    Text("Resolve Ticket", fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

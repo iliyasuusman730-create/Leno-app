@@ -123,6 +123,22 @@ interface UserDao {
     fun searchUsers(query: String, currentUserId: String): Flow<List<UserEntity>>
 
     @Query("""
+        SELECT * FROM users 
+        WHERE isCurrentUser = 0 AND userId != :currentUserId
+          AND (
+            LOWER(username) LIKE '%' || LOWER(:query) || '%' 
+            OR LOWER(displayName) LIKE '%' || LOWER(:query) || '%' 
+            OR UPPER(linoId) LIKE '%' || UPPER(:query) || '%' 
+            OR UPPER(REPLACE(linoId, '-', '')) LIKE '%' || UPPER(REPLACE(:query, '-', '')) || '%'
+            OR (phoneNumber != '' AND phoneNumber LIKE '%' || :query || '%')
+            OR LOWER(userId) LIKE '%' || LOWER(:query) || '%' 
+            OR LOWER(email) LIKE '%' || LOWER(:query) || '%'
+          )
+        ORDER BY displayName ASC
+    """)
+    suspend fun searchUsersSync(query: String, currentUserId: String): List<UserEntity>
+
+    @Query("""
         SELECT u.* FROM users u
         INNER JOIN friendships f ON (
             (f.requesterId = :userId AND f.targetId = u.userId)
@@ -165,10 +181,35 @@ interface UserDao {
     @Query("DELETE FROM users WHERE isOfficial = 0 AND userId != 'official_leno_account'")
     suspend fun deleteNonOfficialUsers()
 
-    @Query("DELETE FROM users WHERE userId = 'test_dummy_user_to_purge'")
+    @Query("""
+        DELETE FROM users 
+        WHERE isCurrentUser = 0 
+          AND userId != 'official_leno_account' 
+          AND (
+            userId LIKE 'user_len_%' 
+            OR userId LIKE 'applicant_%'
+            OR userId LIKE 'demo_%'
+            OR userId LIKE 'mock_%'
+            OR userId = 'test_dummy_user_to_purge'
+            OR username IN ('bello_maths', 'ibrahim_quran', 'fatima_english', 'usman_skills')
+            OR email LIKE 'demo%@leno.chat'
+            OR email LIKE 'instructor@%'
+            OR email LIKE 'quran@%'
+            OR email LIKE 'english@%'
+            OR email LIKE 'skills@%'
+          )
+    """)
     suspend fun purgeDemoAccounts()
 
-    @Query("DELETE FROM users WHERE userId = 'never_delete_registered_teachers'")
+    @Query("""
+        DELETE FROM users 
+        WHERE isCurrentUser = 0 
+          AND userId != 'official_leno_account' 
+          AND (
+            userId LIKE 'user_len_%_teacher' 
+            OR username IN ('bello_maths', 'ibrahim_quran', 'fatima_english', 'usman_skills')
+          )
+    """)
     suspend fun deleteDemoTeachers()
 
     @Query("UPDATE users SET role = :role, assignedSubject = :assignedSubject WHERE userId = :userId")

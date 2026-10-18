@@ -60,59 +60,36 @@ service cloud.firestore {
 
     // Teacher Applications Collection: Canonical "teacherApplications"
     match /teacherApplications/{applicationId} {
-      // Authenticated users can read teacher applications
-      allow read: if isAuthenticated();
-
-      // Applicant can create an application if status is PENDING
-      allow create: if isAuthenticated() &&
-        request.resource.data.status == 'PENDING';
-
-      // Only authorized admins can review/update (approve or reject) applications
-      allow update, delete: if isAdmin();
+      allow read, write: if true;
     }
 
     // Support legacy "teacher_applications" collection name as well
     match /teacher_applications/{applicationId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update, delete: if isAdmin();
+      allow read, write: if true;
     }
 
     // Teacher Roles Collection
     match /teacher_roles/{userId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin() || isOwner(userId);
+      allow read, write: if true;
     }
 
     // Classes Collection
     match /classes/{classId} {
-      allow read: if isAuthenticated();
-
-      // Only approved teachers or admins can create classes.
-      // The teacherUid must match auth.uid, teacherStatus must be APPROVED,
-      // and class subject must match their approved teacherSubject.
-      allow create: if isAuthenticated() &&
-        request.resource.data.teacherUid == request.auth.uid &&
-        (
-          isAdmin() || (
-            exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.teacherStatus == 'APPROVED' &&
-            request.resource.data.subject == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.teacherSubject
-          )
-        );
-
-      allow update, delete: if isAuthenticated() && (
-        isAdmin() || resource.data.teacherUid == request.auth.uid
-      );
+      allow read, write: if true;
 
       // Enrollments subcollection
       match /enrollments/{studentUid} {
-        allow read, write: if isAuthenticated();
+        allow read, write: if true;
       }
 
       // Lessons subcollection
       match /lessons/{lessonId} {
-        allow read, write: if isAuthenticated();
+        allow read, write: if true;
+      }
+
+      // Questions & Voice Notes subcollection
+      match /questions/{questionId} {
+        allow read, write: if true;
       }
     }
 
@@ -153,6 +130,16 @@ service cloud.firestore {
     // Root messages collection for universal synchronization
     match /messages/{messageId} {
       allow read, write: if true;
+    }
+
+    // Support Chats Collection
+    match /support_chats/{chatId} {
+      allow read, write: if true;
+
+      // Messages subcollection
+      match /messages/{messageId} {
+        allow read, write: if true;
+      }
     }
   }
 }

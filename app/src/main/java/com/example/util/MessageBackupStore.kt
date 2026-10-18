@@ -20,6 +20,10 @@ class MessageBackupStore(context: Context) {
     @Volatile
     private var cachedPartners: List<UserEntity>? = null
 
+    init {
+        purgeMockPartners()
+    }
+
     companion object {
         private const val TAG = "MessageBackupStore"
         private const val PREF_NAME = "leno_message_backup_store"
@@ -210,6 +214,36 @@ class MessageBackupStore(context: Context) {
             cachedPartners = null
         } catch (e: Exception) {
             Log.w(TAG, "Failed to remove partner profile: ${e.message}")
+        }
+    }
+
+    fun purgeMockPartners() {
+        try {
+            val partnersJson = prefs.getString(KEY_PARTNERS, "[]") ?: "[]"
+            val array = JSONArray(partnersJson)
+            val updated = JSONArray()
+            var modified = false
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                val uid = obj.optString("userId", "").trim()
+                val uname = obj.optString("username", "").trim().lowercase()
+                val isMock = (uid.startsWith("user_len_") && uid.endsWith("_teacher")) ||
+                    uid == "user_len_50638964" ||
+                    uid == "test_dummy_user_to_purge" ||
+                    uname in setOf("bello_maths", "ibrahim_quran", "fatima_english", "usman_skills")
+                if (isMock && uid != "official_leno_account") {
+                    modified = true
+                    continue
+                }
+                updated.put(obj)
+            }
+            if (modified) {
+                prefs.edit().putString(KEY_PARTNERS, updated.toString()).commit()
+                cachedPartners = null
+                Log.i(TAG, "Purged mock partners from MessageBackupStore.")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to purge mock partners: ${e.message}")
         }
     }
 

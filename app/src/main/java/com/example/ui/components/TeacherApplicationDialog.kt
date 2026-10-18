@@ -100,7 +100,8 @@ fun TeacherApplicationDialog(
 
     val isPending = (teacherRole?.isPending == true) ||
             (teacherRole?.status?.equals("PENDING", ignoreCase = true) == true) ||
-            (existingApplication?.isPending == true)
+            (existingApplication?.isPending == true) ||
+            (currentUser?.teacherStatus?.equals("PENDING", ignoreCase = true) == true)
 
     val isApproved = (teacherRole?.isApprovedTeacher == true) ||
             (teacherRole?.status?.equals("APPROVED", ignoreCase = true) == true) ||

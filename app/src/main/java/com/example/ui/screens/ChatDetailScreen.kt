@@ -392,11 +392,17 @@ fun ChatDetailScreen(
                         }
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
                                 Text(
                                     text = partner?.displayName ?: "Chat",
                                     style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
                                 )
                                 if (isOfficialAccount || partner?.hasVerifiedBadge == true || partner?.isOfficial == true || partnerId == LenoRepository.OFFICIAL_LENO_ID) {
                                     Spacer(modifier = Modifier.width(4.dp))
@@ -408,7 +414,9 @@ fun ChatDetailScreen(
                                     text = "Official Announcements • Verified",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.SemiBold
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                 )
                             } else if (isPartnerTyping) {
                                 Row(
@@ -428,7 +436,9 @@ fun ChatDetailScreen(
                                 Text(
                                     text = TimeUtils.formatLastSeen(partner?.isOnline == true, partner?.lastSeen ?: 0L),
                                     style = MaterialTheme.typography.labelMedium,
-                                    color = if (partner?.isOnline == true) OnlineGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = if (partner?.isOnline == true) OnlineGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -531,15 +541,21 @@ fun ChatDetailScreen(
             )
         }
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
                 .consumeWindowInsets(padding)
                 .navigationBarsPadding()
                 .imePadding()
-                .background(LenoChatBackground)
+                .background(LenoChatBackground),
+            contentAlignment = Alignment.TopCenter
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .widthIn(max = com.example.util.MaxChatWidth)
+            ) {
             if (isBlocked) {
                 Card(
                     modifier = Modifier
@@ -835,10 +851,11 @@ fun ChatDetailScreen(
                         }
                     } else {
                         // STANDARD INPUT BAR MODE
+                        val isSmallScreenDevice = com.example.util.isSmallScreen()
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                                .padding(horizontal = if (isSmallScreenDevice) 4.dp else 8.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             IconButton(
@@ -872,7 +889,13 @@ fun ChatDetailScreen(
                             OutlinedTextField(
                                 value = textInput,
                                 onValueChange = { textInput = it },
-                                placeholder = { Text(if (isOfficialAccount) "Broadcast official announcement..." else "Message...") },
+                                placeholder = {
+                                    Text(
+                                        if (isOfficialAccount) "Broadcast..." else "Message...",
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    )
+                                },
                                 modifier = Modifier
                                     .weight(1f)
                                     .testTag("chat_text_input"),
@@ -943,6 +966,7 @@ fun ChatDetailScreen(
             }
         }
     }
+}
 
     // Real Photo Attachment Picker Modal
     if (showPhotoPickerModal) {
@@ -1330,7 +1354,7 @@ fun MessageBubble(
     ) {
         Box(
             modifier = Modifier
-                .widthIn(max = if (isOfficialMsg) 320.dp else 290.dp)
+                .widthIn(max = com.example.util.responsiveBubbleMaxWidth(isOfficialMsg))
                 .clip(
                     RoundedCornerShape(
                         topStart = 16.dp,

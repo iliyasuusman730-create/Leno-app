@@ -2,6 +2,7 @@ package com.example.data.service
 
 import android.util.Log
 import com.example.data.entity.ClassEntity
+import com.example.data.entity.ClassQuestionEntity
 import com.example.data.entity.EnrollmentEntity
 import com.example.data.entity.LessonEntity
 import com.example.data.entity.MessageEntity
@@ -759,6 +760,20 @@ open class RemoteAccountService {
                 }
             }
 
+            if (user.username.isNotBlank()) {
+                try {
+                    db.collection(COLLECTION_USERNAMES).document(user.username.lowercase())
+                        .set(mapOf("uid" to user.userId, "ownerUid" to user.userId, "updatedAt" to System.currentTimeMillis()), SetOptions.merge())
+                } catch (_: Exception) {}
+            }
+            if (user.linoId.isNotBlank()) {
+                val formattedLenoId = if (!user.linoId.startsWith("LEN-", ignoreCase = true)) "LEN-${user.linoId.uppercase()}" else user.linoId.uppercase()
+                try {
+                    db.collection(COLLECTION_LENO_IDS).document(formattedLenoId)
+                        .set(mapOf("uid" to user.userId, "ownerUid" to user.userId, "updatedAt" to System.currentTimeMillis()), SetOptions.merge())
+                } catch (_: Exception) {}
+            }
+
             if (acknowledged == true) {
                 Log.i(TAG, "✅ [Firestore Write SUCCESS] Document 'users/${user.userId}' successfully written to Firestore.")
             } else {
@@ -841,15 +856,29 @@ open class RemoteAccountService {
                 }
 
                 // 0b. Direct lookup via leno_ids reservation index (fast O(1))
-                val formattedLenoId = if (!clean.startsWith("LEN-", ignoreCase = true)) "LEN-$clean" else clean
-                val lenoDoc = db.collection(COLLECTION_LENO_IDS).document(formattedLenoId.uppercase()).get().await()
+                val rawLenoDigits = clean.replace("len-", "", ignoreCase = true).replace("len", "", ignoreCase = true).uppercase().trim()
+                val formattedLenoId = if (rawLenoDigits.isNotBlank()) "LEN-$rawLenoDigits" else clean.uppercase()
+                val lenoDoc = db.collection(COLLECTION_LENO_IDS).document(formattedLenoId).get().await()
                 if (lenoDoc.exists()) {
                     val ownerUid = lenoDoc.getString("ownerUid") ?: lenoDoc.getString("uid")
                     if (!ownerUid.isNullOrBlank()) {
                         val userDoc = db.collection(COLLECTION_USERS).document(ownerUid).get().await()
                         if (userDoc.exists()) {
-                            val user = docToUser(userDoc.data)
+                            val user = docToUser(userDoc.data, userDoc.id)
                             if (user != null) return@withTimeoutOrNull user
+                        }
+                    }
+                }
+                if (clean.uppercase() != formattedLenoId) {
+                    val altLenoDoc = db.collection(COLLECTION_LENO_IDS).document(clean.uppercase()).get().await()
+                    if (altLenoDoc.exists()) {
+                        val ownerUid = altLenoDoc.getString("ownerUid") ?: altLenoDoc.getString("uid")
+                        if (!ownerUid.isNullOrBlank()) {
+                            val userDoc = db.collection(COLLECTION_USERS).document(ownerUid).get().await()
+                            if (userDoc.exists()) {
+                                val user = docToUser(userDoc.data, userDoc.id)
+                                if (user != null) return@withTimeoutOrNull user
+                            }
                         }
                     }
                 }
@@ -939,10 +968,27 @@ open class RemoteAccountService {
                     return@withTimeoutOrNull docToUser(byRecEmail.documents[0].data)
                 }
 
-                // 5. Try direct doc ID
+                // 5. Try direct doc ID and userId field
                 val byDocId = db.collection(COLLECTION_USERS).document(clean).get().await()
                 if (byDocId.exists()) {
-                    return@withTimeoutOrNull docToUser(byDocId.data)
+                    return@withTimeoutOrNull docToUser(byDocId.data, byDocId.id)
+                }
+                val cleanNoAt = clean.removePrefix("@")
+                if (cleanNoAt != clean) {
+                    val byDocIdNoAt = db.collection(COLLECTION_USERS).document(cleanNoAt).get().await()
+                    if (byDocIdNoAt.exists()) {
+                        return@withTimeoutOrNull docToUser(byDocIdNoAt.data, byDocIdNoAt.id)
+                    }
+                }
+                val byUidField = db.collection(COLLECTION_USERS).whereEqualTo("userId", clean).limit(1).get().await()
+                if (!byUidField.isEmpty) {
+                    return@withTimeoutOrNull docToUser(byUidField.documents[0].data, byUidField.documents[0].id)
+                }
+                if (cleanNoAt != clean) {
+                    val byUidFieldNoAt = db.collection(COLLECTION_USERS).whereEqualTo("userId", cleanNoAt).limit(1).get().await()
+                    if (!byUidFieldNoAt.isEmpty) {
+                        return@withTimeoutOrNull docToUser(byUidFieldNoAt.documents[0].data, byUidFieldNoAt.documents[0].id)
+                    }
                 }
 
                 null
@@ -1008,13 +1054,18 @@ open class RemoteAccountService {
 
                 // 0. Comprehensive scan across users collection (broad substring and multi-field matching)
                 try {
-                    val allUsersSnap = db.collection(COLLECTION_USERS).limit(150).get().await()
+                    val allUsersSnap = db.collection(COLLECTION_USERS).limit(200).get().await()
                     allUsersSnap.documents.forEach { doc ->
                         val u = docToUser(doc.data, doc.id)
                         if (u != null && u.userId != currentUserId) {
+                            val rawLeno = u.linoId.replace("-", "").lowercase()
+                            val cleanDigits = clean.replace("-", "").lowercase()
                             val matches = u.username.lowercase().contains(clean) ||
                                 u.displayName.lowercase().contains(clean) ||
                                 u.linoId.lowercase().contains(clean) ||
+                                (cleanDigits.isNotBlank() && rawLeno.contains(cleanDigits)) ||
+                                u.userId.lowercase().contains(clean) ||
+                                doc.id.lowercase().contains(clean) ||
                                 u.email.lowercase().contains(clean) ||
                                 (clean.length >= 3 && u.phoneNumber.contains(clean))
                             if (matches) {
@@ -1024,6 +1075,40 @@ open class RemoteAccountService {
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "Broad users scan notice: ${e.message}")
+                }
+
+                // 0b. Direct lookup by user ID / document ID
+                try {
+                    val origTrimmed = query.trim().removePrefix("@")
+                    val directDoc = db.collection(COLLECTION_USERS).document(origTrimmed).get().await()
+                    if (directDoc.exists()) {
+                        docToUser(directDoc.data, directDoc.id)?.let {
+                            if (it.userId != currentUserId) results[it.userId] = it
+                        }
+                    }
+                    if (clean != origTrimmed) {
+                        val directDocClean = db.collection(COLLECTION_USERS).document(clean).get().await()
+                        if (directDocClean.exists()) {
+                            docToUser(directDocClean.data, directDocClean.id)?.let {
+                                if (it.userId != currentUserId) results[it.userId] = it
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Search by direct docId notice: ${e.message}")
+                }
+
+                // 0c. Query by userId field
+                try {
+                    val origTrimmed = query.trim().removePrefix("@")
+                    val byUidSnap = db.collection(COLLECTION_USERS).whereEqualTo("userId", origTrimmed).limit(5).get().await()
+                    byUidSnap.documents.forEach { doc ->
+                        docToUser(doc.data, doc.id)?.let {
+                            if (it.userId != currentUserId) results[it.userId] = it
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Search by userId field notice: ${e.message}")
                 }
 
                 // 1. Prefix query on username
@@ -1045,7 +1130,7 @@ open class RemoteAccountService {
                     Log.w(TAG, "Search by username prefix notice: ${e.message}")
                 }
 
-                // 2. Prefix query on displayName (using original query case)
+                // 2. Prefix query on displayName (using original query case and capitalized)
                 try {
                     val origTrimmed = query.trim().removePrefix("@")
                     val dnameSnap = db.collection(COLLECTION_USERS)
@@ -1059,6 +1144,22 @@ open class RemoteAccountService {
                         val u = docToUser(doc.data, doc.id)
                         if (u != null && u.userId != currentUserId) {
                             results[u.userId] = u
+                        }
+                    }
+                    val capitalized = origTrimmed.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+                    if (capitalized != origTrimmed) {
+                        val capSnap = db.collection(COLLECTION_USERS)
+                            .orderBy("displayName")
+                            .startAt(capitalized)
+                            .endAt(capitalized + "\uf8ff")
+                            .limit(25)
+                            .get()
+                            .await()
+                        capSnap.documents.forEach { doc ->
+                            val u = docToUser(doc.data, doc.id)
+                            if (u != null && u.userId != currentUserId) {
+                                results[u.userId] = u
+                            }
                         }
                     }
                 } catch (e: Exception) {
@@ -1083,7 +1184,8 @@ open class RemoteAccountService {
 
                 // 3. Match in leno_ids collection
                 try {
-                    val formattedLeno = if (!clean.startsWith("len-", ignoreCase = true)) "LEN-${clean.uppercase()}" else clean.uppercase()
+                    val rawCleanCode = clean.replace("len-", "", ignoreCase = true).replace("len", "", ignoreCase = true).uppercase().trim()
+                    val formattedLeno = if (rawCleanCode.isNotBlank()) "LEN-$rawCleanCode" else clean.uppercase()
                     val lDoc = db.collection(COLLECTION_LENO_IDS).document(formattedLeno).get().await()
                     if (lDoc.exists()) {
                         val uid = lDoc.getString("ownerUid") ?: lDoc.getString("uid")
@@ -1094,13 +1196,26 @@ open class RemoteAccountService {
                             }
                         }
                     }
+                    if (clean.uppercase() != formattedLeno) {
+                        val altLDoc = db.collection(COLLECTION_LENO_IDS).document(clean.uppercase()).get().await()
+                        if (altLDoc.exists()) {
+                            val uid = altLDoc.getString("ownerUid") ?: altLDoc.getString("uid")
+                            if (!uid.isNullOrBlank() && uid != currentUserId && !results.containsKey(uid)) {
+                                val userDoc = db.collection(COLLECTION_USERS).document(uid).get().await()
+                                if (userDoc.exists()) {
+                                    docToUser(userDoc.data, userDoc.id)?.let { results[it.userId] = it }
+                                }
+                            }
+                        }
+                    }
                 } catch (e: Exception) {
                     Log.w(TAG, "Search by leno ID notice: ${e.message}")
                 }
 
                 // 4. Match by Leno ID field in users collection
                 try {
-                    val formattedLeno = if (!clean.startsWith("len-", ignoreCase = true)) "LEN-${clean.uppercase()}" else clean.uppercase()
+                    val rawCleanCode = clean.replace("len-", "", ignoreCase = true).replace("len", "", ignoreCase = true).uppercase().trim()
+                    val formattedLeno = if (rawCleanCode.isNotBlank()) "LEN-$rawCleanCode" else clean.uppercase()
                     val linoSnap = db.collection(COLLECTION_USERS)
                         .whereEqualTo("linoId", formattedLeno)
                         .limit(5)
@@ -1110,6 +1225,19 @@ open class RemoteAccountService {
                         val u = docToUser(doc.data, doc.id)
                         if (u != null && u.userId != currentUserId) {
                             results[u.userId] = u
+                        }
+                    }
+                    if (clean.uppercase() != formattedLeno) {
+                        val altSnap = db.collection(COLLECTION_USERS)
+                            .whereEqualTo("linoId", clean.uppercase())
+                            .limit(5)
+                            .get()
+                            .await()
+                        altSnap.documents.forEach { doc ->
+                            val u = docToUser(doc.data, doc.id)
+                            if (u != null && u.userId != currentUserId) {
+                                results[u.userId] = u
+                            }
                         }
                     }
                 } catch (e: Exception) {
@@ -2452,11 +2580,6 @@ open class RemoteAccountService {
             onApplications(testTeacherApplications.values.sortedByDescending { it.submittedAt })
             return null
         }
-        if (auth?.currentUser == null) {
-            Log.d(TAG, "Notice: No active Firebase Auth session. Using local teacher applications.")
-            onApplications(testTeacherApplications.values.sortedByDescending { it.submittedAt })
-            return null
-        }
         return try {
             db.collection(COLLECTION_TEACHER_APPLICATIONS)
                 .addSnapshotListener { snapshot, error ->
@@ -2470,6 +2593,8 @@ open class RemoteAccountService {
                         parseTeacherApplicationFromDoc(doc.id, doc.data)
                     } ?: emptyList()
                     Log.i(TAG, "✅ [Firestore Query Result: teacherApplications] Fetched ${items.size} applications.")
+                    // Cache in memory as well
+                    items.forEach { testTeacherApplications[it.userId] = it }
                     onApplications(items.sortedByDescending { it.submittedAt })
                 }
         } catch (e: Exception) {
@@ -2486,14 +2611,12 @@ open class RemoteAccountService {
     open suspend fun fetchTeacherApplicationsFromFirestore(): List<TeacherApplicationItem> = withContext(Dispatchers.IO) {
         if (!isFirestoreProvisioned) return@withContext testTeacherApplications.values.sortedByDescending { it.submittedAt }
         val db = firestore ?: return@withContext testTeacherApplications.values.sortedByDescending { it.submittedAt }
-        if (auth?.currentUser == null) {
-            return@withContext testTeacherApplications.values.sortedByDescending { it.submittedAt }
-        }
         try {
             Log.i(TAG, "🔥 [Admin Query: teacherApplications] Querying all teacher applications...")
             val snap = db.collection(COLLECTION_TEACHER_APPLICATIONS).get().await()
             val list = snap.documents.mapNotNull { parseTeacherApplicationFromDoc(it.id, it.data) }
             Log.i(TAG, "✅ [Admin Query Result] Found ${list.size} applications in Firestore.")
+            list.forEach { testTeacherApplications[it.userId] = it }
             list.sortedByDescending { it.submittedAt }
         } catch (e: Exception) {
             if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
@@ -3007,6 +3130,19 @@ open class RemoteAccountService {
         }
     }
 
+    open suspend fun deleteClassFromRemote(classId: String): Boolean = withContext(Dispatchers.IO) {
+        testClasses.remove(classId)
+        val db = firestore ?: return@withContext true
+        try {
+            db.collection(COLLECTION_CLASSES).document(classId).delete().await()
+            Log.i(TAG, "✅ [Firestore Class Deleted] Deleted class $classId")
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "deleteClassFromRemote error: ${e.message}")
+            false
+        }
+    }
+
     open suspend fun fetchClassesFromRemote(): List<ClassEntity> = withContext(Dispatchers.IO) {
         val db = firestore ?: return@withContext testClasses.values.toList()
         try {
@@ -3319,6 +3455,143 @@ open class RemoteAccountService {
         } catch (e: Exception) {
             Log.w(TAG, "listenToClassLessons init error: ${e.message}")
             null
+        }
+    }
+
+    open suspend fun saveQuestionToRemote(classId: String, question: ClassQuestionEntity): Result<Unit> = withContext(Dispatchers.IO) {
+        val db = firestore ?: return@withContext Result.success(Unit)
+        try {
+            val map = hashMapOf<String, Any?>(
+                "questionId" to question.questionId,
+                "classId" to question.classId,
+                "senderUserId" to question.senderUserId,
+                "senderName" to question.senderName,
+                "senderLinoId" to question.senderLinoId,
+                "senderRole" to question.senderRole,
+                "questionText" to question.questionText,
+                "audioUrl" to question.audioUrl,
+                "audioDurationSeconds" to question.audioDurationSeconds,
+                "answerText" to question.answerText,
+                "answerAudioUrl" to question.answerAudioUrl,
+                "answerAudioDurationSeconds" to question.answerAudioDurationSeconds,
+                "isAnswered" to question.isAnswered,
+                "answeredAt" to question.answeredAt,
+                "timestamp" to question.timestamp
+            )
+            db.collection(COLLECTION_CLASSES)
+                .document(classId)
+                .collection("questions")
+                .document(question.questionId)
+                .set(map, SetOptions.merge())
+                .await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.w(TAG, "saveQuestionToRemote notice: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    open suspend fun fetchQuestionsForClassFromRemote(classId: String): List<ClassQuestionEntity> = withContext(Dispatchers.IO) {
+        val db = firestore ?: return@withContext emptyList()
+        try {
+            val snap = db.collection(COLLECTION_CLASSES)
+                .document(classId)
+                .collection("questions")
+                .orderBy("timestamp")
+                .get()
+                .await()
+            snap.documents.mapNotNull { doc ->
+                val qText = doc.getString("questionText") ?: return@mapNotNull null
+                ClassQuestionEntity(
+                    questionId = doc.id,
+                    classId = classId,
+                    senderUserId = doc.getString("senderUserId") ?: "",
+                    senderName = doc.getString("senderName") ?: "Student",
+                    senderLinoId = doc.getString("senderLinoId") ?: "",
+                    senderRole = doc.getString("senderRole") ?: "STUDENT",
+                    questionText = qText,
+                    audioUrl = doc.getString("audioUrl"),
+                    audioDurationSeconds = (doc.getLong("audioDurationSeconds") ?: 0L).toInt(),
+                    answerText = doc.getString("answerText") ?: "",
+                    answerAudioUrl = doc.getString("answerAudioUrl"),
+                    answerAudioDurationSeconds = (doc.getLong("answerAudioDurationSeconds") ?: 0L).toInt(),
+                    isAnswered = doc.getBoolean("isAnswered") ?: false,
+                    answeredAt = doc.getLong("answeredAt") ?: 0L,
+                    timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis()
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "fetchQuestionsForClassFromRemote notice: ${e.message}")
+            emptyList()
+        }
+    }
+
+    open fun listenToClassQuestions(classId: String, onQuestions: (List<ClassQuestionEntity>) -> Unit): ListenerRegistration? {
+        val db = firestore ?: return null
+        return try {
+            db.collection(COLLECTION_CLASSES)
+                .document(classId)
+                .collection("questions")
+                .orderBy("timestamp")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.w(TAG, "listenToClassQuestions error: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    val list = snapshot?.documents?.mapNotNull { doc ->
+                        val qText = doc.getString("questionText") ?: return@mapNotNull null
+                        ClassQuestionEntity(
+                            questionId = doc.id,
+                            classId = classId,
+                            senderUserId = doc.getString("senderUserId") ?: "",
+                            senderName = doc.getString("senderName") ?: "Student",
+                            senderLinoId = doc.getString("senderLinoId") ?: "",
+                            senderRole = doc.getString("senderRole") ?: "STUDENT",
+                            questionText = qText,
+                            audioUrl = doc.getString("audioUrl"),
+                            audioDurationSeconds = (doc.getLong("audioDurationSeconds") ?: 0L).toInt(),
+                            answerText = doc.getString("answerText") ?: "",
+                            answerAudioUrl = doc.getString("answerAudioUrl"),
+                            answerAudioDurationSeconds = (doc.getLong("answerAudioDurationSeconds") ?: 0L).toInt(),
+                            isAnswered = doc.getBoolean("isAnswered") ?: false,
+                            answeredAt = doc.getLong("answeredAt") ?: 0L,
+                            timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis()
+                        )
+                    } ?: emptyList()
+                    onQuestions(list)
+                }
+        } catch (e: Exception) {
+            Log.w(TAG, "listenToClassQuestions init error: ${e.message}")
+            null
+        }
+    }
+
+    open suspend fun answerQuestionInRemote(
+        classId: String,
+        questionId: String,
+        answerText: String,
+        answerAudioUrl: String? = null,
+        answerAudioDurationSeconds: Int = 0
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val db = firestore ?: return@withContext Result.success(Unit)
+        try {
+            val map = hashMapOf<String, Any?>(
+                "answerText" to answerText,
+                "answerAudioUrl" to answerAudioUrl,
+                "answerAudioDurationSeconds" to answerAudioDurationSeconds,
+                "isAnswered" to true,
+                "answeredAt" to System.currentTimeMillis()
+            )
+            db.collection(COLLECTION_CLASSES)
+                .document(classId)
+                .collection("questions")
+                .document(questionId)
+                .set(map, SetOptions.merge())
+                .await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.w(TAG, "answerQuestionInRemote notice: ${e.message}")
+            Result.failure(e)
         }
     }
 

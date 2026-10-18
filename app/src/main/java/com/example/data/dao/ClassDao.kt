@@ -52,7 +52,14 @@ interface ClassDao {
     @Query("DELETE FROM classes WHERE classId = :classId")
     suspend fun deleteClassById(classId: String)
 
-    @Query("DELETE FROM classes WHERE classId LIKE 'class_maths_%' OR classId LIKE 'class_quran_%' OR classId LIKE 'class_english_%' OR classId LIKE 'class_skills_%' OR classId = 'class_maths_1' OR classId = 'class_maths_2' OR classId = 'class_maths_3' OR classId = 'class_quran_1' OR classId = 'class_english_1' OR classId = 'class_skills_1'")
+    @Query("""
+        DELETE FROM classes 
+        WHERE classId LIKE 'demo_%' 
+           OR classId LIKE 'mock_%' 
+           OR classId LIKE 'test_%'
+           OR classId IN ('class_quran_mastery', 'class_online_skills_dev', 'class_maths_core_algebra', 'class_jamb_intensive', 'class_secondary_maths', 'class_jamb_prep', 'class_science_biology', 'class_math_core_01', 'class_quran_tajweed_02', 'class_english_grammar_03', 'class_vocational_skills_04', 'class_general_science_05', 'class_digital_literacy_06', 'class_maths_1', 'class_maths_2', 'class_maths_3', 'class_quran_1', 'class_english_1', 'class_skills_1')
+           OR instructorUserId LIKE 'user_len_%_teacher'
+    """)
     suspend fun deleteDemoClasses()
 
     @Query("DELETE FROM classes WHERE classId IN (:classIds)")

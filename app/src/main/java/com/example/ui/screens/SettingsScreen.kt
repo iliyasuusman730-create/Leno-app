@@ -67,11 +67,18 @@ import com.example.ui.components.AdminTeacherApplicationsDialog
 import com.example.util.ThemeMode
 import com.example.viewmodel.LenoViewModel
 
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.HeadsetMic
+import androidx.compose.material.icons.filled.HelpOutline
+import com.example.ui.components.ContactSupportDialog
+
 @Composable
 fun SettingsScreen(
     viewModel: LenoViewModel,
     onLogoutSuccess: () -> Unit,
-    onNavigateToProtectAccount: () -> Unit = {}
+    onNavigateToProtectAccount: () -> Unit = {},
+    onOpenChat: (String) -> Unit = {},
+    onOpenSupportChat: (String) -> Unit = onOpenChat
 ) {
     val currentUser by viewModel.currentUser.collectAsState()
     val userSettings by viewModel.userSettings.collectAsState()
@@ -92,6 +99,7 @@ fun SettingsScreen(
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showBlockedUsersModal by remember { mutableStateOf(false) }
     var showAdminTeacherApplicationsDialog by remember { mutableStateOf(false) }
+    var showContactSupportDialog by remember { mutableStateOf(false) }
 
     val scrollState = rememberScrollState()
     val context = LocalContext.current
@@ -335,6 +343,47 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
+        // Help & Support Section
+        Text(
+            text = "Help & Support",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.primary
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                SettingActionRow(
+                    icon = Icons.Default.HeadsetMic,
+                    title = "Contact Support",
+                    subtitle = "Submit inquiries, report bugs, view FAQs, or reach out to our team",
+                    badge = "24/7 Desk",
+                    badgeColor = com.example.ui.theme.LenoPrimary,
+                    onClick = { showContactSupportDialog = true },
+                    tag = "setting_contact_support_row"
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                SettingActionRow(
+                    icon = Icons.AutoMirrored.Filled.Chat,
+                    title = "Leno Official Support Chat",
+                    subtitle = "Live direct messaging with verified @Leno platform assistant",
+                    badge = "Official",
+                    badgeColor = com.example.ui.theme.LenoPrimaryDark,
+                    onClick = { onOpenChat(LenoRepository.OFFICIAL_LENO_ID) },
+                    tag = "setting_official_chat_row"
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
         // Account Actions Section
         Text(
             text = "Account Actions",
@@ -549,6 +598,18 @@ fun SettingsScreen(
         AdminTeacherApplicationsDialog(
             viewModel = viewModel,
             onDismiss = { showAdminTeacherApplicationsDialog = false }
+        )
+    }
+
+    if (showContactSupportDialog) {
+        ContactSupportDialog(
+            viewModel = viewModel,
+            currentUser = currentUser,
+            onDismiss = { showContactSupportDialog = false },
+            onOpenSupportChat = { partnerId ->
+                showContactSupportDialog = false
+                onOpenSupportChat(partnerId)
+            }
         )
     }
 }

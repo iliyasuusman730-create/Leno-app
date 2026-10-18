@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -159,18 +160,26 @@ fun AuthScreen(
     val textPrimary = MaterialTheme.colorScheme.onBackground
     val textSecondary = MaterialTheme.colorScheme.onSurfaceVariant
 
+    val isSmallScreenAuth = com.example.util.isSmallScreen()
+    val authTitleSize = if (isSmallScreenAuth) 22.sp else 28.sp
+    val authTitleLineHeight = if (isSmallScreenAuth) 28.sp else 34.sp
+    val authTitleSpacer = if (isSmallScreenAuth) 18.dp else 32.dp
+    val authButtonHeight = if (isSmallScreenAuth) 50.dp else 58.dp
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(brandBg)
             .statusBarsPadding()
-            .navigationBarsPadding()
+            .navigationBarsPadding(),
+        contentAlignment = Alignment.Center
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .widthIn(max = com.example.util.MaxFormWidth)
                 .imePadding()
-                .padding(horizontal = 24.dp, vertical = 16.dp),
+                .padding(horizontal = if (isSmallScreenAuth) 16.dp else 24.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
@@ -265,14 +274,14 @@ fun AuthScreen(
                             OnboardingStep.STEP_1_NAME -> {
                                 Text(
                                     text = "What's your full name?",
-                                    fontSize = 28.sp,
+                                    fontSize = authTitleSize,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = textPrimary,
                                     textAlign = TextAlign.Center,
-                                    lineHeight = 34.sp
+                                    lineHeight = authTitleLineHeight
                                 )
 
-                                Spacer(modifier = Modifier.height(32.dp))
+                                Spacer(modifier = Modifier.height(authTitleSpacer))
 
                                 OutlinedTextField(
                                     value = fullNameInput,
@@ -300,6 +309,10 @@ fun AuthScreen(
                                     ),
                                     keyboardActions = KeyboardActions(
                                         onNext = {
+                                            if (!com.example.util.NetworkUtils.isNetworkAvailable(context)) {
+                                                errorMessage = "No internet connection detected. Please connect to mobile data or Wi-Fi to register."
+                                                return@KeyboardActions
+                                            }
                                             if (fullNameInput.trim().isNotBlank()) {
                                                 errorMessage = null
                                                 currentStep = OnboardingStep.STEP_2_USERNAME
@@ -340,14 +353,14 @@ fun AuthScreen(
                             OnboardingStep.STEP_2_USERNAME -> {
                                 Text(
                                     text = "Choose your username",
-                                    fontSize = 28.sp,
+                                    fontSize = authTitleSize,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = textPrimary,
                                     textAlign = TextAlign.Center,
-                                    lineHeight = 34.sp
+                                    lineHeight = authTitleLineHeight
                                 )
 
-                                Spacer(modifier = Modifier.height(32.dp))
+                                Spacer(modifier = Modifier.height(authTitleSpacer))
 
                                 OutlinedTextField(
                                     value = usernameInput,
@@ -383,6 +396,10 @@ fun AuthScreen(
                                     ),
                                     keyboardActions = KeyboardActions(
                                         onNext = {
+                                            if (!com.example.util.NetworkUtils.isNetworkAvailable(context)) {
+                                                errorMessage = "No internet connection detected. Please connect to mobile data or Wi-Fi to register."
+                                                return@KeyboardActions
+                                            }
                                             val cleanUser = usernameInput.trim()
                                             if (cleanUser.length < 3) {
                                                 errorMessage = "Username must be at least 3 characters."
@@ -449,14 +466,14 @@ fun AuthScreen(
                             OnboardingStep.STEP_3_PASSWORD -> {
                                 Text(
                                     text = "Create your password",
-                                    fontSize = 28.sp,
+                                    fontSize = authTitleSize,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = textPrimary,
                                     textAlign = TextAlign.Center,
-                                    lineHeight = 34.sp
+                                    lineHeight = authTitleLineHeight
                                 )
 
-                                Spacer(modifier = Modifier.height(32.dp))
+                                Spacer(modifier = Modifier.height(authTitleSpacer))
 
                                 OutlinedTextField(
                                     value = passwordInput,
@@ -498,6 +515,10 @@ fun AuthScreen(
                                     ),
                                     keyboardActions = KeyboardActions(
                                         onDone = {
+                                            if (!com.example.util.NetworkUtils.isNetworkAvailable(context)) {
+                                                errorMessage = "No internet connection detected. Please connect to mobile data or Wi-Fi to register."
+                                                return@KeyboardActions
+                                            }
                                             if (passwordInput.length < 6) {
                                                 errorMessage = "Password must be at least 6 characters."
                                                 return@KeyboardActions
@@ -570,14 +591,14 @@ fun AuthScreen(
                             OnboardingStep.STEP_4_LINO_ID -> {
                                 Text(
                                     text = "Your Leno ID is ready 🎉",
-                                    fontSize = 28.sp,
+                                    fontSize = authTitleSize,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = textPrimary,
                                     textAlign = TextAlign.Center,
-                                    lineHeight = 34.sp
+                                    lineHeight = authTitleLineHeight
                                 )
 
-                                Spacer(modifier = Modifier.height(28.dp))
+                                Spacer(modifier = Modifier.height(if (isSmallScreenAuth) 16.dp else 28.dp))
 
                                 // Large Generated Leno ID Card
                                 Surface(
@@ -661,13 +682,13 @@ fun AuthScreen(
                             OnboardingStep.LOGIN -> {
                                 Text(
                                     text = "Welcome back",
-                                    fontSize = 28.sp,
+                                    fontSize = authTitleSize,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = textPrimary,
                                     textAlign = TextAlign.Center
                                 )
 
-                                Spacer(modifier = Modifier.height(24.dp))
+                                Spacer(modifier = Modifier.height(if (isSmallScreenAuth) 16.dp else 24.dp))
 
                                 OutlinedTextField(
                                     value = loginIdentifierInput,
@@ -818,9 +839,10 @@ fun AuthScreen(
                                     )
 
                                     val cleanId = loginIdentifierInput.trim().removePrefix("@")
-                                    val isCredentialErr = errorMessage!!.contains("Incorrect credentials", ignoreCase = true) ||
+                                    val isCredentialErr = errorMessage!!.contains("Incorrect", ignoreCase = true) ||
                                             errorMessage!!.contains("expired", ignoreCase = true) ||
-                                            errorMessage!!.contains("invalid", ignoreCase = true)
+                                            errorMessage!!.contains("invalid", ignoreCase = true) ||
+                                            errorMessage!!.contains("password", ignoreCase = true)
                                     if (isCredentialErr && cleanId.isNotBlank()) {
                                         Spacer(modifier = Modifier.height(8.dp))
                                         TextButton(
@@ -839,10 +861,18 @@ fun AuthScreen(
                                         }
                                     }
 
-                                    if (errorMessage!!.contains("Account not found", ignoreCase = true) && cleanId.isNotBlank()) {
+                                    val isNotFound = errorMessage!!.contains("Account not found", ignoreCase = true) ||
+                                            errorMessage!!.contains("not found", ignoreCase = true) ||
+                                            errorMessage!!.contains("create an account", ignoreCase = true) ||
+                                            errorMessage!!.contains("create a new account", ignoreCase = true)
+                                    if (isNotFound && cleanId.isNotBlank()) {
                                         Spacer(modifier = Modifier.height(10.dp))
                                         OutlinedButton(
                                             onClick = {
+                                                if (!com.example.util.NetworkUtils.isNetworkAvailable(context)) {
+                                                    errorMessage = "No internet connection detected. Please connect to mobile data or Wi-Fi to register."
+                                                    return@OutlinedButton
+                                                }
                                                 if (loginPasswordInput.length < 4) {
                                                     errorMessage = "Password must be at least 4 characters."
                                                     return@OutlinedButton
@@ -895,7 +925,7 @@ fun AuthScreen(
                             OnboardingStep.FORGOT_PASSWORD -> {
                                 Text(
                                     text = "Recover Account",
-                                    fontSize = 28.sp,
+                                    fontSize = authTitleSize,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = textPrimary,
                                     textAlign = TextAlign.Center
@@ -1070,6 +1100,10 @@ fun AuthScreen(
                     OnboardingStep.STEP_1_NAME -> {
                         Button(
                             onClick = {
+                                if (!com.example.util.NetworkUtils.isNetworkAvailable(context)) {
+                                    errorMessage = "No internet connection detected. Please connect to mobile data or Wi-Fi to register."
+                                    return@Button
+                                }
                                 if (fullNameInput.trim().isBlank()) {
                                     errorMessage = "Please enter your full name."
                                     return@Button
@@ -1081,7 +1115,7 @@ fun AuthScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = brandOrange),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(58.dp)
+                                .height(authButtonHeight)
                                 .testTag("step1_continue_button")
                         ) {
                             Text(
@@ -1132,6 +1166,10 @@ fun AuthScreen(
                     OnboardingStep.STEP_2_USERNAME -> {
                         Button(
                             onClick = {
+                                if (!com.example.util.NetworkUtils.isNetworkAvailable(context)) {
+                                    errorMessage = "No internet connection detected. Please connect to mobile data or Wi-Fi to register."
+                                    return@Button
+                                }
                                 val cleanUser = usernameInput.trim()
                                 if (cleanUser.isBlank()) {
                                     errorMessage = "Please enter a username."
@@ -1157,7 +1195,7 @@ fun AuthScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = brandOrange),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(58.dp)
+                                .height(authButtonHeight)
                                 .testTag("step2_continue_button")
                         ) {
                             if (isLoading) {
@@ -1187,6 +1225,10 @@ fun AuthScreen(
                     OnboardingStep.STEP_3_PASSWORD -> {
                         Button(
                             onClick = {
+                                if (!com.example.util.NetworkUtils.isNetworkAvailable(context)) {
+                                    errorMessage = "No internet connection detected. Please connect to mobile data or Wi-Fi to register."
+                                    return@Button
+                                }
                                 if (passwordInput.length < 6) {
                                     errorMessage = "Password must be at least 6 characters."
                                     return@Button
@@ -1213,7 +1255,7 @@ fun AuthScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = brandOrange),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(58.dp)
+                                .height(authButtonHeight)
                                 .testTag("step3_continue_button")
                         ) {
                             if (isLoading) {
@@ -1249,7 +1291,7 @@ fun AuthScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = brandOrange),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(58.dp)
+                                .height(authButtonHeight)
                                 .testTag("enter_lino_button")
                         ) {
                             Text(
@@ -1298,7 +1340,7 @@ fun AuthScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = brandOrange),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(58.dp)
+                                .height(authButtonHeight)
                                 .testTag("login_submit_button")
                         ) {
                             if (isLoading) {
@@ -1454,7 +1496,7 @@ fun AuthScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = brandOrange),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(58.dp)
+                                .height(authButtonHeight)
                                 .testTag("recover_submit_button")
                         ) {
                             if (isLoading) {

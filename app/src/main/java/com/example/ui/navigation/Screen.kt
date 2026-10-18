@@ -53,6 +53,11 @@ sealed class Screen(
     // Direct Firestore Chat Screen route
     object LiveChat : Screen("live_chat", "Live Chat")
 
+    // Real Support Chat route: support-chat/{chatId}
+    object SupportChat : Screen("support-chat/{chatId}") {
+        fun createRoute(chatId: String) = "support-chat/$chatId"
+    }
+
     companion object {
         val bottomNavItems = listOf(
             ChatsTab,

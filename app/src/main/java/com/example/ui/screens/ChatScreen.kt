@@ -526,7 +526,7 @@ private fun ChatMessageBubble(
             color = if (isFromMe) LenoChatSentBubble else LenoChatReceivedBubble,
             tonalElevation = 1.dp,
             modifier = Modifier
-                .widthIn(max = 280.dp)
+                .widthIn(max = com.example.util.responsiveBubbleMaxWidth(false))
                 .testTag("chat_message_item_${message.id}")
         ) {
             Column(
