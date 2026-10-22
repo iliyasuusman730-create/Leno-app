@@ -88,9 +88,9 @@ class MessageBackupStore(context: Context) {
             val current = getAllMessagesInternal()
             var modified = false
             val updated = current.map { msg ->
-                if (msg.receiverId in uSet && msg.senderId in pSet && msg.status != "READ") {
+                if (msg.receiverId in uSet && msg.senderId in pSet && (!msg.isRead || msg.status != "READ")) {
                     modified = true
-                    msg.copy(status = "READ")
+                    msg.copy(status = "READ", read = true)
                 } else {
                     msg
                 }
@@ -101,6 +101,32 @@ class MessageBackupStore(context: Context) {
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to mark messages as read in backup: ${e.message}")
+        }
+    }
+
+    /**
+     * Updates status and read flag of a specific message in backup store.
+     */
+    @Synchronized
+    fun updateMessageStatus(messageId: String, status: String) {
+        if (messageId.isBlank()) return
+        try {
+            val current = getAllMessagesInternal()
+            var modified = false
+            val isRead = status.equals("READ", ignoreCase = true)
+            val updated = current.map { msg ->
+                if (msg.messageId == messageId) {
+                    modified = true
+                    msg.copy(status = status, read = if (isRead) true else msg.read)
+                } else {
+                    msg
+                }
+            }
+            if (modified) {
+                saveMessagesInternal(updated)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to update message status in backup: ${e.message}")
         }
     }
 
@@ -306,6 +332,7 @@ class MessageBackupStore(context: Context) {
                         audioDurationSeconds = obj.optInt("audioDurationSeconds", 0),
                         timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
                         status = obj.optString("status", "SENT"),
+                        read = obj.optBoolean("read", obj.optString("status").equals("READ", ignoreCase = true)),
                         isSystemMessage = obj.optBoolean("isSystemMessage", false)
                     )
                 )
@@ -330,6 +357,7 @@ class MessageBackupStore(context: Context) {
                 put("audioDurationSeconds", m.audioDurationSeconds)
                 put("timestamp", m.timestamp)
                 put("status", m.status)
+                put("read", m.read || m.isRead)
                 put("isSystemMessage", m.isSystemMessage)
             }
             array.put(obj)

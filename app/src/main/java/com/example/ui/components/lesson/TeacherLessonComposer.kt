@@ -543,6 +543,25 @@ fun TeacherLessonComposer(
                             .fillMaxWidth()
                             .padding(20.dp) // p-6
                     ) {
+                        if (lessonContent.contains("[voice:", ignoreCase = true) || lessonContent.contains("[audio:", ignoreCase = true)) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFFF0FDF4),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF22C55E)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Mic, contentDescription = null, tint = Color(0xFF22C55E), modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Voice note attached to board / lesson", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF166534))
+                                }
+                            }
+                        }
                         if (editorModeTab == 0) {
                             // Text Editor with cursor position tracking & placeholder
                             TextField(
@@ -762,7 +781,7 @@ fun TeacherLessonComposer(
             VideoInsertModal(
                 onDismiss = { showVideoModal = false },
                 onInsertVideo = { url, title ->
-                    lessonContent += "\n[video: $url | $title]\n"
+                    insertTextAtCursor("\n[video: $url | $title]\n")
                     showVideoModal = false
                 }
             )
@@ -773,7 +792,19 @@ fun TeacherLessonComposer(
             VoiceNoteRecorderModal(
                 onDismiss = { showVoiceModal = false },
                 onSaveVoiceNote = { filePath, durationSec ->
-                    lessonContent += "\n[voice: $filePath | $durationSec]\n"
+                    val playableUrl = try {
+                        val srcFile = File(filePath)
+                        if (srcFile.exists() && srcFile.length() < 2 * 1024 * 1024) {
+                            val bytes = srcFile.readBytes()
+                            val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                            "data:audio/m4a;base64,$b64"
+                        } else {
+                            filePath
+                        }
+                    } catch (e: Exception) {
+                        filePath
+                    }
+                    insertTextAtCursor("\n[voice: $playableUrl | $durationSec]\n")
                     showVoiceModal = false
                 }
             )
@@ -785,7 +816,7 @@ fun TeacherLessonComposer(
                 onDismiss = { showQuizModal = false },
                 onInsertQuiz = { question, options, correctIdx ->
                     val optsStr = options.joinToString(", ")
-                    lessonContent += "\n[quiz: $question | $optsStr | $correctIdx]\n"
+                    insertTextAtCursor("\n[quiz: $question | $optsStr | $correctIdx]\n")
                     showQuizModal = false
                 }
             )
@@ -796,7 +827,7 @@ fun TeacherLessonComposer(
             WhiteboardCanvasModal(
                 onDismiss = { showWhiteboardModal = false },
                 onSaveImage = { savedImagePath ->
-                    lessonContent += "\n[image: $savedImagePath | Whiteboard Diagram]\n"
+                    insertTextAtCursor("\n[image: $savedImagePath | Whiteboard Diagram]\n")
                     showWhiteboardModal = false
                 }
             )
@@ -809,6 +840,7 @@ fun TeacherLessonComposer(
                 onDismiss = { showAiBottomSheet = false },
                 onApplyResult = { transformedText ->
                     lessonContent = transformedText
+                    contentTextFieldValue = TextFieldValue(transformedText, TextRange(transformedText.length))
                     showAiBottomSheet = false
                 }
             )

@@ -573,21 +573,24 @@ fun ChatItemRow(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     // Checkmarks for messages sent by me
-                    if (lastMessage?.senderId == myId) {
-                        val statusUpper = lastMessage?.status?.uppercase() ?: "SENT"
-                        val icon = when (statusUpper) {
-                            "READ", "DELIVERED" -> Icons.Default.DoneAll
-                            "SENT" -> Icons.Default.Done
+                    val msg = lastMessage
+                    if (msg != null && msg.senderId == myId) {
+                        val isLastMsgRead = msg.isRead || msg.read || msg.status.equals("READ", ignoreCase = true)
+                        val statusUpper = msg.status.uppercase()
+                        val icon = when {
+                            isLastMsgRead -> Icons.Default.DoneAll
+                            statusUpper == "DELIVERED" -> Icons.Default.DoneAll
+                            statusUpper == "SENT" -> Icons.Default.Done
                             else -> Icons.Default.Schedule
                         }
-                        val tint = when (statusUpper) {
-                            "READ" -> LenoMessageStatusSeen
-                            "DELIVERED", "SENT" -> LenoMessageStatusSent
+                        val tint = when {
+                            isLastMsgRead -> LenoMessageStatusSeen
+                            statusUpper == "DELIVERED" || statusUpper == "SENT" -> LenoMessageStatusSent
                             else -> LenoMessageStatusSent.copy(alpha = 0.50f)
                         }
                         Icon(
                             imageVector = icon,
-                            contentDescription = statusUpper,
+                            contentDescription = if (isLastMsgRead) "Read" else statusUpper,
                             tint = tint,
                             modifier = Modifier
                                 .size(16.dp)

@@ -160,9 +160,9 @@ fun MainScreenContainer(
                         modifier = Modifier.padding(top = 16.dp, bottom = 12.dp)
                     ) {
                         androidx.compose.foundation.Image(
-                            painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.ic_leno_sparkle),
+                            painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.ic_leno_logo),
                             contentDescription = "Leno Logo",
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(28.dp)
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
@@ -255,7 +255,7 @@ fun MainScreenContainer(
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             androidx.compose.foundation.Image(
-                                painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.ic_leno_sparkle),
+                                painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.ic_leno_logo),
                                 contentDescription = "Leno Logo",
                                 modifier = Modifier.size(if (isSmall) 20.dp else 24.dp)
                             )

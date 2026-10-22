@@ -153,6 +153,16 @@ fun ProfileScreen(
     var showPayoutDialog by remember { mutableStateOf(false) }
 
     val user = currentUser
+    val existingUserApp = teacherApplications.firstOrNull { it.userId == currentUser?.userId }
+    val isExplicitStudent = user?.role.equals("STUDENT", ignoreCase = true) ||
+        (user?.role.equals("USER", ignoreCase = true) && !user?.teacherStatus.equals("APPROVED", ignoreCase = true) && existingUserApp?.isApproved != true)
+    val isTeacherProfile = !isExplicitStudent &&
+        (user?.role.equals("TEACHER", ignoreCase = true) || user?.teacherStatus.equals("APPROVED", ignoreCase = true) || existingUserApp?.isApproved == true || (userTeacherRole?.isApprovedTeacher == true && userTeacherRole?.isPending == false && userTeacherRole?.isRejected == false)) &&
+        !user?.teacherStatus.equals("PENDING", ignoreCase = true) &&
+        !user?.teacherStatus.equals("REJECTED", ignoreCase = true) &&
+        existingUserApp?.isPending != true &&
+        existingUserApp?.isRejected != true
+
     val linoIdValue = user?.linoId?.ifBlank { "LEN-${user.userId.replace("usr_", "").padEnd(8, '0').take(8).uppercase()}" } ?: ""
     var isUploadingAvatar by remember { mutableStateOf(false) }
 
@@ -426,8 +436,10 @@ fun ProfileScreen(
                 )
 
                 // Role Differentiation: Only approved teachers show who they are (Leno is for everyone, not just students)
-                val isTeacher = user?.isTeacher == true || userTeacherRole?.isTeacher == true || userTeacherRole?.isApprovedTeacher == true || userTeacherRole?.status == "Teacher" || userTeacherRole?.status == "Trusted Teacher" || userTeacherRole?.status == "APPROVED"
-                val isTrusted = userTeacherRole?.isTrustedTeacher == true
+                val existingAppForHeader = teacherApplications.firstOrNull { it.userId == currentUser?.userId }
+                val isExplicitStudentHeader = user?.role.equals("STUDENT", ignoreCase = true) || (user?.role.equals("USER", ignoreCase = true) && !user?.teacherStatus.equals("APPROVED", ignoreCase = true) && existingAppForHeader?.isApproved != true)
+                val isTeacher = !isExplicitStudentHeader && (user?.isTeacher == true || userTeacherRole?.isTeacher == true || userTeacherRole?.isApprovedTeacher == true || userTeacherRole?.status == "Teacher" || userTeacherRole?.status == "Trusted Teacher" || userTeacherRole?.status == "APPROVED" || existingAppForHeader?.isApproved == true)
+                val isTrusted = !isExplicitStudentHeader && userTeacherRole?.isTrustedTeacher == true
                 val isCreator = userTeacherRole?.isContentCreator == true
                 val approvedSubject = user?.effectiveSubject?.ifBlank { userTeacherRole?.effectiveApprovedSubject ?: "" } ?: (userTeacherRole?.effectiveApprovedSubject ?: "")
 
@@ -511,6 +523,32 @@ fun ProfileScreen(
                                     )
                                 }
                             }
+                        }
+                    }
+                } else {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = null,
+                                modifier = Modifier.size(13.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Student / Learner",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
@@ -829,9 +867,8 @@ fun ProfileScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // Teacher Role & Dashboard Card
-        val existingUserApp = teacherApplications.firstOrNull { it.userId == currentUser?.userId }
-        val isTeacherProfile = user?.isTeacher == true || userTeacherRole?.isApprovedTeacher == true || userTeacherRole?.status == "Teacher" || userTeacherRole?.status == "Trusted Teacher" || userTeacherRole?.status == "APPROVED" || existingUserApp?.isApproved == true
+        // Teacher Role & Dashboard Card - STRICTLY ISOLATED
+        // Normal users and students are NEVER allowed to access Teacher Dashboard
         val teacherStatus = if (userTeacherRole?.isTrustedTeacher == true) "Trusted Teacher"
             else if (isTeacherProfile) "Approved Teacher"
             else if (existingUserApp?.isPending == true || userTeacherRole?.isPending == true || userTeacherRole?.status.equals("PENDING", ignoreCase = true) || user?.teacherStatus.equals("PENDING", ignoreCase = true)) "Pending"
@@ -1517,6 +1554,39 @@ fun ProfileScreen(
                     }
                 }
             }
+        } else if (!isTeacherProfile) {
+            Spacer(modifier = Modifier.height(20.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = com.example.ui.theme.LenoPrimaryVeryLight,
+                        modifier = Modifier.size(46.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.School, contentDescription = null, tint = com.example.ui.theme.LenoPrimaryDark, modifier = Modifier.size(24.dp))
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text("Student Learning Hub 📚", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "You are logged in with student access. Explore subjects, study Quran and skills, and enroll in classes from the Class tab.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -2118,7 +2188,7 @@ fun ProfileScreen(
         )
     }
 
-    if (showCreateClassDialog) {
+    if (showCreateClassDialog && isTeacherProfile) {
         val approvedSubject = userTeacherRole?.effectiveApprovedSubject ?: "Mathematics"
         CreateClassDialog(
             approvedSubject = approvedSubject,

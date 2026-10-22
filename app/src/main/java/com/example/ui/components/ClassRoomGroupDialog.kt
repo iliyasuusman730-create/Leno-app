@@ -119,7 +119,7 @@ fun ClassRoomGroupDialog(
     lessons: List<LessonEntity>,
     questions: List<ClassQuestionEntity> = emptyList(),
     enrolledStudents: List<UserEntity> = emptyList(),
-    onAskQuestion: (text: String, audioUrl: String?, durationSec: Int) -> Unit = { _, _, _ -> },
+    onAskQuestion: (text: String, audioUrl: String?, durationSec: Int, senderRole: String) -> Unit = { _, _, _, _ -> },
     onAnswerQuestion: (questionId: String, text: String, audioUrl: String?, durationSec: Int) -> Unit = { _, _, _, _ -> },
     onDismiss: () -> Unit,
     onChatWithInstructor: () -> Unit,
@@ -468,7 +468,7 @@ private fun ClassQuestionsTab(
     questions: List<ClassQuestionEntity>,
     isInstructor: Boolean,
     currentUserId: String,
-    onAskQuestion: (text: String, audioUrl: String?, durationSec: Int) -> Unit,
+    onAskQuestion: (text: String, audioUrl: String?, durationSec: Int, senderRole: String) -> Unit,
     onAnswerQuestion: (questionId: String, text: String, audioUrl: String?, durationSec: Int) -> Unit,
     onAddLessonNote: () -> Unit
 ) {
@@ -485,11 +485,19 @@ private fun ClassQuestionsTab(
     var studentRecordingDurationSec by remember { mutableIntStateOf(0) }
     var isUploadingStudentAudio by remember { mutableStateOf(false) }
 
-    // Teacher Voice Recording State (when answering)
+    // Teacher Voice Recording State (when answering existing questions)
     var isRecordingTeacherAnswer by remember { mutableStateOf(false) }
     var teacherRecordingDurationSec by remember { mutableIntStateOf(0) }
     var recordedTeacherAudioFile by remember { mutableStateOf<File?>(null) }
     var teacherAudioDurationSec by remember { mutableIntStateOf(0) }
+
+    // Teacher Board Note & Voice Recording State (creating board announcement/message/voice note)
+    var isRecordingTeacherBoardNote by remember { mutableStateOf(false) }
+    var teacherBoardRecordingDurationSec by remember { mutableIntStateOf(0) }
+    var recordedTeacherBoardAudioFile by remember { mutableStateOf<File?>(null) }
+    var teacherBoardAudioDurationSec by remember { mutableIntStateOf(0) }
+    var isUploadingTeacherBoardAudio by remember { mutableStateOf(false) }
+    var teacherBoardMessageInput by remember { mutableStateOf("") }
 
     // Permission launcher for microphone
     var pendingMicAction by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -524,7 +532,7 @@ private fun ClassQuestionsTab(
         }
     }
 
-    // Timer for teacher recording
+    // Timer for teacher recording (answering)
     LaunchedEffect(isRecordingTeacherAnswer) {
         if (isRecordingTeacherAnswer) {
             teacherRecordingDurationSec = 0
@@ -535,10 +543,21 @@ private fun ClassQuestionsTab(
         }
     }
 
+    // Timer for teacher board voice note recording
+    LaunchedEffect(isRecordingTeacherBoardNote) {
+        if (isRecordingTeacherBoardNote) {
+            teacherBoardRecordingDurationSec = 0
+            while (isRecordingTeacherBoardNote) {
+                delay(1000L)
+                teacherBoardRecordingDurationSec++
+            }
+        }
+    }
+
     DisposableEffect(Unit) {
         onDispose {
             try {
-                if (isRecordingStudentQuestion || isRecordingTeacherAnswer) {
+                if (isRecordingStudentQuestion || isRecordingTeacherAnswer || isRecordingTeacherBoardNote) {
                     audioRecorderHelper.stopRecording()
                 }
             } catch (_: Exception) {}
@@ -662,6 +681,7 @@ private fun ClassQuestionsTab(
                                         )
                                     }
                                     Spacer(modifier = Modifier.width(8.dp))
+                                    val isTeacherPost = q.senderRole.equals("TEACHER", ignoreCase = true)
                                     Column {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Text(
@@ -673,13 +693,13 @@ private fun ClassQuestionsTab(
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Surface(
                                                 shape = RoundedCornerShape(4.dp),
-                                                color = Color(0xFFE0E0E0)
+                                                color = if (isTeacherPost) Color(0xFFE8F5E9) else Color(0xFFE0E0E0)
                                             ) {
                                                 Text(
-                                                    text = "Student",
+                                                    text = if (isTeacherPost) "Teacher 🎓" else "Student",
                                                     fontSize = 9.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    color = Color(0xFF424242),
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (isTeacherPost) Color(0xFF2E7D32) else Color(0xFF424242),
                                                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                                                 )
                                             }
@@ -692,15 +712,16 @@ private fun ClassQuestionsTab(
                                     }
                                 }
 
+                                val isTeacherPost = q.senderRole.equals("TEACHER", ignoreCase = true)
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
-                                    color = if (q.isAnswered) Color(0xFFE8F5E9) else Color(0xFFFFF3E0)
+                                    color = if (isTeacherPost) Color(0xFFE8F5E9) else if (q.isAnswered) Color(0xFFE8F5E9) else Color(0xFFFFF3E0)
                                 ) {
                                     Text(
-                                        text = if (q.isAnswered) "Answered ✓" else "Pending ⏳",
+                                        text = if (isTeacherPost) "Board Note 📢" else if (q.isAnswered) "Answered ✓" else "Pending ⏳",
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (q.isAnswered) Color(0xFF2E7D32) else Color(0xFFE65100),
+                                        color = if (isTeacherPost) Color(0xFF2E7D32) else if (q.isAnswered) Color(0xFF2E7D32) else Color(0xFFE65100),
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
                                 }
@@ -708,32 +729,36 @@ private fun ClassQuestionsTab(
 
                             Spacer(modifier = Modifier.height(8.dp))
 
-                            // Question Content
+                            val isTeacherPost = q.senderRole.equals("TEACHER", ignoreCase = true)
+                            // Question / Announcement Content
                             if (q.questionText.isNotBlank()) {
                                 Row(verticalAlignment = Alignment.Top) {
-                                    Text(
-                                        text = "Q: ",
-                                        fontWeight = FontWeight.Black,
-                                        fontSize = 14.sp,
-                                        color = LenoPrimaryDark
-                                    )
+                                    if (!isTeacherPost) {
+                                        Text(
+                                            text = "Q: ",
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 14.sp,
+                                            color = LenoPrimaryDark
+                                        )
+                                    }
                                     Text(
                                         text = q.questionText,
                                         fontSize = 13.sp,
+                                        fontWeight = if (isTeacherPost) FontWeight.SemiBold else FontWeight.Normal,
                                         color = MaterialTheme.colorScheme.onSurface,
                                         lineHeight = 18.sp
                                     )
                                 }
                             }
 
-                            // Voice Question Playback (if audio exists)
+                            // Voice Question/Note Playback (if audio exists)
                             if (!q.audioUrl.isNullOrBlank()) {
                                 Spacer(modifier = Modifier.height(6.dp))
                                 ClassVoiceNotePlayer(
                                     audioUrl = q.audioUrl,
                                     durationSec = q.audioDurationSeconds,
-                                    accentColor = LenoPrimary,
-                                    label = "Student Voice Question"
+                                    accentColor = if (isTeacherPost) Color(0xFF2E7D32) else LenoPrimary,
+                                    label = if (isTeacherPost) "Teacher Voice Note" else "Student Voice Question"
                                 )
                             }
 
@@ -1071,7 +1096,7 @@ private fun ClassQuestionsTab(
                                                 val durMins = finalDuration / 60
                                                 val durSecs = finalDuration % 60
                                                 val durationStr = String.format(Locale.getDefault(), "%d:%02d", durMins, durSecs)
-                                                onAskQuestion("🎤 Voice Question ($durationStr)", audioUrl, finalDuration)
+                                                onAskQuestion("🎤 Voice Question ($durationStr)", audioUrl, finalDuration, "STUDENT")
                                                 isUploadingStudentAudio = false
                                             }
                                         }
@@ -1163,7 +1188,7 @@ private fun ClassQuestionsTab(
                             IconButton(
                                 onClick = {
                                     if (questionInput.isNotBlank()) {
-                                        onAskQuestion(questionInput.trim(), null, 0)
+                                        onAskQuestion(questionInput.trim(), null, 0, "STUDENT")
                                         questionInput = ""
                                     }
                                 },
@@ -1191,37 +1216,250 @@ private fun ClassQuestionsTab(
                     )
                 }
             } else {
-                // TEACHER: Quick action to add new notes / syllabus
-                Row(
+                // TEACHER: Can post announcements, messages, or voice notes to the board + Add Lesson Note
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Teacher Management Mode",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = LenoPrimaryDark
-                        )
-                        Text(
-                            text = "Respond to questions above or post syllabus notes",
-                            fontSize = 10.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    if (isRecordingTeacherBoardNote) {
+                        // LIVE VOICE RECORDING UI FOR TEACHER BOARD NOTE
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val mins = teacherBoardRecordingDurationSec / 60
+                                val secs = teacherBoardRecordingDurationSec % 60
+                                val timeStr = String.format(Locale.getDefault(), "%d:%02d", mins, secs)
 
-                    Button(
-                        onClick = onAddLessonNote,
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = LenoPrimary),
-                        modifier = Modifier.testTag("teacher_add_note_btn")
-                    ) {
-                        Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Add Lesson Note", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Icon(
+                                    imageVector = Icons.Default.Mic,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "🔴 Recording Voice Note: $timeStr",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+
+                                Spacer(modifier = Modifier.weight(1f))
+
+                                // Discard recording
+                                IconButton(
+                                    onClick = {
+                                        audioRecorderHelper.stopRecording()
+                                        isRecordingTeacherBoardNote = false
+                                        recordedTeacherBoardAudioFile = null
+                                    },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Cancel Recording",
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(6.dp))
+
+                                // Stop recording & save
+                                IconButton(
+                                    onClick = {
+                                        val finalDuration = if (teacherBoardRecordingDurationSec < 1) 1 else teacherBoardRecordingDurationSec
+                                        val recResult = audioRecorderHelper.stopRecording()
+                                        isRecordingTeacherBoardNote = false
+                                        val audioFile = recResult.getOrNull()
+                                        if (audioFile != null && audioFile.exists() && audioFile.length() > 44L) {
+                                            recordedTeacherBoardAudioFile = audioFile
+                                            teacherBoardAudioDurationSec = finalDuration
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF2E7D32))
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Stop,
+                                        contentDescription = "Done Recording",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    } else if (isUploadingTeacherBoardAudio) {
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = LenoPrimaryVeryLight,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = LenoPrimary
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Posting voice note to board...", fontSize = 12.sp, color = LenoPrimaryDark, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    } else {
+                        // Attached voice note chip
+                        if (recordedTeacherBoardAudioFile != null) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color(0xFFE8F5E9),
+                                border = BorderStroke(1.dp, Color(0xFFA5D6A7)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Mic, contentDescription = null, tint = Color(0xFF2E7D32), modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Voice note attached (${teacherBoardAudioDurationSec}s)", fontSize = 11.sp, color = Color(0xFF2E7D32), fontWeight = FontWeight.SemiBold)
+                                    Spacer(modifier = Modifier.weight(1f))
+                                    IconButton(
+                                        onClick = {
+                                            recordedTeacherBoardAudioFile = null
+                                            teacherBoardAudioDurationSec = 0
+                                        },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(Icons.Default.Close, contentDescription = "Remove", modifier = Modifier.size(14.dp))
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                        }
+
+                        // Input bar: Type announcement / message + Mic button + Send button
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = teacherBoardMessageInput,
+                                onValueChange = { teacherBoardMessageInput = it },
+                                placeholder = { Text("Post message or voice note to class board...", fontSize = 12.sp) },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("teacher_board_message_input"),
+                                shape = RoundedCornerShape(20.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = LenoPrimary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+                                ),
+                                maxLines = 3
+                            )
+
+                            Spacer(modifier = Modifier.width(6.dp))
+
+                            // Mic Button for Teacher Voice Note
+                            IconButton(
+                                onClick = {
+                                    checkAndRequestMic {
+                                        audioRecorderHelper.startRecording()
+                                        isRecordingTeacherBoardNote = true
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFE8F5E9))
+                                    .testTag("teacher_record_board_voice_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Mic,
+                                    contentDescription = "Record Teacher Voice Note",
+                                    tint = Color(0xFF2E7D32),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(6.dp))
+
+                            // Send Button
+                            IconButton(
+                                onClick = {
+                                    if (teacherBoardMessageInput.isNotBlank() || recordedTeacherBoardAudioFile != null) {
+                                        isUploadingTeacherBoardAudio = true
+                                        coroutineScope.launch {
+                                            val audioUrl = recordedTeacherBoardAudioFile?.let { file ->
+                                                val storageService = FirebaseStorageService()
+                                                val uploadRes = storageService.uploadVoiceNoteFile(file, classItem.classId)
+                                                uploadRes.getOrDefault(AudioRecorderHelper.convertAudioFileToBase64DataUrl(file))
+                                            }
+                                            val finalText = if (teacherBoardMessageInput.isNotBlank()) teacherBoardMessageInput.trim() else "🎤 Voice Note"
+                                            onAskQuestion(finalText, audioUrl, teacherBoardAudioDurationSec, "TEACHER")
+                                            teacherBoardMessageInput = ""
+                                            recordedTeacherBoardAudioFile = null
+                                            teacherBoardAudioDurationSec = 0
+                                            isUploadingTeacherBoardAudio = false
+                                        }
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(LenoPrimary)
+                                    .testTag("teacher_board_send_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = "Post to Board",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        // Quick Syllabus Note Button
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "🎙️ Teacher Mode: Post messages & voice notes to the board",
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            OutlinedButton(
+                                onClick = onAddLessonNote,
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.testTag("teacher_add_note_btn")
+                            ) {
+                                Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(12.dp))
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text("Add Lesson Note", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
             }

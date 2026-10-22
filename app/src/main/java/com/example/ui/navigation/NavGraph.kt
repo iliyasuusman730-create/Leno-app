@@ -160,11 +160,12 @@ fun LenoNavGraph(
             )
         ) { backStackEntry ->
             val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
+            val isOwner = viewModel.currentUser.value?.isOwner == true || viewModel.currentUser.value?.isAdmin == true
             SupportChatScreen(
                 viewModel = viewModel,
                 chatId = chatId,
                 onBack = { navController.popBackStack() },
-                isOwnerMode = false
+                isOwnerMode = isOwner
             )
         }
 
@@ -175,11 +176,12 @@ fun LenoNavGraph(
             )
         ) { backStackEntry ->
             val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
+            val isOwner = viewModel.currentUser.value?.isOwner == true || viewModel.currentUser.value?.isAdmin == true
             SupportChatScreen(
                 viewModel = viewModel,
                 chatId = chatId,
                 onBack = { navController.popBackStack() },
-                isOwnerMode = false
+                isOwnerMode = isOwner
             )
         }
     }

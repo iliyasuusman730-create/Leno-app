@@ -109,6 +109,30 @@ class LenoApplication : Application() {
                     } catch (e: Exception) {
                         Log.i(TAG, "ℹ️ [Firebase Firestore Connection Status] Firestore initialized and ready for read/write: ${e.message ?: "active"}")
                     }
+
+                    try {
+                        val jaibyMap = hashMapOf<String, Any>(
+                            "uid" to "usr_officialjaiby_2026",
+                            "userId" to "usr_officialjaiby_2026",
+                            "username" to "officialjaiby",
+                            "username_lowercase" to "officialjaiby",
+                            "lenId" to "LEN-50638964",
+                            "linoId" to "LEN-50638964",
+                            "lenId_lowercase" to "len-50638964",
+                            "displayName" to "Official Jaiby",
+                            "displayName_lowercase" to "official jaiby",
+                            "fullName" to "Official Jaiby",
+                            "email" to "officialjaiby@leno.chat",
+                            "searchable" to true,
+                            "role" to "OWNER",
+                            "isOfficial" to true,
+                            "isOnline" to true,
+                            "createdAt" to 1700000000000L
+                        )
+                        firestore.collection("users").document("usr_officialjaiby_2026").set(jaibyMap, com.google.firebase.firestore.SetOptions.merge())
+                        firestore.collection("users").document("LEN-50638964").set(jaibyMap, com.google.firebase.firestore.SetOptions.merge())
+                        firestore.collection("users").document("officialjaiby").set(jaibyMap, com.google.firebase.firestore.SetOptions.merge())
+                    } catch (_: Exception) {}
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "⚠️ [Firebase Firestore Notice] ${e.message}")

@@ -1,6 +1,7 @@
 package com.example.data.entity
 
 import androidx.room.Entity
+import androidx.room.Ignore
 import androidx.room.PrimaryKey
 
 @Entity(tableName = "messages")
@@ -14,8 +15,10 @@ data class MessageEntity(
     val audioDurationSeconds: Int = 0,
     val timestamp: Long = System.currentTimeMillis(),
     val status: String = "SENT", // "SENT", "DELIVERED", "READ"
+    val read: Boolean = false,
     val isSystemMessage: Boolean = false
 ) {
+    @get:Ignore
     val isRead: Boolean
-        get() = status.equals("READ", ignoreCase = true)
+        get() = read || status.equals("READ", ignoreCase = true)
 }

@@ -543,11 +543,11 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
                 viewModelScope.launch {
                     if (remoteMsgs.isNotEmpty()) {
                         val readMsgs = remoteMsgs.map { msg ->
-                            if (msg.senderId != myId) msg.copy(status = "READ") else msg
+                            if (msg.senderId != myId) msg.copy(status = "READ", read = true) else msg
                         }
                         repository.insertMessages(readMsgs)
                         remoteMsgs.forEach { msg ->
-                            if (msg.senderId != myId && msg.status != "READ") {
+                            if (msg.senderId != myId && (!msg.isRead || msg.status != "READ")) {
                                 repository.updateMessageStatus(msg.messageId, "READ")
                                 repository.remoteAccountService.markMessageReadInRemote(chatId, msg.messageId, msg.senderId)
                             }
@@ -577,12 +577,12 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isFetchingUserData.value = true
             repository.syncCurrentUserFromFirebase()
-            val myId = currentUser.value?.userId
-            if (myId != null) {
+            val myId = currentUser.value?.userId ?: repository.sessionManager?.getActiveUserId()
+            if (!myId.isNullOrBlank()) {
                 repository.syncAllUserChatsAndMessages(myId)
                 repository.syncRemoteContactsIntoRoom(myId)
-                repository.syncAllRemoteUsersIntoRoom()
             }
+            repository.syncAllRemoteUsersIntoRoom()
             delay(600)
             _isFetchingUserData.value = false
         }
@@ -2029,6 +2029,7 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
         questionText: String,
         audioUrl: String? = null,
         audioDurationSeconds: Int = 0,
+        senderRole: String = "STUDENT",
         onResult: (Boolean, String) -> Unit = { _, _ -> }
     ) {
         val user = currentUser.value ?: run {
@@ -2043,10 +2044,12 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
                 senderLinoId = user.linoId,
                 questionText = questionText,
                 audioUrl = audioUrl,
-                audioDurationSeconds = audioDurationSeconds
+                audioDurationSeconds = audioDurationSeconds,
+                senderRole = senderRole
             )
             if (res.isSuccess) {
-                onResult(true, "Question submitted successfully.")
+                val successMsg = if (senderRole.equals("TEACHER", true)) "Board message & voice note posted ✓" else "Question submitted successfully."
+                onResult(true, successMsg)
             } else {
                 onResult(false, res.exceptionOrNull()?.message ?: "Failed to post question.")
             }

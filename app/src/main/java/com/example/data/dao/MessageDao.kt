@@ -160,10 +160,10 @@ interface MessageDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessages(messages: List<MessageEntity>)
 
-    @Query("UPDATE messages SET status = 'READ' WHERE receiverId = :currentUserId AND senderId = :otherUserId")
+    @Query("UPDATE messages SET status = 'READ', read = 1 WHERE receiverId = :currentUserId AND senderId = :otherUserId")
     suspend fun markMessagesAsRead(currentUserId: String, otherUserId: String)
 
-    @Query("UPDATE messages SET status = 'READ' WHERE receiverId IN (:currentUserIds) AND senderId IN (:otherUserIds) AND status != 'READ'")
+    @Query("UPDATE messages SET status = 'READ', read = 1 WHERE receiverId IN (:currentUserIds) AND senderId IN (:otherUserIds) AND (status != 'READ' OR read = 0)")
     suspend fun markMessagesAsReadWithAliases(currentUserIds: List<String>, otherUserIds: List<String>)
 
     @Query("SELECT * FROM messages WHERE messageId = :messageId LIMIT 1")
@@ -172,8 +172,11 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE senderId = :currentUserId AND (status = 'SENDING' OR status = 'FAILED')")
     suspend fun getPendingMessagesForUserSync(currentUserId: String): List<MessageEntity>
 
-    @Query("UPDATE messages SET status = :status WHERE messageId = :messageId")
+    @Query("UPDATE messages SET status = :status, read = CASE WHEN :status = 'READ' THEN 1 ELSE read END WHERE messageId = :messageId")
     suspend fun updateMessageStatus(messageId: String, status: String)
+
+    @Query("UPDATE messages SET read = :read, status = CASE WHEN :read = 1 THEN 'READ' ELSE status END WHERE messageId = :messageId")
+    suspend fun updateMessageReadStatus(messageId: String, read: Boolean)
 
     @Query("UPDATE messages SET senderId = :newUid WHERE senderId = :oldUid")
     suspend fun migrateSenderId(oldUid: String, newUid: String)

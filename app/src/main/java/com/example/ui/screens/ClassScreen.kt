@@ -652,12 +652,13 @@ fun ClassScreen(
             lessons = groupLessons,
             questions = groupQuestions,
             enrolledStudents = enrolledStudents,
-            onAskQuestion = { qText, audioUrl, durationSec ->
+            onAskQuestion = { qText, audioUrl, durationSec, sRole ->
                 viewModel.askQuestionInClass(
                     classId = groupClass.classId,
                     questionText = qText,
                     audioUrl = audioUrl,
-                    audioDurationSeconds = durationSec
+                    audioDurationSeconds = durationSec,
+                    senderRole = sRole
                 ) { success, msg ->
                     Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                 }

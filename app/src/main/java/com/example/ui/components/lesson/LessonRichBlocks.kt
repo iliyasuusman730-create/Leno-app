@@ -191,9 +191,10 @@ fun parseLessonContentToBlocks(rawContent: String): List<LessonBlock> {
                 i++
             }
 
-            // Voice block: [voice: url|duration]
-            line.trim().startsWith("[voice:") && line.trim().endsWith("]") -> {
-                val payload = line.trim().removePrefix("[voice:").removeSuffix("]").trim()
+            // Voice block: [voice: url|duration] or [audio: url|duration]
+            (line.trim().startsWith("[voice:", ignoreCase = true) || line.trim().startsWith("[audio:", ignoreCase = true)) && line.trim().endsWith("]") -> {
+                val prefix = if (line.trim().startsWith("[voice:", ignoreCase = true)) "[voice:" else "[audio:"
+                val payload = line.trim().removePrefix(prefix).removeSuffix("]").trim()
                 val parts = payload.split("|")
                 val url = parts.getOrNull(0)?.trim() ?: ""
                 val dur = parts.getOrNull(1)?.trim()?.toIntOrNull() ?: 0

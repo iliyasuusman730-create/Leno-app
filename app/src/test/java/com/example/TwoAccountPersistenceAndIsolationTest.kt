@@ -55,6 +55,26 @@ class FakeRemoteAccountService : RemoteAccountService() {
         return Result.success(uid)
     }
 
+    override suspend fun signUpWithFirebaseAuth(
+        email: String,
+        password: String,
+        username: String,
+        displayName: String,
+        lenId: String
+    ): Result<String> {
+        return signUpWithFirebaseAuth(email, password)
+    }
+
+    override suspend fun isUsernameTakenInUsersCollection(username: String): Boolean {
+        val clean = username.trim().removePrefix("@").lowercase()
+        return claimedUsernames.containsKey(clean) || remoteUsers.values.any { it.username.lowercase() == clean }
+    }
+
+    override suspend fun isLenoIdTakenInFirestore(lenoId: String): Boolean {
+        val clean = lenoId.trim().uppercase()
+        return claimedLenoIds.containsKey(clean) || remoteUsers.values.any { it.linoId.equals(clean, ignoreCase = true) }
+    }
+
     override suspend fun signInWithFirebaseAuth(email: String, password: String): Result<String> {
         val clean = email.trim().lowercase()
         val uid = authAccounts[clean]

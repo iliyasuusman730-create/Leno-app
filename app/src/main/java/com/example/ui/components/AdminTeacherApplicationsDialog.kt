@@ -250,7 +250,8 @@ fun AdminTeacherApplicationsDialog(
                         IconButton(
                             onClick = {
                                 viewModel.refreshTeacherApplications()
-                                Toast.makeText(context, "Refreshing teacher_applications collection...", Toast.LENGTH_SHORT).show()
+                                viewModel.loadAdminDirectoryUsers()
+                                Toast.makeText(context, "Refreshing directory users & applications...", Toast.LENGTH_SHORT).show()
                             }
                         ) {
                             Icon(
@@ -682,6 +683,8 @@ fun AdminTeacherApplicationsDialog(
                             val queryMatch = q.isEmpty() ||
                                 u.displayName.lowercase().contains(q) ||
                                 u.username.lowercase().contains(q) ||
+                                u.linoId.lowercase().contains(q) ||
+                                u.linoId.replace("-", "").lowercase().contains(q.replace("-", "")) ||
                                 u.email.lowercase().contains(q) ||
                                 u.userId.lowercase().contains(q) ||
                                 u.assignedSubject.lowercase().contains(q)

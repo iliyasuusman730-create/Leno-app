@@ -1445,24 +1445,26 @@ fun MessageBubble(
 
                     if (isFromMe) {
                         Spacer(modifier = Modifier.width(4.dp))
+                        val isMessageRead = message.isRead || message.read || message.status.equals("READ", ignoreCase = true)
                         val statusUpper = message.status.uppercase()
-                        val statusIcon = when (statusUpper) {
-                            "READ", "DELIVERED" -> Icons.Default.DoneAll
-                            "SENT" -> Icons.Default.Done
-                            "FAILED" -> Icons.Default.Report
+                        val statusIcon = when {
+                            isMessageRead -> Icons.Default.DoneAll
+                            statusUpper == "DELIVERED" -> Icons.Default.DoneAll
+                            statusUpper == "SENT" -> Icons.Default.Done
+                            statusUpper == "FAILED" -> Icons.Default.Report
                             else -> Icons.Default.Schedule
                         }
-                        val statusTint = when (statusUpper) {
-                            "READ" -> LenoMessageStatusSeen
-                            "FAILED" -> LenoStatusErrorText
-                            "SENT", "DELIVERED" -> LenoMessageStatusSent
+                        val statusTint = when {
+                            isMessageRead -> LenoMessageStatusSeen
+                            statusUpper == "FAILED" -> LenoStatusErrorText
+                            statusUpper == "SENT" || statusUpper == "DELIVERED" -> LenoMessageStatusSent
                             else -> LenoMessageStatusSent.copy(alpha = 0.6f)
                         }
-                        val statusDesc = when (statusUpper) {
-                            "READ" -> "Read"
-                            "DELIVERED" -> "Delivered"
-                            "SENT" -> "Sent"
-                            "FAILED" -> "Failed to send. Tap to retry."
+                        val statusDesc = when {
+                            isMessageRead -> "Read"
+                            statusUpper == "DELIVERED" -> "Delivered"
+                            statusUpper == "SENT" -> "Sent"
+                            statusUpper == "FAILED" -> "Failed to send. Tap to retry."
                             else -> "Sending"
                         }
 
@@ -1472,7 +1474,7 @@ fun MessageBubble(
                             tint = statusTint,
                             modifier = Modifier
                                 .size(15.dp)
-                                .testTag(if (statusUpper == "READ") "read_receipt_${message.messageId}" else "message_status_${message.messageId}")
+                                .testTag(if (isMessageRead) "read_receipt_${message.messageId}" else "message_status_${message.messageId}")
                         )
                     }
                 }
@@ -1480,11 +1482,12 @@ fun MessageBubble(
         }
 
         AnimatedVisibility(visible = showStatusDetail && isFromMe) {
-            val statusLabel = when (message.status.uppercase()) {
-                "READ" -> "Read ✓✓"
-                "DELIVERED" -> "Delivered ✓✓"
-                "SENT" -> "Sent ✓"
-                "FAILED" -> "Failed • Tap to retry ↻"
+            val isMessageRead = message.isRead || message.read || message.status.equals("READ", ignoreCase = true)
+            val statusLabel = when {
+                isMessageRead -> "Read ✓✓"
+                message.status.uppercase() == "DELIVERED" -> "Delivered ✓✓"
+                message.status.uppercase() == "SENT" -> "Sent ✓"
+                message.status.uppercase() == "FAILED" -> "Failed • Tap to retry ↻"
                 else -> "Sending..."
             }
             Surface(
