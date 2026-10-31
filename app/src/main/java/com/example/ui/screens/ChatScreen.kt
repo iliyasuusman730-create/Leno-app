@@ -5,7 +5,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -492,6 +499,7 @@ fun ChatScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChatMessageBubble(
     message: FirestoreChatMessage,
@@ -502,6 +510,36 @@ private fun ChatMessageBubble(
     val formattedTime = remember(message.timestamp) {
         timeFormat.format(Date(message.timestamp))
     }
+
+    var showActionsRow by remember { mutableStateOf(false) }
+
+    val bubbleShape = remember(isFromMe) {
+        if (isFromMe) {
+            RoundedCornerShape(
+                topStart = 18.dp,
+                topEnd = 18.dp,
+                bottomStart = 18.dp,
+                bottomEnd = 4.dp
+            )
+        } else {
+            RoundedCornerShape(
+                topStart = 18.dp,
+                topEnd = 18.dp,
+                bottomStart = 4.dp,
+                bottomEnd = 18.dp
+            )
+        }
+    }
+
+    // Bubble Colors: .sent { background: #00A86B; color: #FFFFFF; } and .receive { background: #F3F4F6; color: #111827; }
+    val sentBackground = Color(0xFF00A86B)
+    val receiveBackground = Color(0xFFF3F4F6)
+
+    val textColor = if (isFromMe) Color(0xFFFFFFFF) else Color(0xFF111827)
+    val timeColor = if (isFromMe) Color.White.copy(alpha = 0.7f) else Color(0xFF111827).copy(alpha = 0.7f)
+
+    val screenWidth = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
+    val bubbleMaxWidth = screenWidth * 0.75f
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -517,78 +555,140 @@ private fun ChatMessageBubble(
         }
 
         Surface(
-            shape = RoundedCornerShape(
-                topStart = 16.dp,
-                topEnd = 16.dp,
-                bottomStart = if (isFromMe) 16.dp else 4.dp,
-                bottomEnd = if (isFromMe) 4.dp else 16.dp
-            ),
-            color = if (isFromMe) LenoChatSentBubble else LenoChatReceivedBubble,
-            tonalElevation = 1.dp,
+            shape = bubbleShape,
+            color = if (isFromMe) sentBackground else receiveBackground,
+            shadowElevation = 0.5.dp,
             modifier = Modifier
-                .widthIn(max = com.example.util.responsiveBubbleMaxWidth(false))
+                .widthIn(max = bubbleMaxWidth)
                 .testTag("chat_message_item_${message.id}")
         ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+            Box(
+                modifier = Modifier
+                    .background(if (isFromMe) sentBackground else receiveBackground)
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = { showActionsRow = !showActionsRow }
+                    )
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
             ) {
-                if (!message.imageUrl.isNullOrBlank()) {
-                    AsyncImage(
-                        model = message.imageUrl,
-                        contentDescription = "Attached photo",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 120.dp, max = 220.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .testTag("chat_bubble_image_${message.id}"),
-                        contentScale = ContentScale.Crop
-                    )
-                    if (message.text.isNotBlank() && message.text != "📷 Photo") {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = message.text,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = if (isFromMe) LenoChatSentText else LenoChatReceivedText
+                Column {
+                    if (!message.imageUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            model = message.imageUrl,
+                            contentDescription = "Attached photo",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 120.dp, max = 220.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .testTag("chat_bubble_image_${message.id}"),
+                            contentScale = ContentScale.Crop
                         )
-                    }
-                } else {
-                    Text(
-                        text = message.text,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = if (isFromMe) LenoChatSentText else LenoChatReceivedText
-                    )
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(
-                    modifier = Modifier.align(Alignment.End),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = formattedTime,
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                        color = if (isFromMe) LenoChatSentText.copy(alpha = 0.75f) else LenoChatMessageTimestamp
-                    )
-                    if (isFromMe) {
-                        Spacer(modifier = Modifier.width(4.dp))
-                        if (message.read) {
-                            Icon(
-                                imageVector = Icons.Default.DoneAll,
-                                contentDescription = "Read",
-                                tint = LenoMessageStatusSeen,
-                                modifier = Modifier
-                                    .size(15.dp)
-                                    .testTag("read_receipt_${message.id}")
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.Done,
-                                contentDescription = "Sent",
-                                tint = LenoMessageStatusSent,
-                                modifier = Modifier
-                                    .size(15.dp)
-                                    .testTag("sent_receipt_${message.id}")
+                        if (message.text.isNotBlank() && message.text != "📷 Photo") {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = message.text,
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontSize = 16.sp,
+                                    lineHeight = 22.sp
+                                ),
+                                color = textColor
                             )
                         }
+                    } else {
+                        Text(
+                            text = message.text,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontSize = 16.sp,
+                                lineHeight = 22.sp
+                            ),
+                            color = textColor
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.align(Alignment.End),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = formattedTime,
+                            fontSize = 10.sp,
+                            color = timeColor
+                        )
+                        if (isFromMe) {
+                            Spacer(modifier = Modifier.width(4.dp))
+                            if (message.read) {
+                                Icon(
+                                    imageVector = Icons.Default.DoneAll,
+                                    contentDescription = "Read",
+                                    tint = LenoMessageStatusSeen,
+                                    modifier = Modifier
+                                        .size(14.dp)
+                                        .testTag("read_receipt_${message.id}")
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Done,
+                                    contentDescription = "Sent",
+                                    tint = Color.White.copy(alpha = 0.7f),
+                                    modifier = Modifier
+                                        .size(14.dp)
+                                        .testTag("sent_receipt_${message.id}")
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Actions Row below bubble
+        AnimatedVisibility(visible = showActionsRow) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xF0FFFFFF),
+                border = BorderStroke(1.dp, Color(0x40818CF8)),
+                shadowElevation = 3.dp,
+                modifier = Modifier
+                    .padding(top = 4.dp, bottom = 4.dp)
+                    .testTag("actions_row_${message.id}")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    IconButton(
+                        onClick = { showActionsRow = false },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_reply),
+                            contentDescription = "Reply",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = { showActionsRow = false },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_forward),
+                            contentDescription = "Forward",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = { showActionsRow = false },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_delete),
+                            contentDescription = "Delete",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                 }
             }

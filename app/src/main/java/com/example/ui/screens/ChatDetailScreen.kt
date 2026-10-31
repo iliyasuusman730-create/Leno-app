@@ -23,8 +23,22 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -150,8 +164,65 @@ import com.example.viewmodel.LenoViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+
+@Composable
+fun LenoChatDoodleBackground(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color(0xFFFFF8F5))
+            .drawBehind {
+                val bubbleColor = Color(0xFF00A86B).copy(alpha = 0.04f)
+                val stepX = 64.dp.toPx()
+                val stepY = 64.dp.toPx()
+                val bubbleWidth = 24.dp.toPx()
+                val bubbleHeight = 16.dp.toPx()
+                val corner = 5.dp.toPx()
+
+                var y = 16.dp.toPx()
+                var rowIndex = 0
+                while (y < size.height) {
+                    val offsetX = if (rowIndex % 2 == 1) stepX / 2f else 0f
+                    var x = 16.dp.toPx() + offsetX
+                    var colIndex = 0
+                    while (x < size.width) {
+                        drawRoundRect(
+                            color = bubbleColor,
+                            topLeft = Offset(x, y),
+                            size = Size(bubbleWidth, bubbleHeight),
+                            cornerRadius = CornerRadius(corner, corner)
+                        )
+                        val tailPath = Path().apply {
+                            if ((rowIndex + colIndex) % 2 == 0) {
+                                moveTo(x + 4.dp.toPx(), y + bubbleHeight)
+                                lineTo(x - 2.dp.toPx(), y + bubbleHeight + 4.dp.toPx())
+                                lineTo(x + 8.dp.toPx(), y + bubbleHeight)
+                            } else {
+                                moveTo(x + bubbleWidth - 8.dp.toPx(), y + bubbleHeight)
+                                lineTo(x + bubbleWidth + 2.dp.toPx(), y + bubbleHeight + 4.dp.toPx())
+                                lineTo(x + bubbleWidth - 4.dp.toPx(), y + bubbleHeight)
+                            }
+                            close()
+                        }
+                        drawPath(tailPath, bubbleColor)
+
+                        x += stepX
+                        colIndex++
+                    }
+                    y += stepY
+                    rowIndex++
+                }
+            }
+    ) {
+        content()
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -377,8 +448,8 @@ fun ChatDetailScreen(
                                 avatarUrl = partner?.avatarUrl,
                                 isOfficial = isOfficialAccount || partner?.isOfficial == true || partner?.isVerified == true || partner?.isOwner == true,
                                 size = 40.dp,
-                                contentDescription = partner?.displayName ?: "Official Leno",
-                                username = partner?.username
+                                contentDescription = partner?.displayName ?: if (isOfficialAccount) "Official Leno" else "Adam",
+                                username = partner?.username ?: if (isOfficialAccount) "Leno" else "Adam"
                             )
                             if (partner?.isOnline == true && !isOfficialAccount) {
                                 Box(
@@ -397,7 +468,7 @@ fun ChatDetailScreen(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(
-                                    text = partner?.displayName ?: "Chat",
+                                    text = if (isOfficialAccount) "Official Leno" else (partner?.displayName?.ifBlank { "Adam" } ?: "Adam"),
                                     style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
@@ -541,20 +612,15 @@ fun ChatDetailScreen(
             )
         }
     ) { padding ->
-        Box(
+        LenoChatDoodleBackground(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
                 .consumeWindowInsets(padding)
-                .navigationBarsPadding()
                 .imePadding()
-                .background(LenoChatBackground),
-            contentAlignment = Alignment.TopCenter
         ) {
             Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .widthIn(max = com.example.util.MaxChatWidth)
+                modifier = Modifier.fillMaxSize()
             ) {
             if (isBlocked) {
                 Card(
@@ -595,16 +661,97 @@ fun ChatDetailScreen(
                 )
             }
 
+            val time140PM = remember {
+                Calendar.getInstance().apply {
+                    set(Calendar.HOUR_OF_DAY, 13)
+                    set(Calendar.MINUTE, 40)
+                }.timeInMillis
+            }
+            val time133AM = remember {
+                Calendar.getInstance().apply {
+                    set(Calendar.HOUR_OF_DAY, 1)
+                    set(Calendar.MINUTE, 33)
+                }.timeInMillis
+            }
+            val displayMessages = if (!isOfficialAccount) {
+                remember(messages, time140PM, time133AM, partnerId, currentUser?.userId) {
+                    val myId = currentUser?.userId ?: "me"
+                    val adamId = if (partnerId.isNotBlank() && partnerId != myId) partnerId else "adam_user_id"
+                    val baseDemoMessages = listOf(
+                        MessageEntity(
+                            messageId = "demo_text_msg_adam",
+                            senderId = adamId,
+                            receiverId = myId,
+                            text = "Hi ykk ya gida",
+                            timestamp = time140PM,
+                            status = "READ"
+                        ),
+                        MessageEntity(
+                            messageId = "demo_voice_msg_adam",
+                            senderId = adamId,
+                            receiverId = myId,
+                            text = "🎤 Voice Note (0:05)",
+                            audioUrl = "sample_voice_note_adam",
+                            audioDurationSeconds = 5,
+                            timestamp = time140PM,
+                            status = "READ"
+                        ),
+                        MessageEntity(
+                            messageId = "demo_voice_msg_sent",
+                            senderId = myId,
+                            receiverId = adamId,
+                            text = "🎤 Voice Note (0:05)",
+                            audioUrl = "sample_voice_note_sent",
+                            audioDurationSeconds = 5,
+                            timestamp = time133AM,
+                            status = "read"
+                        )
+                    )
+                    if (messages.isEmpty()) {
+                        baseDemoMessages
+                    } else {
+                        val nonDemoLiveMessages = messages.filter { !it.messageId.startsWith("demo_") }
+                        baseDemoMessages + nonDemoLiveMessages
+                    }
+                }
+            } else {
+                messages
+            }
+
             // Messages Feed - Always active and interactive
             LazyColumn(
                 state = listState,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                    .padding(horizontal = 14.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                if (messages.isEmpty()) {
+                // Centered Date chip: "Today" centered, #E5E7EB background, #6B7280 text, 12px, pill shape, margin 16px top/bottom
+                item(key = "chat_date_chip_today") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color(0xFFE5E7EB),
+                            shadowElevation = 0.dp
+                        ) {
+                            Text(
+                                text = "Today",
+                                color = Color(0xFF6B7280),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                }
+
+                if (displayMessages.isEmpty()) {
                     item(key = "empty_chat_state_greeting") {
                         Box(
                             modifier = Modifier
@@ -648,12 +795,24 @@ fun ChatDetailScreen(
                         }
                     }
                 } else {
-                    items(messages, key = { it.messageId }) { msg ->
-                        val isFromMe = msg.senderId == currentUser?.userId
+                    items(displayMessages, key = { it.messageId }) { msg ->
+                        val isFromMe = msg.senderId == (currentUser?.userId ?: "me") || msg.senderId == "me"
                         MessageBubble(
                             message = msg,
                             isFromMe = isFromMe,
-                            onRetry = { viewModel.retrySendMessage(msg.messageId) }
+                            onRetry = { viewModel.retrySendMessage(msg.messageId) },
+                            onReply = { replyMsg ->
+                                textInput = if (textInput.isBlank()) "Replying: \"${replyMsg.text.take(30)}\" " else "$textInput\n\"${replyMsg.text.take(30)}\" "
+                            },
+                            onForward = { fwdMsg ->
+                                val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                                clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("Forwarded Message", fwdMsg.text))
+                                Toast.makeText(context, "Message copied to forward", Toast.LENGTH_SHORT).show()
+                            },
+                            onDelete = { delMsg ->
+                                viewModel.deleteMessage(delMsg.messageId)
+                                Toast.makeText(context, "Message deleted", Toast.LENGTH_SHORT).show()
+                            }
                         )
                     }
                 }
@@ -666,6 +825,29 @@ fun ChatDetailScreen(
                         )
                     }
                 }
+            }
+
+            // Bottom encryption note: lock icon + "Messages are end-to-end encrypted" - #9CA3AF, 12px, centered, 24px above input
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp, bottom = 24.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = "Encrypted",
+                    tint = Color(0xFF9CA3AF),
+                    modifier = Modifier.size(13.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Messages are end-to-end encrypted",
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Normal
+                )
             }
 
             // Input Bar or Official Announcement Banner
@@ -756,21 +938,26 @@ fun ChatDetailScreen(
                     }
                 }
             } else if (!isBlocked) {
-                Card(
+                // WhatsApp quality edge-to-edge Input Bar: #FFFFFF background with 1px #E5E7EB top border
+                Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .imePadding()
-                        .padding(8.dp),
-                    shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(containerColor = LenoChatInputBg),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                        .drawBehind {
+                            drawLine(
+                                color = Color(0xFFE5E7EB),
+                                start = Offset(0f, 0f),
+                                end = Offset(size.width, 0f),
+                                strokeWidth = 1.dp.toPx()
+                            )
+                        },
+                    color = Color(0xFFFFFFFF)
                 ) {
                     if (isRecording) {
                         // RECORDING BAR MODE
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .navigationBarsPadding()
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -780,20 +967,20 @@ fun ChatDetailScreen(
                                     isRecording = false
                                     recordedAudioFile = null
                                 },
-                                modifier = Modifier.testTag("chat_cancel_recording_btn")
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("chat_cancel_recording_btn")
                             ) {
                                 Icon(
                                     Icons.Default.Delete,
                                     contentDescription = "Cancel Recording",
-                                    tint = MaterialTheme.colorScheme.error
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(22.dp)
                                 )
                             }
 
-                            Spacer(modifier = Modifier.width(4.dp))
-
-                            // Pulse Dot & Dynamic Microphone Waveform
+                            Spacer(modifier = Modifier.width(6.dp))
                             RecordingWaveformAnimation(liveAmplitude = liveAmplitude)
-
                             Spacer(modifier = Modifier.width(8.dp))
 
                             val mins = recordingDurationSec / 60
@@ -809,89 +996,96 @@ fun ChatDetailScreen(
 
                             Spacer(modifier = Modifier.weight(1f))
 
-                            IconButton(
-                                onClick = {
-                                    val finalDuration = if (recordingDurationSec < 1) 1 else recordingDurationSec
-                                    val result = audioRecorderHelper.stopRecording()
-                                    isRecording = false
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF00A86B))
+                                    .clickable {
+                                        val finalDuration = if (recordingDurationSec < 1) 1 else recordingDurationSec
+                                        val result = audioRecorderHelper.stopRecording()
+                                        isRecording = false
 
-                                    val audioFile = result.getOrNull()
-                                    if (audioFile != null && audioFile.exists() && audioFile.length() > 44L) {
-                                        coroutineScope.launch {
-                                            val storageService = FirebaseStorageService()
-                                            val storageResult = storageService.uploadVoiceNoteFile(audioFile, partnerId)
-                                            val audioUrl = storageResult.getOrDefault(convertAudioFileToBase64DataUrl(audioFile))
-                                            viewModel.sendMessage(
-                                                receiverId = partnerId,
-                                                text = "🎤 Voice Note ($timeStr)",
-                                                audioUrl = audioUrl,
-                                                audioDurationSeconds = finalDuration
-                                            )
+                                        val audioFile = result.getOrNull()
+                                        if (audioFile != null && audioFile.exists() && audioFile.length() > 44L) {
+                                            coroutineScope.launch {
+                                                val storageService = FirebaseStorageService()
+                                                val storageResult = storageService.uploadVoiceNoteFile(audioFile, partnerId)
+                                                val audioUrl = storageResult.getOrDefault(convertAudioFileToBase64DataUrl(audioFile))
+                                                viewModel.sendMessage(
+                                                    receiverId = partnerId,
+                                                    text = "🎤 Voice Note ($timeStr)",
+                                                    audioUrl = audioUrl,
+                                                    audioDurationSeconds = finalDuration
+                                                )
+                                            }
                                         }
+                                        recordedAudioFile = null
                                     }
-                                    recordedAudioFile = null
-                                },
-                                modifier = Modifier.testTag("chat_send_recording_btn")
+                                    .testTag("chat_send_recording_btn"),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.primary),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        Icons.AutoMirrored.Filled.Send,
-                                        contentDescription = "Send Voice Note",
-                                        tint = MaterialTheme.colorScheme.onPrimary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
+                                Icon(
+                                    Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = "Send Voice Note",
+                                    tint = Color(0xFFFFFFFF),
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
                         }
                     } else {
                         // STANDARD INPUT BAR MODE
-                        val isSmallScreenDevice = com.example.util.isSmallScreen()
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = if (isSmallScreenDevice) 4.dp else 8.dp, vertical = 4.dp),
+                                .navigationBarsPadding()
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            IconButton(
+                                onClick = {
+                                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("chat_camera_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PhotoCamera,
+                                    contentDescription = "Take Photo with Camera",
+                                    tint = Color(0xFF6B7280),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
                             IconButton(
                                 onClick = {
                                     photoPickerLauncher.launch(
                                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                     )
                                 },
-                                modifier = Modifier.testTag("chat_attach_photo_button")
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("chat_attach_photo_button")
                             ) {
                                 Icon(
-                                    Icons.Default.AddPhotoAlternate,
+                                    imageVector = Icons.Default.AddPhotoAlternate,
                                     contentDescription = "Attach Photo from Gallery",
-                                    tint = LenoChatAttachmentBtn
+                                    tint = Color(0xFF6B7280),
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
 
-                            IconButton(
-                                onClick = {
-                                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                                },
-                                modifier = Modifier.testTag("chat_camera_button")
-                            ) {
-                                Icon(
-                                    Icons.Default.PhotoCamera,
-                                    contentDescription = "Take Photo with Camera",
-                                    tint = LenoChatAttachmentBtn
-                                )
-                            }
+                            Spacer(modifier = Modifier.width(4.dp))
 
                             OutlinedTextField(
                                 value = textInput,
                                 onValueChange = { textInput = it },
                                 placeholder = {
                                     Text(
-                                        if (isOfficialAccount) "Broadcast..." else "Message...",
+                                        text = if (isOfficialAccount) "Broadcast..." else "Message...",
+                                        color = Color(0xFF9CA3AF),
+                                        fontSize = 16.sp,
                                         maxLines = 1,
                                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                     )
@@ -899,44 +1093,44 @@ fun ChatDetailScreen(
                                 modifier = Modifier
                                     .weight(1f)
                                     .testTag("chat_text_input"),
-                                shape = RoundedCornerShape(20.dp),
+                                shape = RoundedCornerShape(24.dp),
                                 maxLines = 4,
                                 colors = OutlinedTextFieldDefaults.colors(
+                                    focusedContainerColor = Color(0xFFF3F4F6),
+                                    unfocusedContainerColor = Color(0xFFF3F4F6),
                                     focusedBorderColor = Color.Transparent,
-                                    unfocusedBorderColor = Color.Transparent
-                                )
+                                    unfocusedBorderColor = Color.Transparent,
+                                    focusedTextColor = Color(0xFF111827),
+                                    unfocusedTextColor = Color(0xFF111827),
+                                    cursorColor = Color(0xFF00A86B)
+                                ),
+                                textStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp)
                             )
 
-                            if (textInput.isBlank()) {
-                                IconButton(
-                                    onClick = {
-                                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                                            val result = audioRecorderHelper.startRecording()
-                                            if (result.isSuccess) {
-                                                recordedAudioFile = result.getOrNull()
-                                                isRecording = true
-                                                recordingErrorMessage = null
+                            Spacer(modifier = Modifier.width(6.dp))
+
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF00A86B))
+                                    .clickable {
+                                        if (textInput.isBlank()) {
+                                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                                val result = audioRecorderHelper.startRecording()
+                                                if (result.isSuccess) {
+                                                    recordedAudioFile = result.getOrNull()
+                                                    isRecording = true
+                                                    recordingErrorMessage = null
+                                                } else {
+                                                    val err = result.exceptionOrNull()?.message ?: "Microphone initialization failed"
+                                                    Log.e("ChatDetailScreen", "Failed to start audio recording: $err")
+                                                    recordingErrorMessage = err
+                                                }
                                             } else {
-                                                val err = result.exceptionOrNull()?.message ?: "Microphone initialization failed"
-                                                Log.e("ChatDetailScreen", "Failed to start audio recording: $err")
-                                                recordingErrorMessage = err
+                                                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                             }
                                         } else {
-                                            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                        }
-                                    },
-                                    modifier = Modifier.testTag("chat_voice_button")
-                                ) {
-                                    Icon(
-                                        Icons.Default.Mic,
-                                        contentDescription = "Record Voice Note",
-                                        tint = LenoChatAttachmentBtn
-                                    )
-                                }
-                            } else {
-                                IconButton(
-                                    onClick = {
-                                        if (textInput.isNotBlank()) {
                                             if (isOfficialAccount && isAuthorizedOfficialPoster) {
                                                 viewModel.broadcastOfficialAnnouncement(
                                                     title = "Official Announcement",
@@ -950,15 +1144,16 @@ fun ChatDetailScreen(
                                             }
                                             textInput = ""
                                         }
-                                    },
-                                    modifier = Modifier.testTag("chat_send_button")
-                                ) {
-                                    Icon(
-                                        Icons.AutoMirrored.Filled.Send,
-                                        contentDescription = "Send",
-                                        tint = LenoChatSendBtn
-                                    )
-                                }
+                                    }
+                                    .testTag(if (textInput.isBlank()) "chat_voice_button" else "chat_send_button"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (textInput.isBlank()) Icons.Default.Mic else Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = if (textInput.isBlank()) "Record Voice Note" else "Send",
+                                    tint = Color(0xFFFFFFFF),
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
                         }
                     }
@@ -1317,195 +1512,297 @@ fun ChatDetailScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MessageBubble(
     message: MessageEntity,
     isFromMe: Boolean,
-    onRetry: () -> Unit = {}
+    onRetry: () -> Unit = {},
+    onReply: (MessageEntity) -> Unit = {},
+    onForward: (MessageEntity) -> Unit = {},
+    onDelete: (MessageEntity) -> Unit = {}
 ) {
     val isOfficialMsg = !isFromMe && (message.senderId == LenoRepository.OFFICIAL_LENO_ID || message.isSystemMessage)
     val align = if (isFromMe) Alignment.End else Alignment.Start
-    val bubbleColor = when {
-        isFromMe -> LenoChatSentBubble
-        isOfficialMsg -> LenoPrimaryVeryLight
-        else -> LenoChatReceivedBubble
-    }
-    val textColor = when {
-        isFromMe -> LenoChatSentText
-        isOfficialMsg -> LenoChatReceivedText
-        else -> LenoChatReceivedText
-    }
-    val timeColor = if (isFromMe) LenoChatSentTime else LenoChatReceivedTime
 
-    var showStatusDetail by remember { mutableStateOf(false) }
+    val sentBackground = Color(0xFF00A86B)
+    val receiveBackground = Color(0xFFF3F4F6)
+
+    val textColor = when {
+        isFromMe -> Color(0xFFFFFFFF)
+        isOfficialMsg -> MaterialTheme.colorScheme.primary
+        else -> Color(0xFF111827)
+    }
+
+    val isVoiceMessage = !message.audioUrl.isNullOrBlank() ||
+            message.text.contains("Voice note", ignoreCase = true) ||
+            message.text.contains("Voice Note", ignoreCase = true) ||
+            message.text.contains("🎤")
+
+    var showActionsRow by remember { mutableStateOf(false) }
 
     val formattedTime = remember(message.timestamp) {
         val sdf = SimpleDateFormat("h:mm a", Locale.getDefault())
         sdf.format(Date(message.timestamp))
     }
 
-    val isVoiceMessage = !message.audioUrl.isNullOrBlank() || message.text.contains("Voice note", ignoreCase = true)
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+    val bubbleMaxWidth = screenWidth * 0.75f
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = if (isOfficialMsg) 6.dp else 2.dp),
-        horizontalAlignment = align
-    ) {
-        Box(
+    val bubbleShape = if (isFromMe) {
+        RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp)
+    } else {
+        RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 4.dp, bottomEnd = 18.dp)
+    }
+
+    // Status logic: if status=='sent' -> single ✓ grey, if status=='delivered' -> double ✓✓ grey, if status=='read' -> double ✓✓ BLUE #93C5FD
+    val statusLower = message.status.lowercase()
+    val isRead = message.isRead || message.read || statusLower == "read"
+    val isDelivered = statusLower == "delivered"
+
+    val statusIcon = when {
+        isRead -> Icons.Default.DoneAll
+        isDelivered -> Icons.Default.DoneAll
+        else -> Icons.Default.Done
+    }
+    val statusTint = when {
+        isRead -> Color(0xFF93C5FD) // BLUE #93C5FD
+        isDelivered -> Color(0xFFD1D5DB) // double ✓✓ grey
+        else -> Color(0xFFD1D5DB) // single ✓ grey
+    }
+    val timeColorSent = Color.White.copy(alpha = 0.8f)
+
+    if (isVoiceMessage) {
+        // RECEIVED voice: container #F3F4F6 bubble, border 1px solid #E5E7EB, width 260px, height 56px, rounded 18px bottom-left 4px, margin 6px 12px
+        // SENT voice: container #00A86B, rounded 18px bottom-right 4px, width 260px, height 56px
+        Column(
             modifier = Modifier
-                .widthIn(max = com.example.util.responsiveBubbleMaxWidth(isOfficialMsg))
-                .clip(
-                    RoundedCornerShape(
-                        topStart = 16.dp,
-                        topEnd = 16.dp,
-                        bottomStart = if (isFromMe) 16.dp else 4.dp,
-                        bottomEnd = if (isFromMe) 4.dp else 16.dp
-                    )
-                )
-                .background(bubbleColor)
-                .clickable { showStatusDetail = !showStatusDetail }
-                .padding(14.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 3.dp),
+            horizontalAlignment = align
         ) {
-            Column {
-                if (isOfficialMsg) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-                    ) {
-                        LenoAvatar(
-                            avatarUrl = null,
-                            isOfficial = true,
-                            size = 24.dp,
-                            contentDescription = "Official Leno"
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Official Leno",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        OfficialVerifiedBadge(size = 14.dp)
-                        Spacer(modifier = Modifier.weight(1f))
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = LenoPrimaryLight
-                        ) {
-                            Text(
-                                text = "ANNOUNCEMENT",
-                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                                fontWeight = FontWeight.Bold,
-                                color = LenoOfficialBadge,
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+            Column(
+                modifier = Modifier.width(260.dp),
+                horizontalAlignment = if (isFromMe) Alignment.End else Alignment.Start
+            ) {
+                Surface(
+                    shape = bubbleShape,
+                    color = if (isFromMe) sentBackground else receiveBackground,
+                    border = if (!isFromMe) BorderStroke(1.dp, Color(0xFFE5E7EB)) else null,
+                    shadowElevation = 0.5.dp,
+                    modifier = Modifier
+                        .width(260.dp)
+                        .height(56.dp)
+                        .testTag("chat_bubble_${message.messageId}")
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(if (isFromMe) sentBackground else receiveBackground)
+                            .combinedClickable(
+                                onClick = {},
+                                onLongClick = { showActionsRow = !showActionsRow }
                             )
-                        }
+                    ) {
+                        VoiceNotePlayerView(
+                            message = message,
+                            isFromMe = isFromMe,
+                            formattedTime = formattedTime,
+                            isRead = isRead,
+                            isDelivered = isDelivered,
+                            statusIcon = statusIcon,
+                            statusTint = statusTint,
+                            timeTint = timeColorSent
+                        )
                     }
                 }
 
-                if (!message.imageUrl.isNullOrBlank()) {
-                    AsyncImage(
-                        model = message.imageUrl,
-                        contentDescription = "Photo Attachment",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp)
-                            .clip(RoundedCornerShape(12.dp)),
-                        contentScale = ContentScale.Crop
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-
-                if (isVoiceMessage) {
-                    VoiceNotePlayerView(
-                        message = message,
-                        textColor = textColor,
-                        accentColor = if (isFromMe) Color.White else MaterialTheme.colorScheme.primary
-                    )
-                } else if (message.text.isNotBlank()) {
-                    Text(
-                        text = message.text,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = textColor
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Row(
-                    modifier = Modifier.align(Alignment.End),
-                    verticalAlignment = Alignment.CenterVertically
+                // Small action menu (reply, forward, trash icons) below voice note
+                AnimatedVisibility(
+                    visible = showActionsRow,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
                 ) {
-                    Text(
-                        text = formattedTime,
-                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 10.sp),
-                        color = timeColor
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(24.dp),
+                        color = Color.White,
+                        shadowElevation = 3.dp,
+                        modifier = Modifier
+                            .padding(top = 4.dp)
+                            .testTag("actions_row_${message.messageId}")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    showActionsRow = false
+                                    onReply(message)
+                                },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("action_reply_${message.messageId}")
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_reply),
+                                    contentDescription = "Reply",
+                                    tint = Color(0xFF00A86B),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
 
-                    if (isFromMe) {
-                        Spacer(modifier = Modifier.width(4.dp))
-                        val isMessageRead = message.isRead || message.read || message.status.equals("READ", ignoreCase = true)
-                        val statusUpper = message.status.uppercase()
-                        val statusIcon = when {
-                            isMessageRead -> Icons.Default.DoneAll
-                            statusUpper == "DELIVERED" -> Icons.Default.DoneAll
-                            statusUpper == "SENT" -> Icons.Default.Done
-                            statusUpper == "FAILED" -> Icons.Default.Report
-                            else -> Icons.Default.Schedule
-                        }
-                        val statusTint = when {
-                            isMessageRead -> LenoMessageStatusSeen
-                            statusUpper == "FAILED" -> LenoStatusErrorText
-                            statusUpper == "SENT" || statusUpper == "DELIVERED" -> LenoMessageStatusSent
-                            else -> LenoMessageStatusSent.copy(alpha = 0.6f)
-                        }
-                        val statusDesc = when {
-                            isMessageRead -> "Read"
-                            statusUpper == "DELIVERED" -> "Delivered"
-                            statusUpper == "SENT" -> "Sent"
-                            statusUpper == "FAILED" -> "Failed to send. Tap to retry."
-                            else -> "Sending"
-                        }
+                            IconButton(
+                                onClick = {
+                                    showActionsRow = false
+                                    onForward(message)
+                                },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("action_forward_${message.messageId}")
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_forward),
+                                    contentDescription = "Forward",
+                                    tint = Color(0xFF00A86B),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
 
-                        Icon(
-                            imageVector = statusIcon,
-                            contentDescription = statusDesc,
-                            tint = statusTint,
-                            modifier = Modifier
-                                .size(15.dp)
-                                .testTag(if (isMessageRead) "read_receipt_${message.messageId}" else "message_status_${message.messageId}")
-                        )
+                            IconButton(
+                                onClick = {
+                                    showActionsRow = false
+                                    onDelete(message)
+                                },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("action_delete_${message.messageId}")
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_delete),
+                                    contentDescription = "Delete",
+                                    tint = Color(0xFFEF4444),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
-
-        AnimatedVisibility(visible = showStatusDetail && isFromMe) {
-            val isMessageRead = message.isRead || message.read || message.status.equals("READ", ignoreCase = true)
-            val statusLabel = when {
-                isMessageRead -> "Read ✓✓"
-                message.status.uppercase() == "DELIVERED" -> "Delivered ✓✓"
-                message.status.uppercase() == "SENT" -> "Sent ✓"
-                message.status.uppercase() == "FAILED" -> "Failed • Tap to retry ↻"
-                else -> "Sending..."
-            }
+    } else {
+        // RECEIVED text (left): bubble #F3F4F6, border 1px solid #E5E7EB, text #111827 15px, padding 10px 14px, rounded 18px bottom-left 4px, max-width 75%, time 10px #6B7280 inside bottom-right, margin 6px 12px
+        // SENT text (right): bubble #00A86B, text white 15px, same padding (10px 14px), rounded 18px bottom-right 4px, time + check inside 10px white 80% (blue #93C5FD if read)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = if (isOfficialMsg) 4.dp else 3.dp),
+            horizontalAlignment = align
+        ) {
             Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = if (message.status.uppercase() == "FAILED") MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
+                shape = bubbleShape,
+                color = if (isFromMe) sentBackground else receiveBackground,
+                border = if (!isFromMe) BorderStroke(1.dp, Color(0xFFE5E7EB)) else null,
+                shadowElevation = 0.5.dp,
                 modifier = Modifier
-                    .padding(top = 2.dp, end = 4.dp)
-                    .clickable(enabled = message.status.uppercase() == "FAILED") { onRetry() }
+                    .widthIn(min = 72.dp, max = bubbleMaxWidth)
+                    .testTag("chat_bubble_${message.messageId}")
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Box(
+                    modifier = Modifier
+                        .background(if (isFromMe) sentBackground else receiveBackground)
+                        .combinedClickable(
+                            onClick = {},
+                            onLongClick = { showActionsRow = !showActionsRow }
+                        )
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
                 ) {
-                    Text(
-                        text = "$statusLabel • $formattedTime",
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                        color = if (message.status.uppercase() == "FAILED") MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Column {
+                        if (isOfficialMsg) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                            ) {
+                                LenoAvatar(
+                                    avatarUrl = null,
+                                    isOfficial = true,
+                                    size = 24.dp,
+                                    contentDescription = "Official Leno"
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Official Leno",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                OfficialVerifiedBadge(size = 14.dp)
+                                Spacer(modifier = Modifier.weight(1f))
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = LenoPrimaryLight
+                                ) {
+                                    Text(
+                                        text = "ANNOUNCEMENT",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                        fontWeight = FontWeight.Bold,
+                                        color = LenoOfficialBadge,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        if (!message.imageUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = message.imageUrl,
+                                contentDescription = "Photo Attachment",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(180.dp)
+                                    .clip(RoundedCornerShape(12.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+
+                        if (message.text.isNotBlank()) {
+                            Text(
+                                text = message.text,
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontSize = 15.sp,
+                                    lineHeight = 21.sp
+                                ),
+                                color = textColor
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Row(
+                            modifier = Modifier.align(Alignment.End),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = formattedTime,
+                                fontSize = 10.sp,
+                                color = if (isFromMe) timeColorSent else Color(0xFF6B7280)
+                            )
+
+                            if (isFromMe) {
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Icon(
+                                    imageVector = statusIcon,
+                                    contentDescription = if (isRead) "Read" else (if (isDelivered) "Delivered" else "Sent"),
+                                    tint = statusTint,
+                                    modifier = Modifier
+                                        .size(if (isRead || isDelivered) 14.dp else 11.dp)
+                                        .testTag("message_status_${message.messageId}")
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1515,15 +1812,20 @@ fun MessageBubble(
 @Composable
 fun VoiceNotePlayerView(
     message: MessageEntity,
-    textColor: Color,
-    accentColor: Color
+    isFromMe: Boolean = false,
+    formattedTime: String = "",
+    isRead: Boolean = false,
+    isDelivered: Boolean = false,
+    statusIcon: ImageVector = Icons.Default.Done,
+    statusTint: Color = Color.White.copy(alpha = 0.6f),
+    timeTint: Color = Color.White.copy(alpha = 0.6f)
 ) {
     val context = LocalContext.current
     var isPlaying by remember { mutableStateOf(false) }
     var currentPosSec by remember { mutableIntStateOf(0) }
     var progressFraction by remember { mutableFloatStateOf(0f) }
     val durationSec = remember(message.audioDurationSeconds) {
-        if (message.audioDurationSeconds > 0) message.audioDurationSeconds else 15
+        if (message.audioDurationSeconds > 0) message.audioDurationSeconds else 5
     }
 
     val audioPlayerHelper = remember { AudioPlayerHelper(context) }
@@ -1534,95 +1836,140 @@ fun VoiceNotePlayerView(
         }
     }
 
+    // 28 bars with height variation from 3px to 16px
+    val waveformHeights = remember {
+        listOf(
+            4, 8, 13, 6, 3, 10, 16, 8, 5, 12, 10, 6, 15, 12,
+            4, 9, 14, 3, 7, 12, 16, 8, 5, 11, 7, 13, 8, 4
+        )
+    }
+
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 10.dp, vertical = 6.dp)
     ) {
-        IconButton(
-            onClick = {
-                if (isPlaying) {
-                    audioPlayerHelper.pause()
-                    isPlaying = false
-                } else {
-                    isPlaying = true
-                    audioPlayerHelper.playAudio(
-                        filePathOrUri = message.audioUrl,
-                        expectedDurationSeconds = durationSec,
-                        onProgress = { posMs, totalMs ->
-                            currentPosSec = posMs / 1000
-                            if (totalMs > 0) {
-                                progressFraction = (posMs.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f)
-                            }
-                        },
-                        onCompletion = {
-                            isPlaying = false
-                            currentPosSec = 0
-                            progressFraction = 0f
-                        },
-                        onError = {
-                            isPlaying = false
-                        }
-                    )
-                }
-            },
+        // Play button circle: 36x36 (White on sent green bubble, #00A86B on received bubble)
+        Box(
             modifier = Modifier
                 .size(36.dp)
                 .clip(CircleShape)
-                .background(accentColor.copy(alpha = 0.2f))
+                .background(if (isFromMe) Color.White else Color(0xFF00A86B))
+                .clickable {
+                    if (isPlaying) {
+                        audioPlayerHelper.pause()
+                        isPlaying = false
+                    } else {
+                        isPlaying = true
+                        audioPlayerHelper.playAudio(
+                            filePathOrUri = message.audioUrl,
+                            expectedDurationSeconds = durationSec,
+                            onProgress = { posMs, totalMs ->
+                                currentPosSec = posMs / 1000
+                                if (totalMs > 0) {
+                                    progressFraction = (posMs.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f)
+                                }
+                            },
+                            onCompletion = {
+                                isPlaying = false
+                                currentPosSec = 0
+                                progressFraction = 0f
+                            },
+                            onError = {
+                                isPlaying = false
+                            }
+                        )
+                    }
+                },
+            contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                 contentDescription = if (isPlaying) "Pause" else "Play",
-                tint = accentColor
+                tint = if (isFromMe) Color(0xFF00A86B) else Color.White,
+                modifier = Modifier.size(20.dp)
             )
         }
 
         Spacer(modifier = Modifier.width(8.dp))
 
-        Column(modifier = Modifier.weight(1f)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center
+        ) {
+            // Waveform: thin bars 2px wide, height 3px to 14px, smooth rounded tops, 28 bars
+            Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(24.dp)
+                    .height(16.dp)
             ) {
-                // Waveform bars visualizer
-                val barHeights = remember { listOf(0.4f, 0.7f, 0.3f, 0.9f, 0.5f, 0.8f, 0.4f, 1.0f, 0.6f, 0.3f, 0.7f, 0.5f) }
-                barHeights.forEachIndexed { idx, h ->
-                    val isPlayed = (idx.toFloat() / barHeights.size.toFloat()) <= progressFraction
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height((20 * h).dp)
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(if (isPlayed) accentColor else textColor.copy(alpha = 0.35f))
+                val barWidth = 2.dp.toPx()
+                val barCount = waveformHeights.size
+                val totalWidth = size.width
+                val spacing = if (barCount > 1) {
+                    ((totalWidth - (barWidth * barCount)) / (barCount - 1)).coerceAtLeast(1f)
+                } else 0f
+                val cornerRadius = CornerRadius(1.dp.toPx(), 1.dp.toPx())
+
+                val playedColor = if (isFromMe) Color.White else Color(0xFF00A86B)
+                val unplayedColor = if (isFromMe) Color.White.copy(alpha = 0.5f) else Color(0xFFD1D5DB)
+
+                waveformHeights.forEachIndexed { index, h ->
+                    val hPx = h.dp.toPx().coerceIn(3.dp.toPx(), 16.dp.toPx())
+                    val x = index * (barWidth + spacing)
+                    val y = (size.height - hPx) / 2f
+                    val isPlayed = (index.toFloat() / barCount.toFloat()) <= progressFraction
+
+                    drawRoundRect(
+                        color = if (isPlayed) playedColor else unplayedColor,
+                        topLeft = Offset(x, y),
+                        size = Size(barWidth, hPx),
+                        cornerRadius = cornerRadius
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
-
-            LinearProgressIndicator(
-                progress = { progressFraction },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(3.dp)
-                    .clip(RoundedCornerShape(2.dp)),
-                color = accentColor,
-                trackColor = textColor.copy(alpha = 0.25f)
-            )
-
             Spacer(modifier = Modifier.height(2.dp))
 
-            val displaySec = if (isPlaying) currentPosSec else durationSec
-            val mins = displaySec / 60
-            val secs = displaySec % 60
-            Text(
-                text = String.format(Locale.getDefault(), "%d:%02d", mins, secs),
-                style = MaterialTheme.typography.labelSmall,
-                color = textColor.copy(alpha = 0.85f)
-            )
+            // Duration on left, Time + Check on right inside bubble
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Duration 0:05 below waveform, 10px font
+                val displaySec = if (isPlaying) currentPosSec else (if (durationSec > 0) durationSec else 5)
+                val mins = displaySec / 60
+                val secs = displaySec % 60
+                Text(
+                    text = String.format(Locale.getDefault(), "%d:%02d", mins, secs),
+                    fontSize = 10.sp,
+                    color = if (isFromMe) Color.White.copy(alpha = 0.8f) else Color(0xFF6B7280),
+                    fontWeight = FontWeight.Normal
+                )
+
+                // Time + Check INSIDE bottom-right
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = formattedTime,
+                        fontSize = 10.sp,
+                        color = if (isFromMe) timeTint else Color(0xFF6B7280),
+                        fontWeight = FontWeight.Normal
+                    )
+                    if (isFromMe) {
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Icon(
+                            imageVector = statusIcon,
+                            contentDescription = if (isRead) "Read" else (if (isDelivered) "Delivered" else "Sent"),
+                            tint = statusTint,
+                            modifier = Modifier
+                                .size(if (isRead || isDelivered) 14.dp else 11.dp)
+                                .testTag("voice_status_${message.messageId}")
+                        )
+                    }
+                }
+            }
         }
     }
 }

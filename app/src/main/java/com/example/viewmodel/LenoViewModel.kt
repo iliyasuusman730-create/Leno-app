@@ -530,6 +530,9 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
         if (myId != null) {
             viewModelScope.launch {
                 repository.markMessagesAsRead(myId, partnerId)
+                // When Adam opens chat, update messages to status='read' so sender sees blue
+                delay(600)
+                repository.markSentMessagesAsRead(myId, partnerId)
             }
         }
 
@@ -543,12 +546,12 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
                 viewModelScope.launch {
                     if (remoteMsgs.isNotEmpty()) {
                         val readMsgs = remoteMsgs.map { msg ->
-                            if (msg.senderId != myId) msg.copy(status = "READ", read = true) else msg
+                            if (msg.senderId != myId) msg.copy(status = "read", read = true) else msg
                         }
                         repository.insertMessages(readMsgs)
                         remoteMsgs.forEach { msg ->
-                            if (msg.senderId != myId && (!msg.isRead || msg.status != "READ")) {
-                                repository.updateMessageStatus(msg.messageId, "READ")
+                            if (msg.senderId != myId && (!msg.isRead || !msg.status.equals("read", ignoreCase = true))) {
+                                repository.updateMessageStatus(msg.messageId, "read")
                                 repository.remoteAccountService.markMessageReadInRemote(chatId, msg.messageId, msg.senderId)
                             }
                         }
@@ -560,7 +563,7 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 if (myId != null) {
                     repository.markMessagesAsRead(myId, partnerId)
-                    kotlinx.coroutines.withTimeoutOrNull(2500L) {
+                    kotlinx.coroutines.withTimeoutOrNull(10000L) {
                         repository.syncRemoteChatMessages(partnerId)
                     }
                     repository.markMessagesAsRead(myId, partnerId)
@@ -655,6 +658,12 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun uploadChatImageFile(file: File, chatId: String = ""): String? {
         val result = repository.uploadChatImageFile(file, chatId)
         return result.getOrNull()
+    }
+
+    fun deleteMessage(messageId: String) {
+        viewModelScope.launch {
+            repository.deleteMessage(messageId)
+        }
     }
 
     fun sendFriendRequest(targetId: String, onComplete: () -> Unit = {}) {

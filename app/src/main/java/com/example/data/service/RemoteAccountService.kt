@@ -861,38 +861,40 @@ open class RemoteAccountService {
         try {
             Log.i("Leno", "Writing user to Firestore: uid=$uid, lenId=$formattedLenoId, username=$cleanUsername")
             
-            // 1. Write to document(uid)
+            // 1. Write to document(uid) and document(lenId)
             val docUidRef = db.collection(COLLECTION_USERS).document(uid)
-            docUidRef.set(userMap, SetOptions.merge())
-                .addOnSuccessListener {
-                    Log.i("Leno", "Leno: User written")
-                }
-                .addOnFailureListener { e ->
-                    Log.e("Leno", "Leno: User write error: ${e.message}", e)
-                }
-
-            // 2. Also write same map to document(lenId) for dual lookup
-            val docLenIdRef = db.collection(COLLECTION_USERS).document(formattedLenoId)
-            docLenIdRef.set(userMap, SetOptions.merge())
-                .addOnSuccessListener {
-                    Log.i("Leno", "Leno: User written")
-                }
-                .addOnFailureListener { e ->
-                    Log.e("Leno", "Leno: User write error: ${e.message}", e)
-                }
-
-            // 3. Atomically update auxiliary reservation collections
-            try {
-                db.collection(COLLECTION_USERNAMES).document(cleanUsername.lowercase())
-                    .set(mapOf("uid" to uid, "ownerUid" to uid, "username" to cleanUsername.lowercase()), SetOptions.merge())
-                db.collection(COLLECTION_LENO_IDS).document(formattedLenoId)
-                    .set(mapOf("uid" to uid, "ownerUid" to uid, "lenoId" to formattedLenoId), SetOptions.merge())
-            } catch (_: Exception) {}
-
-            withTimeoutOrNull(6000L) {
+            withTimeoutOrNull(8000L) {
                 try {
-                    docUidRef.get().await()
+                    docUidRef.set(userMap, SetOptions.merge()).await()
+                    Log.i("Leno", "Leno: User written (uid: $uid)")
+                } catch (e: Exception) {
+                    Log.w("Leno", "Leno: User write notice (uid: $uid): ${e.message}")
+                }
+
+                if (formattedLenoId.isNotBlank()) {
+                    try {
+                        val docLenIdRef = db.collection(COLLECTION_USERS).document(formattedLenoId)
+                        docLenIdRef.set(userMap, SetOptions.merge()).await()
+                        Log.i("Leno", "Leno: User written (lenId: $formattedLenoId)")
+                    } catch (e: Exception) {
+                        Log.w("Leno", "Leno: User write notice (lenId: $formattedLenoId): ${e.message}")
+                    }
+                }
+
+                // 3. Atomically update auxiliary reservation collections
+                try {
+                    db.collection(COLLECTION_USERNAMES).document(cleanUsername.lowercase())
+                        .set(mapOf("uid" to uid, "ownerUid" to uid, "username" to cleanUsername.lowercase()), SetOptions.merge())
+                        .await()
                 } catch (_: Exception) {}
+
+                if (formattedLenoId.isNotBlank()) {
+                    try {
+                        db.collection(COLLECTION_LENO_IDS).document(formattedLenoId)
+                            .set(mapOf("uid" to uid, "ownerUid" to uid, "lenoId" to formattedLenoId), SetOptions.merge())
+                            .await()
+                    } catch (_: Exception) {}
+                }
             }
 
             Log.i("Leno", "✅ Leno: User written successfully to both documents: $uid & $formattedLenoId")
@@ -970,39 +972,40 @@ open class RemoteAccountService {
                 "approvedSubject" to (if (user.isTeacher) user.effectiveSubject else "")
             )
 
-            // 1. Write to document(uid)
+            // 1. Write to document(uid) and document(lenId)
             val docUidRef = db.collection(COLLECTION_USERS).document(user.userId)
-            docUidRef.set(userMap, SetOptions.merge())
-                .addOnSuccessListener {
+            withTimeoutOrNull(8000L) {
+                try {
+                    docUidRef.set(userMap, SetOptions.merge()).await()
                     Log.i("Leno", "Leno: User written (uid: ${user.userId})")
-                }
-                .addOnFailureListener { e ->
-                    Log.e("Leno", "Leno: User write error (uid: ${user.userId}): ${e.message}", e)
+                } catch (e: Exception) {
+                    Log.w("Leno", "Leno: User write notice (uid: ${user.userId}): ${e.message}")
                 }
 
-            // 2. Dual write to document(lenId) for dual lookup
-            if (formattedLenoId.isNotBlank()) {
-                val docLenRef = db.collection(COLLECTION_USERS).document(formattedLenoId)
-                docLenRef.set(userMap, SetOptions.merge())
-                    .addOnSuccessListener {
+                if (formattedLenoId.isNotBlank()) {
+                    try {
+                        val docLenRef = db.collection(COLLECTION_USERS).document(formattedLenoId)
+                        docLenRef.set(userMap, SetOptions.merge()).await()
                         Log.i("Leno", "Leno: User written (lenId: $formattedLenoId)")
+                    } catch (e: Exception) {
+                        Log.w("Leno", "Leno: User write notice (lenId: $formattedLenoId): ${e.message}")
                     }
-                    .addOnFailureListener { e ->
-                        Log.e("Leno", "Leno: User write error (lenId: $formattedLenoId): ${e.message}", e)
-                    }
-            }
+                }
 
-            if (user.username.isNotBlank()) {
-                try {
-                    db.collection(COLLECTION_USERNAMES).document(user.username.lowercase())
-                        .set(mapOf("uid" to user.userId, "ownerUid" to user.userId, "username" to user.username.lowercase(), "updatedAt" to System.currentTimeMillis()), SetOptions.merge())
-                } catch (_: Exception) {}
-            }
-            if (formattedLenoId.isNotBlank()) {
-                try {
-                    db.collection(COLLECTION_LENO_IDS).document(formattedLenoId)
-                        .set(mapOf("uid" to user.userId, "ownerUid" to user.userId, "lenoId" to formattedLenoId, "updatedAt" to System.currentTimeMillis()), SetOptions.merge())
-                } catch (_: Exception) {}
+                if (user.username.isNotBlank()) {
+                    try {
+                        db.collection(COLLECTION_USERNAMES).document(user.username.lowercase())
+                            .set(mapOf("uid" to user.userId, "ownerUid" to user.userId, "username" to user.username.lowercase(), "updatedAt" to System.currentTimeMillis()), SetOptions.merge())
+                            .await()
+                    } catch (_: Exception) {}
+                }
+                if (formattedLenoId.isNotBlank()) {
+                    try {
+                        db.collection(COLLECTION_LENO_IDS).document(formattedLenoId)
+                            .set(mapOf("uid" to user.userId, "ownerUid" to user.userId, "lenoId" to formattedLenoId, "updatedAt" to System.currentTimeMillis()), SetOptions.merge())
+                            .await()
+                    } catch (_: Exception) {}
+                }
             }
 
             Result.success(Unit)
@@ -1131,12 +1134,23 @@ open class RemoteAccountService {
      * Searches case-insensitively and utilizes dual document lookup.
      */
     open suspend fun findRemoteUser(identifier: String): UserEntity? = withContext(Dispatchers.IO) {
-        val clean = identifier.trim().removePrefix("@")
+        val clean = identifier.trim().removePrefix("@").trim()
         if (clean.isBlank()) return@withContext null
         val cleanLower = clean.lowercase()
         val cleanUpper = clean.uppercase()
+        val titleCase = clean.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+        val usernameVariants = listOf(clean, cleanLower, cleanUpper, titleCase).distinct()
+        val displayNameVariants = listOf(clean, cleanLower, cleanUpper, titleCase).distinct()
+
         val rawLenoDigits = clean.replace("LEN-", "", ignoreCase = true).replace("LEN", "", ignoreCase = true).replace("-", "").trim()
-        val formattedLenoId = if (rawLenoDigits.isNotBlank()) "LEN-$rawLenoDigits" else cleanUpper
+        val isNumericLeno = rawLenoDigits.isNotEmpty() && rawLenoDigits.all { it.isDigit() }
+        val formattedLenoId = if (isNumericLeno) "LEN-$rawLenoDigits" else if (clean.startsWith("LEN-", ignoreCase = true)) cleanUpper else ""
+        val lenoVariants = listOfNotNull(
+            formattedLenoId.ifEmpty { null },
+            if (isNumericLeno) rawLenoDigits else null,
+            cleanUpper.takeIf { it.startsWith("LEN-") },
+            clean.takeIf { it.startsWith("LEN-", ignoreCase = true) }
+        ).distinct()
 
         // 0. Instant resolution for Official Accounts across any device
         if (cleanLower == "officialjaiby" || cleanLower == "official jaiby" || cleanLower == "50638964" || cleanUpper == "LEN-50638964" || cleanLower.contains("officialjaiby")) {
@@ -1176,19 +1190,21 @@ open class RemoteAccountService {
         }
 
         if (isTestEnvironment()) {
-            val byUid = testUsers[clean] ?: testUsers[cleanUpper] ?: testUsers[formattedLenoId]
+            val byUid = testUsers[clean] ?: testUsers[cleanUpper] ?: (if (formattedLenoId.isNotEmpty()) testUsers[formattedLenoId] else null)
             if (byUid != null) return@withContext byUid
             val unameUid = testUsernames[cleanLower]
             if (unameUid != null && testUsers[unameUid] != null) return@withContext testUsers[unameUid]
-            val lenoUid = testLenoIds[formattedLenoId] ?: testLenoIds[cleanUpper]
+            val lenoUid = if (formattedLenoId.isNotEmpty()) testLenoIds[formattedLenoId] ?: testLenoIds[cleanUpper] else null
             if (lenoUid != null && testUsers[lenoUid] != null) return@withContext testUsers[lenoUid]
             val matched = testUsers.values.firstOrNull {
                 it.username.equals(clean, ignoreCase = true) ||
-                it.linoId.equals(formattedLenoId, ignoreCase = true) ||
+                (formattedLenoId.isNotEmpty() && it.linoId.equals(formattedLenoId, ignoreCase = true)) ||
+                (isNumericLeno && it.linoId.replace("-", "").equals(rawLenoDigits, ignoreCase = true)) ||
                 it.displayName.equals(clean, ignoreCase = true) ||
                 it.email.equals(clean, ignoreCase = true) ||
                 it.googleEmail.equals(clean, ignoreCase = true) ||
-                it.recoveryEmail.equals(clean, ignoreCase = true)
+                it.recoveryEmail.equals(clean, ignoreCase = true) ||
+                it.userId.equals(clean, ignoreCase = true)
             }
             return@withContext matched
         }
@@ -1197,26 +1213,22 @@ open class RemoteAccountService {
         val db = firestore ?: FirebaseFirestore.getInstance()
 
         try {
-            withTimeoutOrNull(8000L) {
-                // 1. Direct document lookups (O(1) instant dual lookup)
-                val directDocIds = listOf(
-                    clean,
-                    cleanUpper,
-                    cleanLower,
-                    formattedLenoId,
-                    "LEN-$cleanUpper"
-                ).distinct()
-
-                for (docId in directDocIds) {
-                    try {
-                        val doc = db.collection(COLLECTION_USERS).document(docId).get().await()
-                        if (doc.exists()) {
-                            docToUser(doc.data, doc.id)?.let { return@withTimeoutOrNull it }
+            withTimeoutOrNull(10000L) {
+                // 1. Direct O(1) lookup in usernames index collection (guaranteed lowercase)
+                try {
+                    val unameDoc = db.collection(COLLECTION_USERNAMES).document(cleanLower).get().await()
+                    if (unameDoc.exists()) {
+                        val ownerUid = unameDoc.getString("ownerUid") ?: unameDoc.getString("uid") ?: unameDoc.getString("userId")
+                        if (!ownerUid.isNullOrBlank()) {
+                            val userDoc = db.collection(COLLECTION_USERS).document(ownerUid).get().await()
+                            if (userDoc.exists()) {
+                                docToUser(userDoc.data, userDoc.id)?.let { return@withTimeoutOrNull it }
+                            }
                         }
-                    } catch (_: Exception) {}
-                }
+                    }
+                } catch (_: Exception) {}
 
-                // 2. Exact lookup by username_lowercase
+                // 2. Query users collection by username_lowercase (indexed)
                 try {
                     val byUnameLower = db.collection(COLLECTION_USERS)
                         .whereEqualTo("username_lowercase", cleanLower)
@@ -1228,55 +1240,70 @@ open class RemoteAccountService {
                     }
                 } catch (_: Exception) {}
 
-                // 2b. Exact lookup by legacy username
+                // 3. Query users collection with whereIn("username", usernameVariants)
+                // This matches existing users regardless of original registration casing (e.g. "Sheikh_Yahaya")
                 try {
-                    val byUsername = db.collection(COLLECTION_USERS)
-                        .whereEqualTo("username", cleanLower)
+                    val byUsernameVariants = db.collection(COLLECTION_USERS)
+                        .whereIn("username", usernameVariants)
                         .limit(1)
                         .get()
                         .await()
-                    if (!byUsername.isEmpty) {
-                        return@withTimeoutOrNull docToUser(byUsername.documents[0].data, byUsername.documents[0].id)
+                    if (!byUsernameVariants.isEmpty) {
+                        return@withTimeoutOrNull docToUser(byUsernameVariants.documents[0].data, byUsernameVariants.documents[0].id)
                     }
                 } catch (_: Exception) {}
 
-                // 3. Exact lookup by lenId_lowercase or linoId
-                try {
-                    val byLenIdLower = db.collection(COLLECTION_USERS)
-                        .whereEqualTo("lenId_lowercase", cleanLower)
-                        .limit(1)
-                        .get()
-                        .await()
-                    if (!byLenIdLower.isEmpty) {
-                        return@withTimeoutOrNull docToUser(byLenIdLower.documents[0].data, byLenIdLower.documents[0].id)
+                // 4. Leno ID lookup if applicable
+                if (formattedLenoId.isNotEmpty() || isNumericLeno) {
+                    if (formattedLenoId.isNotEmpty()) {
+                        try {
+                            val lenoDoc = db.collection(COLLECTION_LENO_IDS).document(formattedLenoId).get().await()
+                            if (lenoDoc.exists()) {
+                                val ownerUid = lenoDoc.getString("ownerUid") ?: lenoDoc.getString("uid") ?: lenoDoc.getString("userId")
+                                if (!ownerUid.isNullOrBlank()) {
+                                    val userDoc = db.collection(COLLECTION_USERS).document(ownerUid).get().await()
+                                    if (userDoc.exists()) {
+                                        docToUser(userDoc.data, userDoc.id)?.let { return@withTimeoutOrNull it }
+                                    }
+                                }
+                            }
+                        } catch (_: Exception) {}
                     }
-                } catch (_: Exception) {}
 
-                try {
-                    val byLenoId = db.collection(COLLECTION_USERS)
-                        .whereEqualTo("linoId", formattedLenoId)
-                        .limit(1)
-                        .get()
-                        .await()
-                    if (!byLenoId.isEmpty) {
-                        return@withTimeoutOrNull docToUser(byLenoId.documents[0].data, byLenoId.documents[0].id)
+                    if (lenoVariants.isNotEmpty()) {
+                        try {
+                            val byLenoVariants = db.collection(COLLECTION_USERS)
+                                .whereIn("linoId", lenoVariants)
+                                .limit(1)
+                                .get()
+                                .await()
+                            if (!byLenoVariants.isEmpty) {
+                                return@withTimeoutOrNull docToUser(byLenoVariants.documents[0].data, byLenoVariants.documents[0].id)
+                            }
+                        } catch (_: Exception) {}
                     }
-                } catch (_: Exception) {}
 
-                if (rawLenoDigits.isNotBlank() && rawLenoDigits != formattedLenoId) {
                     try {
-                        val byRawLenoId = db.collection(COLLECTION_USERS)
-                            .whereEqualTo("linoId", rawLenoDigits)
+                        val byLenIdLower = db.collection(COLLECTION_USERS)
+                            .whereEqualTo("lenId_lowercase", cleanLower)
                             .limit(1)
                             .get()
                             .await()
-                        if (!byRawLenoId.isEmpty) {
-                            return@withTimeoutOrNull docToUser(byRawLenoId.documents[0].data, byRawLenoId.documents[0].id)
+                        if (!byLenIdLower.isEmpty) {
+                            return@withTimeoutOrNull docToUser(byLenIdLower.documents[0].data, byLenIdLower.documents[0].id)
                         }
                     } catch (_: Exception) {}
                 }
 
-                // 4. Exact lookup by displayName_lowercase & displayName
+                // 5. Direct document ID lookup in users collection (for UID lookups)
+                try {
+                    val directDoc = db.collection(COLLECTION_USERS).document(clean).get().await()
+                    if (directDoc.exists()) {
+                        docToUser(directDoc.data, directDoc.id)?.let { return@withTimeoutOrNull it }
+                    }
+                } catch (_: Exception) {}
+
+                // 6. Display name match
                 try {
                     val byDisplayNameLower = db.collection(COLLECTION_USERS)
                         .whereEqualTo("displayName_lowercase", cleanLower)
@@ -1289,44 +1316,17 @@ open class RemoteAccountService {
                 } catch (_: Exception) {}
 
                 try {
-                    val byDisplayName = db.collection(COLLECTION_USERS)
-                        .whereEqualTo("displayName", clean)
+                    val byDisplayNameVariants = db.collection(COLLECTION_USERS)
+                        .whereIn("displayName", displayNameVariants)
                         .limit(1)
                         .get()
                         .await()
-                    if (!byDisplayName.isEmpty) {
-                        return@withTimeoutOrNull docToUser(byDisplayName.documents[0].data, byDisplayName.documents[0].id)
+                    if (!byDisplayNameVariants.isEmpty) {
+                        return@withTimeoutOrNull docToUser(byDisplayNameVariants.documents[0].data, byDisplayNameVariants.documents[0].id)
                     }
                 } catch (_: Exception) {}
 
-                // 5. Lookups via auxiliary index collections (usernames and leno_ids)
-                try {
-                    val unameDoc = db.collection(COLLECTION_USERNAMES).document(cleanLower).get().await()
-                    if (unameDoc.exists()) {
-                        val ownerUid = unameDoc.getString("ownerUid") ?: unameDoc.getString("uid")
-                        if (!ownerUid.isNullOrBlank()) {
-                            val userDoc = db.collection(COLLECTION_USERS).document(ownerUid).get().await()
-                            if (userDoc.exists()) {
-                                docToUser(userDoc.data, userDoc.id)?.let { return@withTimeoutOrNull it }
-                            }
-                        }
-                    }
-                } catch (_: Exception) {}
-
-                try {
-                    val lenoDoc = db.collection(COLLECTION_LENO_IDS).document(formattedLenoId).get().await()
-                    if (lenoDoc.exists()) {
-                        val ownerUid = lenoDoc.getString("ownerUid") ?: lenoDoc.getString("uid")
-                        if (!ownerUid.isNullOrBlank()) {
-                            val userDoc = db.collection(COLLECTION_USERS).document(ownerUid).get().await()
-                            if (userDoc.exists()) {
-                                docToUser(userDoc.data, userDoc.id)?.let { return@withTimeoutOrNull it }
-                            }
-                        }
-                    }
-                } catch (_: Exception) {}
-
-                // 6. Try search by email
+                // 7. Email match
                 try {
                     val byEmailField = db.collection(COLLECTION_USERS)
                         .whereEqualTo("email", cleanLower)
@@ -1338,19 +1338,21 @@ open class RemoteAccountService {
                     }
                 } catch (_: Exception) {}
 
-                // 7. Broad scan of recent users as fallback
+                // 8. Broad scan fallback across users collection (limit 300)
+                // Ensures older users without indices or lowercase fields are 100% discoverable
                 try {
-                    val broadSnap = db.collection(COLLECTION_USERS).limit(100).get().await()
+                    val broadSnap = db.collection(COLLECTION_USERS).limit(300).get().await()
                     broadSnap.documents.forEach { doc ->
                         val u = docToUser(doc.data, doc.id)
                         if (u != null) {
                             val rawLeno = u.linoId.replace("-", "").lowercase()
                             val cleanDigits = rawLenoDigits.lowercase()
-                            val matches = u.username.equals(cleanLower, ignoreCase = true) ||
+                            val matches = u.username.equals(clean, ignoreCase = true) ||
+                                u.username.equals(cleanLower, ignoreCase = true) ||
                                 u.displayName.equals(clean, ignoreCase = true) ||
                                 u.displayName.equals(cleanLower, ignoreCase = true) ||
-                                u.linoId.equals(formattedLenoId, ignoreCase = true) ||
-                                (cleanDigits.isNotBlank() && rawLeno == cleanDigits) ||
+                                (formattedLenoId.isNotEmpty() && u.linoId.equals(formattedLenoId, ignoreCase = true)) ||
+                                (isNumericLeno && rawLeno == cleanDigits) ||
                                 u.userId.equals(clean, ignoreCase = true) ||
                                 u.email.equals(cleanLower, ignoreCase = true)
                             if (matches) {
@@ -1385,7 +1387,7 @@ open class RemoteAccountService {
             withTimeoutOrNull(6000L) {
                 val doc = db.collection(COLLECTION_USERS).document(userId).get().await()
                 if (doc.exists()) {
-                    docToUser(doc.data)
+                    docToUser(doc.data, doc.id)
                 } else {
                     null
                 }
@@ -1403,14 +1405,27 @@ open class RemoteAccountService {
      * Searches for users across the remote cloud store matching query.
      */
     suspend fun searchRemoteUsers(query: String, currentUserId: String): List<UserEntity> = withContext(Dispatchers.IO) {
-        val clean = query.trim().removePrefix("@").lowercase()
+        val clean = query.trim().removePrefix("@").trim()
         if (clean.isBlank()) return@withContext emptyList()
+        val cleanLower = clean.lowercase()
+        val cleanUpper = clean.uppercase()
+        val titleCase = clean.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+        val usernameVariants = listOf(clean, cleanLower, cleanUpper, titleCase).distinct()
+
+        val rawLenoDigits = clean.replace("LEN-", "", ignoreCase = true).replace("LEN", "", ignoreCase = true).replace("-", "").trim()
+        val isNumericLeno = rawLenoDigits.isNotEmpty() && rawLenoDigits.all { it.isDigit() }
+        val formattedLenoId = if (isNumericLeno) "LEN-$rawLenoDigits" else if (clean.startsWith("LEN-", ignoreCase = true)) cleanUpper else ""
+
         if (isTestEnvironment()) {
             return@withContext testUsers.values.filter {
                 it.userId != currentUserId && (
-                    it.username.lowercase().contains(clean) ||
-                    it.displayName.lowercase().contains(clean) ||
-                    it.linoId.lowercase().contains(clean)
+                    it.username.contains(clean, ignoreCase = true) ||
+                    it.displayName.contains(clean, ignoreCase = true) ||
+                    it.linoId.contains(clean, ignoreCase = true) ||
+                    (formattedLenoId.isNotEmpty() && it.linoId.contains(formattedLenoId, ignoreCase = true)) ||
+                    (isNumericLeno && it.linoId.replace("-", "").contains(rawLenoDigits, ignoreCase = true)) ||
+                    it.userId.contains(clean, ignoreCase = true) ||
+                    it.email.contains(clean, ignoreCase = true)
                 )
             }
         }
@@ -1418,24 +1433,127 @@ open class RemoteAccountService {
         val db = firestore ?: return@withContext emptyList()
 
         try {
-            withTimeoutOrNull(8000L) {
+            withTimeoutOrNull(10000L) {
                 val results = mutableMapOf<String, UserEntity>()
 
-                // 0. Comprehensive scan across users collection (broad substring and multi-field matching)
+                // 1. Direct exact lookup via findRemoteUser first
                 try {
-                    val allUsersSnap = db.collection(COLLECTION_USERS).limit(200).get().await()
-                    allUsersSnap.documents.forEach { doc ->
+                    val exact = findRemoteUser(clean)
+                    if (exact != null && exact.userId != currentUserId) {
+                        results[exact.userId] = exact
+                    }
+                } catch (_: Exception) {}
+
+                // 2. Query whereIn on username
+                try {
+                    val unameSnap = db.collection(COLLECTION_USERS)
+                        .whereIn("username", usernameVariants)
+                        .limit(10)
+                        .get()
+                        .await()
+                    unameSnap.documents.forEach { doc ->
+                        docToUser(doc.data, doc.id)?.let {
+                            if (it.userId != currentUserId) results[it.userId] = it
+                        }
+                    }
+                } catch (_: Exception) {}
+
+                // 3. Prefix search on username_lowercase
+                try {
+                    val uLowerSnap = db.collection(COLLECTION_USERS)
+                        .orderBy("username_lowercase")
+                        .startAt(cleanLower)
+                        .endAt(cleanLower + "\uf8ff")
+                        .limit(25)
+                        .get()
+                        .await()
+                    uLowerSnap.documents.forEach { doc ->
+                        docToUser(doc.data, doc.id)?.let {
+                            if (it.userId != currentUserId) results[it.userId] = it
+                        }
+                    }
+                } catch (_: Exception) {}
+
+                // 3b. Prefix search on original username
+                try {
+                    val uSnap = db.collection(COLLECTION_USERS)
+                        .orderBy("username")
+                        .startAt(clean)
+                        .endAt(clean + "\uf8ff")
+                        .limit(25)
+                        .get()
+                        .await()
+                    uSnap.documents.forEach { doc ->
+                        docToUser(doc.data, doc.id)?.let {
+                            if (it.userId != currentUserId) results[it.userId] = it
+                        }
+                    }
+                } catch (_: Exception) {}
+
+                // 4. Prefix search on displayName_lowercase and displayName
+                try {
+                    val dLowerSnap = db.collection(COLLECTION_USERS)
+                        .orderBy("displayName_lowercase")
+                        .startAt(cleanLower)
+                        .endAt(cleanLower + "\uf8ff")
+                        .limit(25)
+                        .get()
+                        .await()
+                    dLowerSnap.documents.forEach { doc ->
+                        docToUser(doc.data, doc.id)?.let {
+                            if (it.userId != currentUserId) results[it.userId] = it
+                        }
+                    }
+                } catch (_: Exception) {}
+
+                try {
+                    val dSnap = db.collection(COLLECTION_USERS)
+                        .orderBy("displayName")
+                        .startAt(titleCase)
+                        .endAt(titleCase + "\uf8ff")
+                        .limit(25)
+                        .get()
+                        .await()
+                    dSnap.documents.forEach { doc ->
+                        docToUser(doc.data, doc.id)?.let {
+                            if (it.userId != currentUserId) results[it.userId] = it
+                        }
+                    }
+                } catch (_: Exception) {}
+
+                // 5. Leno ID lookup
+                if (formattedLenoId.isNotEmpty() || isNumericLeno) {
+                    val lenoTarget = if (formattedLenoId.isNotEmpty()) formattedLenoId else cleanUpper
+                    try {
+                        val linoSnap = db.collection(COLLECTION_USERS)
+                            .whereEqualTo("linoId", lenoTarget)
+                            .limit(5)
+                            .get()
+                            .await()
+                        linoSnap.documents.forEach { doc ->
+                            docToUser(doc.data, doc.id)?.let {
+                                if (it.userId != currentUserId) results[it.userId] = it
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+
+                // 6. Broad scan of users collection (limit 200) to find substring matches and older users
+                try {
+                    val broadSnap = db.collection(COLLECTION_USERS).limit(200).get().await()
+                    broadSnap.documents.forEach { doc ->
                         val u = docToUser(doc.data, doc.id)
                         if (u != null && u.userId != currentUserId) {
                             val rawLeno = u.linoId.replace("-", "").lowercase()
-                            val cleanDigits = clean.replace("-", "").lowercase()
-                            val matches = u.username.lowercase().contains(clean) ||
-                                u.displayName.lowercase().contains(clean) ||
-                                u.linoId.lowercase().contains(clean) ||
-                                (cleanDigits.isNotBlank() && rawLeno.contains(cleanDigits)) ||
-                                u.userId.lowercase().contains(clean) ||
-                                doc.id.lowercase().contains(clean) ||
-                                u.email.lowercase().contains(clean) ||
+                            val cleanDigits = rawLenoDigits.lowercase()
+                            val matches = u.username.contains(clean, ignoreCase = true) ||
+                                u.displayName.contains(clean, ignoreCase = true) ||
+                                u.linoId.contains(clean, ignoreCase = true) ||
+                                (formattedLenoId.isNotEmpty() && u.linoId.contains(formattedLenoId, ignoreCase = true)) ||
+                                (isNumericLeno && rawLeno.contains(cleanDigits)) ||
+                                u.userId.contains(clean, ignoreCase = true) ||
+                                doc.id.contains(clean, ignoreCase = true) ||
+                                u.email.contains(clean, ignoreCase = true) ||
                                 (clean.length >= 3 && u.phoneNumber.contains(clean))
                             if (matches) {
                                 results[u.userId] = u
@@ -1446,207 +1564,8 @@ open class RemoteAccountService {
                     Log.w(TAG, "Broad users scan notice: ${e.message}")
                 }
 
-                // 0b. Direct lookup by user ID / document ID
-                try {
-                    val origTrimmed = query.trim().removePrefix("@")
-                    val directDoc = db.collection(COLLECTION_USERS).document(origTrimmed).get().await()
-                    if (directDoc.exists()) {
-                        docToUser(directDoc.data, directDoc.id)?.let {
-                            if (it.userId != currentUserId) results[it.userId] = it
-                        }
-                    }
-                    if (clean != origTrimmed) {
-                        val directDocClean = db.collection(COLLECTION_USERS).document(clean).get().await()
-                        if (directDocClean.exists()) {
-                            docToUser(directDocClean.data, directDocClean.id)?.let {
-                                if (it.userId != currentUserId) results[it.userId] = it
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Search by direct docId notice: ${e.message}")
-                }
-
-                // 0c. Query by userId field
-                try {
-                    val origTrimmed = query.trim().removePrefix("@")
-                    val byUidSnap = db.collection(COLLECTION_USERS).whereEqualTo("userId", origTrimmed).limit(5).get().await()
-                    byUidSnap.documents.forEach { doc ->
-                        docToUser(doc.data, doc.id)?.let {
-                            if (it.userId != currentUserId) results[it.userId] = it
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Search by userId field notice: ${e.message}")
-                }
-
-                // 1. Prefix query on username and username_lowercase
-                try {
-                    val unameSnap = db.collection(COLLECTION_USERS)
-                        .orderBy("username")
-                        .startAt(clean)
-                        .endAt(clean + "\uf8ff")
-                        .limit(25)
-                        .get()
-                        .await()
-                    unameSnap.documents.forEach { doc ->
-                        val u = docToUser(doc.data, doc.id)
-                        if (u != null && u.userId != currentUserId) {
-                            results[u.userId] = u
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Search by username prefix notice: ${e.message}")
-                }
-
-                try {
-                    val uLowerSnap = db.collection(COLLECTION_USERS)
-                        .orderBy("username_lowercase")
-                        .startAt(clean)
-                        .endAt(clean + "\uf8ff")
-                        .limit(25)
-                        .get()
-                        .await()
-                    uLowerSnap.documents.forEach { doc ->
-                        val u = docToUser(doc.data, doc.id)
-                        if (u != null && u.userId != currentUserId) {
-                            results[u.userId] = u
-                        }
-                    }
-                } catch (_: Exception) {}
-
-                // 2. Prefix query on displayName and displayName_lowercase
-                try {
-                    val origTrimmed = query.trim().removePrefix("@")
-                    val dnameSnap = db.collection(COLLECTION_USERS)
-                        .orderBy("displayName")
-                        .startAt(origTrimmed)
-                        .endAt(origTrimmed + "\uf8ff")
-                        .limit(25)
-                        .get()
-                        .await()
-                    dnameSnap.documents.forEach { doc ->
-                        val u = docToUser(doc.data, doc.id)
-                        if (u != null && u.userId != currentUserId) {
-                            results[u.userId] = u
-                        }
-                    }
-                    val capitalized = origTrimmed.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
-                    if (capitalized != origTrimmed) {
-                        val capSnap = db.collection(COLLECTION_USERS)
-                            .orderBy("displayName")
-                            .startAt(capitalized)
-                            .endAt(capitalized + "\uf8ff")
-                            .limit(25)
-                            .get()
-                            .await()
-                        capSnap.documents.forEach { doc ->
-                            val u = docToUser(doc.data, doc.id)
-                            if (u != null && u.userId != currentUserId) {
-                                results[u.userId] = u
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Search by displayName notice: ${e.message}")
-                }
-
-                try {
-                    val dLowerSnap = db.collection(COLLECTION_USERS)
-                        .orderBy("displayName_lowercase")
-                        .startAt(clean)
-                        .endAt(clean + "\uf8ff")
-                        .limit(25)
-                        .get()
-                        .await()
-                    dLowerSnap.documents.forEach { doc ->
-                        val u = docToUser(doc.data, doc.id)
-                        if (u != null && u.userId != currentUserId) {
-                            results[u.userId] = u
-                        }
-                    }
-                } catch (_: Exception) {}
-
-                // 2b. Exact match in usernames collection
-                try {
-                    val uDoc = db.collection(COLLECTION_USERNAMES).document(clean).get().await()
-                    if (uDoc.exists()) {
-                        val uid = uDoc.getString("ownerUid") ?: uDoc.getString("uid")
-                        if (!uid.isNullOrBlank() && uid != currentUserId && !results.containsKey(uid)) {
-                            val userDoc = db.collection(COLLECTION_USERS).document(uid).get().await()
-                            if (userDoc.exists()) {
-                                docToUser(userDoc.data, userDoc.id)?.let { results[it.userId] = it }
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Search by exact username notice: ${e.message}")
-                }
-
-                // 3. Match in leno_ids collection
-                try {
-                    val rawCleanCode = clean.replace("len-", "", ignoreCase = true).replace("len", "", ignoreCase = true).uppercase().trim()
-                    val formattedLeno = if (rawCleanCode.isNotBlank()) "LEN-$rawCleanCode" else clean.uppercase()
-                    val lDoc = db.collection(COLLECTION_LENO_IDS).document(formattedLeno).get().await()
-                    if (lDoc.exists()) {
-                        val uid = lDoc.getString("ownerUid") ?: lDoc.getString("uid")
-                        if (!uid.isNullOrBlank() && uid != currentUserId && !results.containsKey(uid)) {
-                            val userDoc = db.collection(COLLECTION_USERS).document(uid).get().await()
-                            if (userDoc.exists()) {
-                                docToUser(userDoc.data, userDoc.id)?.let { results[it.userId] = it }
-                            }
-                        }
-                    }
-                    if (clean.uppercase() != formattedLeno) {
-                        val altLDoc = db.collection(COLLECTION_LENO_IDS).document(clean.uppercase()).get().await()
-                        if (altLDoc.exists()) {
-                            val uid = altLDoc.getString("ownerUid") ?: altLDoc.getString("uid")
-                            if (!uid.isNullOrBlank() && uid != currentUserId && !results.containsKey(uid)) {
-                                val userDoc = db.collection(COLLECTION_USERS).document(uid).get().await()
-                                if (userDoc.exists()) {
-                                    docToUser(userDoc.data, userDoc.id)?.let { results[it.userId] = it }
-                                }
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Search by leno ID notice: ${e.message}")
-                }
-
-                // 4. Match by Leno ID field in users collection & lenId_lowercase
-                try {
-                    val rawCleanCode = clean.replace("len-", "", ignoreCase = true).replace("len", "", ignoreCase = true).uppercase().trim()
-                    val formattedLeno = if (rawCleanCode.isNotBlank()) "LEN-$rawCleanCode" else clean.uppercase()
-                    val linoSnap = db.collection(COLLECTION_USERS)
-                        .whereEqualTo("linoId", formattedLeno)
-                        .limit(5)
-                        .get()
-                        .await()
-                    linoSnap.documents.forEach { doc ->
-                        val u = docToUser(doc.data, doc.id)
-                        if (u != null && u.userId != currentUserId) {
-                            results[u.userId] = u
-                        }
-                    }
-                    val lenLowerSnap = db.collection(COLLECTION_USERS)
-                        .orderBy("lenId_lowercase")
-                        .startAt(clean)
-                        .endAt(clean + "\uf8ff")
-                        .limit(25)
-                        .get()
-                        .await()
-                    lenLowerSnap.documents.forEach { doc ->
-                        val u = docToUser(doc.data, doc.id)
-                        if (u != null && u.userId != currentUserId) {
-                            results[u.userId] = u
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Search by linoId field notice: ${e.message}")
-                }
-
-                // 5. Explicit Official Accounts injection for guaranteed discoverability
-                if (clean.contains("officialjaiby") || "officialjaiby".contains(clean) || clean.contains("50638964")) {
+                // 7. Official Accounts injection
+                if (cleanLower.contains("officialjaiby") || "officialjaiby".contains(cleanLower) || cleanLower.contains("50638964")) {
                     val officialJaiby = UserEntity(
                         userId = "usr_officialjaiby_2026",
                         username = "officialjaiby",
@@ -1663,7 +1582,7 @@ open class RemoteAccountService {
                         results[officialJaiby.userId] = officialJaiby
                     }
                 }
-                if (clean.contains("leno") || clean.contains("official leno") || clean.contains("00000001")) {
+                if (cleanLower.contains("leno") || cleanLower.contains("official leno") || cleanLower.contains("00000001")) {
                     val officialLeno = UserEntity(
                         userId = "official_leno_account",
                         username = "leno",
@@ -2064,6 +1983,10 @@ open class RemoteAccountService {
         if (!isFirestoreProvisioned) {
             return@withContext Result.success(Unit)
         }
+        if (message.senderId.isBlank() || message.receiverId.isBlank()) {
+            Log.w(TAG, "Cannot save message with empty sender or receiver: sender='${message.senderId}', receiver='${message.receiverId}'")
+            return@withContext Result.failure(IllegalArgumentException("Empty sender or receiver ID"))
+        }
         val db = firestore ?: return@withContext Result.success(Unit)
         val chatId = getChatId(message.senderId, message.receiverId)
         try {
@@ -2091,7 +2014,7 @@ open class RemoteAccountService {
                 "updatedAt" to message.timestamp
             )
 
-            withTimeoutOrNull(5000L) {
+            withTimeoutOrNull(15000L) {
                 try {
                     val batch = db.batch()
                     batch.set(db.collection(COLLECTION_CHATS).document(chatId), chatSummary, SetOptions.merge())
@@ -2105,24 +2028,24 @@ open class RemoteAccountService {
                 } catch (e: Exception) {
                     Log.w(TAG, "Batch write fallback to direct writes: ${e.message}")
                     try {
-                        withTimeoutOrNull(2000L) {
+                        withTimeoutOrNull(8000L) {
                             db.collection(COLLECTION_CHATS).document(chatId).set(chatSummary, SetOptions.merge()).await()
                             db.collection(COLLECTION_CONVERSATIONS).document(chatId).set(chatSummary, SetOptions.merge()).await()
                         }
                     } catch (_: Exception) {}
                     try {
-                        withTimeoutOrNull(2000L) {
+                        withTimeoutOrNull(8000L) {
                             db.collection(COLLECTION_CHATS).document(chatId).collection("messages").document(message.messageId).set(msgData).await()
                             db.collection(COLLECTION_CONVERSATIONS).document(chatId).collection("messages").document(message.messageId).set(msgData).await()
                         }
                     } catch (_: Exception) {}
                     try {
-                        withTimeoutOrNull(2000L) {
+                        withTimeoutOrNull(8000L) {
                             db.collection(COLLECTION_USERS).document(message.receiverId).collection("inbox").document(message.messageId).set(msgData).await()
                         }
                     } catch (_: Exception) {}
                     try {
-                        withTimeoutOrNull(2000L) {
+                        withTimeoutOrNull(8000L) {
                             db.collection("messages").document(message.messageId).set(msgData).await()
                         }
                     } catch (_: Exception) {}
@@ -2178,14 +2101,14 @@ open class RemoteAccountService {
                 .update(
                     mapOf(
                         "read" to true,
-                        "status" to "READ"
+                        "status" to "read"
                     )
                 )
                 .await()
 
             val receipt = hashMapOf<String, Any>(
                 "messageId" to messageId,
-                "status" to "READ",
+                "status" to "read",
                 "read" to true,
                 "timestamp" to System.currentTimeMillis()
             )
@@ -2229,10 +2152,10 @@ open class RemoteAccountService {
                         val sid = doc.getString("senderId").orEmpty()
                         val rid = doc.getString("receiverId").orEmpty()
                         val isForMe = rid in myAliases || sid in partnerAliases || (sid.isNotBlank() && sid !in myAliases)
-                        val alreadyRead = doc.getBoolean("read") == true && doc.getString("status") == "READ"
+                        val alreadyRead = doc.getBoolean("read") == true || doc.getString("status")?.equals("read", ignoreCase = true) == true
 
                         if (isForMe && !alreadyRead) {
-                            batch.update(doc.reference, mapOf("read" to true, "status" to "READ"))
+                            batch.update(doc.reference, mapOf("read" to true, "status" to "read"))
                             val effectiveSender = if (sid.isNotBlank()) sid else otherUserId
                             if (effectiveSender.isNotBlank()) {
                                 val receiptRef = db.collection(COLLECTION_USERS)
@@ -2241,7 +2164,7 @@ open class RemoteAccountService {
                                     .document(doc.id)
                                 batch.set(receiptRef, hashMapOf(
                                     "messageId" to doc.id,
-                                    "status" to "READ",
+                                    "status" to "read",
                                     "read" to true,
                                     "timestamp" to now
                                 ))
@@ -2249,10 +2172,10 @@ open class RemoteAccountService {
                             count++
                         }
                     }
-                    if (count > 0) {
-                        batch.commit().await()
-                        Log.i(TAG, "Successfully marked $count messages as read in $colName for chat $chatId")
-                    }
+                    // When chat opened, after marking status='read', also set chat's unreadCount to 0
+                    batch.set(db.collection(colName).document(chatId), mapOf("unreadCount" to 0), SetOptions.merge())
+                    batch.commit().await()
+                    Log.i(TAG, "Successfully marked $count messages as read in $colName for chat $chatId")
                 } catch (e: Exception) {
                     Log.w(TAG, "markAllChatMessagesAsReadInRemote for $colName notice: ${e.message}")
                 }
@@ -2728,9 +2651,9 @@ open class RemoteAccountService {
                         val audio = data["audioUrl"] as? String
                         val duration = (data["audioDurationSeconds"] as? Number)?.toInt() ?: 0
                         val ts = (data["timestamp"] as? Number)?.toLong() ?: System.currentTimeMillis()
-                        val isReadDoc = (data["read"] as? Boolean) == true || (data["status"] as? String) == "READ"
-                        val rawMsgStatus = data["status"] as? String ?: "SENT"
-                        val st = if (isReadDoc) "READ" else rawMsgStatus
+                        val rawMsgStatus = (data["status"] as? String)?.lowercase() ?: "sent"
+                        val isReadDoc = (data["read"] as? Boolean) == true || rawMsgStatus == "read"
+                        val st = if (isReadDoc) "read" else rawMsgStatus
                         val isSys = data["isSystemMessage"] as? Boolean ?: false
                         MessageEntity(
                             messageId = mid,

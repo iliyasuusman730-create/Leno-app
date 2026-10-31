@@ -131,6 +131,24 @@ class MessageBackupStore(context: Context) {
     }
 
     /**
+     * Deletes a specific message from resilient backup store.
+     */
+    @Synchronized
+    fun deleteMessage(messageId: String) {
+        if (messageId.isBlank()) return
+        try {
+            val current = getAllMessagesInternal()
+            val filtered = current.filter { it.messageId != messageId }
+            if (filtered.size != current.size) {
+                saveMessagesInternal(filtered)
+                Log.d(TAG, "Deleted message $messageId from resilient backup store")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to delete message $messageId in backup: ${e.message}")
+        }
+    }
+
+    /**
      * Retrieves all messages relevant to a user (as sender or receiver).
      */
     fun getMessagesForUser(userId: String, aliasIds: List<String> = emptyList()): List<MessageEntity> {

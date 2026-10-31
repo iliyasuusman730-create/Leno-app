@@ -56,6 +56,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -371,6 +374,33 @@ private fun SupportMessageBubble(
     val timeFormatter = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
     val formattedTime = remember(message.timestamp) { timeFormatter.format(Date(message.timestamp)) }
 
+    val bubbleShape = remember(isSelf) {
+        if (isSelf) {
+            RoundedCornerShape(
+                topStart = 22.dp,
+                topEnd = 22.dp,
+                bottomStart = 22.dp,
+                bottomEnd = 4.dp
+            )
+        } else {
+            RoundedCornerShape(
+                topStart = 22.dp,
+                topEnd = 22.dp,
+                bottomStart = 4.dp,
+                bottomEnd = 22.dp
+            )
+        }
+    }
+
+    // Bubble Colors: .sent { background: #00A86B; color: #FFFFFF; } and .receive { background: #F3F4F6; color: #111827; }
+    val sentBackground = Color(0xFF00A86B)
+    val receiveBackground = Color(0xFFF3F4F6)
+    val bubbleBorder = if (isSelf) {
+        BorderStroke(1.dp, Color(0x30FFFFFF))
+    } else {
+        BorderStroke(1.dp, Color(0xFFE5E7EB))
+    }
+
     Box(
         modifier = Modifier.fillMaxWidth(),
         contentAlignment = if (isSelf) Alignment.CenterEnd else Alignment.CenterStart
@@ -410,44 +440,44 @@ private fun SupportMessageBubble(
             }
 
             Surface(
-                shape = RoundedCornerShape(
-                    topStart = 16.dp,
-                    topEnd = 16.dp,
-                    bottomStart = if (isSelf) 16.dp else 4.dp,
-                    bottomEnd = if (isSelf) 4.dp else 16.dp
-                ),
-                color = if (isSelf) LenoPrimary else MaterialTheme.colorScheme.surfaceVariant,
-                border = if (!isSelf) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)) else null,
+                shape = bubbleShape,
+                color = if (isSelf) sentBackground else receiveBackground,
+                border = bubbleBorder,
+                shadowElevation = 2.dp,
                 modifier = Modifier.testTag("support_message_bubble")
             ) {
-                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)) {
-                    Text(
-                        text = message.text,
-                        color = if (isSelf) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 14.sp,
-                        lineHeight = 19.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Row(
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.align(Alignment.End)
-                    ) {
+                Box(
+                    modifier = Modifier.background(if (isSelf) sentBackground else receiveBackground)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
                         Text(
-                            text = formattedTime,
-                            fontSize = 10.sp,
-                            color = if (isSelf) Color.White.copy(alpha = 0.75f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            text = message.text,
+                            color = if (isSelf) Color(0xFFFFFFFF) else Color(0xFF111827),
+                            fontSize = 15.sp,
+                            lineHeight = 20.sp
                         )
-                        if (isSelf) {
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Icon(
-                                imageVector = if (message.read) Icons.Default.DoneAll else Icons.Default.Done,
-                                contentDescription = if (message.read) "Read" else "Sent",
-                                tint = Color.White.copy(alpha = 0.75f),
-                                modifier = Modifier.size(12.dp)
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Row(
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.align(Alignment.End)
+                        ) {
+                            Text(
+                                text = formattedTime,
+                                fontSize = 10.sp,
+                                color = if (isSelf) Color.White.copy(alpha = 0.85f) else Color(0xFF6B7280)
                             )
+                            if (isSelf) {
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Icon(
+                                    imageVector = if (message.read) Icons.Default.DoneAll else Icons.Default.Done,
+                                    contentDescription = if (message.read) "Read" else "Sent",
+                                    tint = Color.White.copy(alpha = 0.85f),
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
                         }
                     }
                 }
