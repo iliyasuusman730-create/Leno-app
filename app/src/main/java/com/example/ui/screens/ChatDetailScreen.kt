@@ -17,6 +17,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -27,6 +31,9 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.ui.draw.drawBehind
@@ -35,7 +42,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
 import com.example.R
@@ -64,6 +70,7 @@ import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
@@ -80,6 +87,13 @@ import androidx.compose.material.icons.filled.Report
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material3.Badge
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -138,6 +152,17 @@ import com.example.ui.components.LenoAvatar
 import com.example.ui.components.OfficialProfileDialog
 import com.example.ui.components.OfficialVerifiedBadge
 import com.example.ui.theme.LenoChatAttachmentBtn
+import com.example.ui.theme.LenoPrimary
+import com.example.ui.theme.LenoPrimaryDark
+import com.example.ui.theme.LenoPrimaryLight
+import com.example.ui.theme.LenoEmeraldSent
+import com.example.ui.theme.LenoEmeraldSentText
+import com.example.ui.theme.LenoEmeraldSentTime
+import com.example.ui.theme.LenoSoftMintReceived
+import com.example.ui.theme.LenoSoftMintReceivedBorder
+import com.example.ui.theme.LenoDarkGreenText
+import com.example.ui.theme.LenoDarkGreenTime
+import com.example.ui.theme.LenoTickCyan
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import com.example.ui.theme.LenoChatBackground
@@ -176,9 +201,9 @@ fun LenoChatDoodleBackground(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFFFFF8F5))
+            .background(Color(0xFFF7FAF8))
             .drawBehind {
-                val bubbleColor = Color(0xFF00A86B).copy(alpha = 0.04f)
+                val bubbleColor = Color(0xFF059669).copy(alpha = 0.03f)
                 val stepX = 64.dp.toPx()
                 val stepY = 64.dp.toPx()
                 val bubbleWidth = 24.dp.toPx()
@@ -274,6 +299,7 @@ fun ChatDetailScreen(
     }
 
     var textInput by remember { mutableStateOf("") }
+    val messageReactions = remember { androidx.compose.runtime.mutableStateMapOf<String, String>() }
 
     // Notify ViewModel when user is typing in textInput
     LaunchedEffect(textInput) {
@@ -291,6 +317,8 @@ fun ChatDetailScreen(
     var showReportDialog by remember { mutableStateOf(false) }
     var showPhotoPickerModal by remember { mutableStateOf(false) }
     var showOfficialProfileDialog by remember { mutableStateOf(false) }
+    var showStarredMessagesDialog by remember { mutableStateOf(false) }
+    val starredMessageIds by viewModel.starredMessageIds.collectAsState()
     var reportReasonInput by remember { mutableStateOf("") }
 
     // Voice Recording State
@@ -428,6 +456,41 @@ fun ChatDetailScreen(
     val isOfficialAccount = partnerId == LenoRepository.OFFICIAL_LENO_ID
     val isAuthorizedOfficialPoster = currentUser?.userId == LenoRepository.OFFICIAL_LENO_ID
 
+    val demoTimestamp = remember {
+        java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 17)
+        }.timeInMillis
+    }
+    val displayMessages = if (messages.isEmpty() && !isOfficialAccount) {
+        remember(demoTimestamp, partnerId, currentUser?.userId) {
+            val myId = currentUser?.userId ?: "me"
+            val targetPartnerId = partnerId.ifBlank { "aisha_user_id" }
+            listOf(
+                MessageEntity(
+                    messageId = "demo_text_msg_hi",
+                    senderId = myId,
+                    receiverId = targetPartnerId,
+                    text = "hi",
+                    timestamp = demoTimestamp,
+                    status = "SENT"
+                ),
+                MessageEntity(
+                    messageId = "demo_voice_msg_sent",
+                    senderId = myId,
+                    receiverId = targetPartnerId,
+                    text = "🎤 Voice Note (0:05)",
+                    audioUrl = "sample_voice_note",
+                    audioDurationSeconds = 5,
+                    timestamp = demoTimestamp,
+                    status = "SENT"
+                )
+            )
+        }
+    } else {
+        messages
+    }
+
     Scaffold(
         contentWindowInsets = WindowInsets.statusBars,
         topBar = {
@@ -448,8 +511,8 @@ fun ChatDetailScreen(
                                 avatarUrl = partner?.avatarUrl,
                                 isOfficial = isOfficialAccount || partner?.isOfficial == true || partner?.isVerified == true || partner?.isOwner == true,
                                 size = 40.dp,
-                                contentDescription = partner?.displayName ?: if (isOfficialAccount) "Official Leno" else "Adam",
-                                username = partner?.username ?: if (isOfficialAccount) "Leno" else "Adam"
+                                contentDescription = partner?.displayName ?: "Official Leno",
+                                username = partner?.username
                             )
                             if (partner?.isOnline == true && !isOfficialAccount) {
                                 Box(
@@ -468,7 +531,7 @@ fun ChatDetailScreen(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(
-                                    text = if (isOfficialAccount) "Official Leno" else (partner?.displayName?.ifBlank { "Adam" } ?: "Adam"),
+                                    text = if (isOfficialAccount) "Official Leno" else (partner?.displayName?.ifBlank { "Aisha" } ?: "Aisha"),
                                     style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
@@ -576,6 +639,14 @@ fun ChatDetailScreen(
                             onDismissRequest = { menuExpanded = false }
                         ) {
                             DropdownMenuItem(
+                                text = { Text("Starred Messages") },
+                                leadingIcon = { Icon(Icons.Default.Star, contentDescription = null, tint = Color(0xFFF59E0B)) },
+                                onClick = {
+                                    menuExpanded = false
+                                    showStarredMessagesDialog = true
+                                }
+                            )
+                            DropdownMenuItem(
                                 text = { Text("View Profile") },
                                 leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
                                 onClick = {
@@ -661,168 +732,194 @@ fun ChatDetailScreen(
                 )
             }
 
-            val time140PM = remember {
-                Calendar.getInstance().apply {
-                    set(Calendar.HOUR_OF_DAY, 13)
-                    set(Calendar.MINUTE, 40)
-                }.timeInMillis
-            }
-            val time133AM = remember {
-                Calendar.getInstance().apply {
-                    set(Calendar.HOUR_OF_DAY, 1)
-                    set(Calendar.MINUTE, 33)
-                }.timeInMillis
-            }
-            val displayMessages = if (!isOfficialAccount) {
-                remember(messages, time140PM, time133AM, partnerId, currentUser?.userId) {
-                    val myId = currentUser?.userId ?: "me"
-                    val adamId = if (partnerId.isNotBlank() && partnerId != myId) partnerId else "adam_user_id"
-                    val baseDemoMessages = listOf(
-                        MessageEntity(
-                            messageId = "demo_text_msg_adam",
-                            senderId = adamId,
-                            receiverId = myId,
-                            text = "Hi ykk ya gida",
-                            timestamp = time140PM,
-                            status = "READ"
-                        ),
-                        MessageEntity(
-                            messageId = "demo_voice_msg_adam",
-                            senderId = adamId,
-                            receiverId = myId,
-                            text = "🎤 Voice Note (0:05)",
-                            audioUrl = "sample_voice_note_adam",
-                            audioDurationSeconds = 5,
-                            timestamp = time140PM,
-                            status = "READ"
-                        ),
-                        MessageEntity(
-                            messageId = "demo_voice_msg_sent",
-                            senderId = myId,
-                            receiverId = adamId,
-                            text = "🎤 Voice Note (0:05)",
-                            audioUrl = "sample_voice_note_sent",
-                            audioDurationSeconds = 5,
-                            timestamp = time133AM,
-                            status = "read"
-                        )
-                    )
-                    if (messages.isEmpty()) {
-                        baseDemoMessages
-                    } else {
-                        val nonDemoLiveMessages = messages.filter { !it.messageId.startsWith("demo_") }
-                        baseDemoMessages + nonDemoLiveMessages
-                    }
-                }
-            } else {
-                messages
-            }
-
-            // Messages Feed - Always active and interactive
-            LazyColumn(
-                state = listState,
+            // Messages Feed with Floating Scroll-Down & New Message Pill
+            Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Centered Date chip: "Today" centered, #E5E7EB background, #6B7280 text, 12px, pill shape, margin 16px top/bottom
-                item(key = "chat_date_chip_today") {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = Color(0xFFE5E7EB),
-                            shadowElevation = 0.dp
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 14.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Centered Date chip: "Today" centered, #E5E7EB background, #6B7280 text, 12px, pill shape, margin 16px top/bottom
+                    item(key = "chat_date_chip_today") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 16.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = "Today",
-                                color = Color(0xFF6B7280),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0xFFE5E7EB),
+                                shadowElevation = 0.dp
+                            ) {
+                                Text(
+                                    text = "Today",
+                                    color = Color(0xFF6B7280),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    if (displayMessages.isEmpty()) {
+                        item(key = "empty_chat_state_greeting") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 48.dp, horizontal = 24.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                                        modifier = Modifier.size(64.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.Email,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(32.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text(
+                                        text = if (isOfficialAccount) "Official Leno Channel" else "No messages yet",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = if (isOfficialAccount) "Official announcements and platform updates will be posted here." else "Send a message or voice note to start the conversation! 👋",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        items(displayMessages, key = { it.messageId }) { msg ->
+                            val isFromMe = msg.senderId == (currentUser?.userId ?: "me") || msg.senderId == "me"
+                            val isMsgStarred = starredMessageIds.contains(msg.messageId)
+                            MessageBubble(
+                                message = msg,
+                                isFromMe = isFromMe,
+                                isStarred = isMsgStarred,
+                                onToggleStar = { viewModel.toggleStarMessage(it.messageId) },
+                                reaction = messageReactions[msg.messageId],
+                                onReact = { emoji ->
+                                    if (messageReactions[msg.messageId] == emoji) {
+                                        messageReactions.remove(msg.messageId)
+                                    } else {
+                                        messageReactions[msg.messageId] = emoji
+                                    }
+                                },
+                                onRetry = { viewModel.retrySendMessage(msg.messageId) },
+                                onReply = { replyMsg ->
+                                    textInput = if (textInput.isBlank()) "Replying: \"${replyMsg.text.take(30)}\" " else "$textInput\n\"${replyMsg.text.take(30)}\" "
+                                },
+                                onForward = { fwdMsg ->
+                                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                                    clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("Forwarded Message", fwdMsg.text))
+                                    Toast.makeText(context, "Message copied to forward", Toast.LENGTH_SHORT).show()
+                                },
+                                onCopy = { copyMsg ->
+                                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                                    val contentToCopy = if (copyMsg.text.isNotBlank()) copyMsg.text else if (!copyMsg.audioUrl.isNullOrBlank()) "Voice note" else "Photo attachment"
+                                    clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("Leno Message", contentToCopy))
+                                    Toast.makeText(context, "Message copied to clipboard", Toast.LENGTH_SHORT).show()
+                                },
+                                onDelete = { delMsg ->
+                                    viewModel.deleteMessage(delMsg.messageId)
+                                    Toast.makeText(context, "Message deleted", Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                        }
+                    }
+
+                    if (isPartnerTyping) {
+                        item(key = "typing_indicator_bubble") {
+                            TypingIndicatorBubble(
+                                partnerName = partner?.displayName ?: "Partner",
+                                partnerAvatarUrl = partner?.avatarUrl
                             )
                         }
                     }
                 }
 
-                if (displayMessages.isEmpty()) {
-                    item(key = "empty_chat_state_greeting") {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 48.dp, horizontal = 24.dp),
-                            contentAlignment = Alignment.Center
+                // In-Chat Floating Scroll Down & New Messages Pill
+                val showScrollDown by remember {
+                    derivedStateOf { listState.canScrollForward }
+                }
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = showScrollDown,
+                    enter = fadeIn() + slideInVertically { it / 2 },
+                    exit = fadeOut() + slideOutVertically { it / 2 },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(bottom = 12.dp, end = 16.dp)
+                ) {
+                    val unreadBelowCount = remember(displayMessages, currentUser?.userId) {
+                        val myId = currentUser?.userId
+                        displayMessages.count { it.senderId != myId && it.status != "READ" && !it.read }
+                    }
+                    Surface(
+                        onClick = {
+                            coroutineScope.launch {
+                                val targetIndex = (displayMessages.size + 1).coerceAtLeast(0)
+                                listState.animateScrollToItem(targetIndex)
+                            }
+                        },
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surface,
+                        shadowElevation = 6.dp,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                        modifier = Modifier.testTag("scroll_down_pill")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-                                    modifier = Modifier.size(64.dp)
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Scroll to bottom",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            if (unreadBelowCount > 0) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF25D366))
+                                        .padding(horizontal = 5.dp, vertical = 1.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = Icons.Default.Email,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(32.dp)
-                                        )
-                                    }
+                                    Text(
+                                        text = unreadBelowCount.toString(),
+                                        color = Color.White,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text(
-                                    text = if (isOfficialAccount) "Official Leno Channel" else "No messages yet",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = if (isOfficialAccount) "Official announcements and platform updates will be posted here." else "Send a message or voice note to start the conversation! 👋",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center
-                                )
                             }
                         }
-                    }
-                } else {
-                    items(displayMessages, key = { it.messageId }) { msg ->
-                        val isFromMe = msg.senderId == (currentUser?.userId ?: "me") || msg.senderId == "me"
-                        MessageBubble(
-                            message = msg,
-                            isFromMe = isFromMe,
-                            onRetry = { viewModel.retrySendMessage(msg.messageId) },
-                            onReply = { replyMsg ->
-                                textInput = if (textInput.isBlank()) "Replying: \"${replyMsg.text.take(30)}\" " else "$textInput\n\"${replyMsg.text.take(30)}\" "
-                            },
-                            onForward = { fwdMsg ->
-                                val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-                                clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("Forwarded Message", fwdMsg.text))
-                                Toast.makeText(context, "Message copied to forward", Toast.LENGTH_SHORT).show()
-                            },
-                            onDelete = { delMsg ->
-                                viewModel.deleteMessage(delMsg.messageId)
-                                Toast.makeText(context, "Message deleted", Toast.LENGTH_SHORT).show()
-                            }
-                        )
-                    }
-                }
-
-                if (isPartnerTyping) {
-                    item(key = "typing_indicator_bubble") {
-                        TypingIndicatorBubble(
-                            partnerName = partner?.displayName ?: "Partner",
-                            partnerAvatarUrl = partner?.avatarUrl
-                        )
                     }
                 }
             }
@@ -1510,6 +1607,263 @@ fun ChatDetailScreen(
             }
         )
     }
+
+    if (showStarredMessagesDialog) {
+        val starredMsgs = remember(displayMessages, starredMessageIds) {
+            displayMessages.filter { starredMessageIds.contains(it.messageId) }
+        }
+        AlertDialog(
+            onDismissRequest = { showStarredMessagesDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Star, contentDescription = null, tint = Color(0xFFF59E0B))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Starred Messages (${starredMsgs.size})", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                if (starredMsgs.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                Icons.Default.StarBorder,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.size(44.dp)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "No starred messages yet.\nLong-press any message to star it!",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 380.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(starredMsgs, key = { it.messageId }) { sm ->
+                            val isSmFromMe = sm.senderId == currentUser?.userId
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        showStarredMessagesDialog = false
+                                        val targetIdx = displayMessages.indexOfFirst { it.messageId == sm.messageId }
+                                        if (targetIdx >= 0) {
+                                            coroutineScope.launch {
+                                                listState.animateScrollToItem(targetIdx + 1)
+                                            }
+                                        }
+                                    }
+                                    .testTag("starred_item_${sm.messageId}"),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = if (isSmFromMe) "You" else partner?.displayName ?: "Partner",
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        val smTime = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(sm.timestamp))
+                                        Text(
+                                            text = smTime,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    val textPreview = sm.text.ifBlank {
+                                        if (!sm.audioUrl.isNullOrBlank()) "🎤 Voice Note" else "📷 Photo"
+                                    }
+                                    Text(
+                                        text = textPreview,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 3,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showStarredMessagesDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun MessageActionsToolbar(
+    message: MessageEntity,
+    isStarred: Boolean = false,
+    onToggleStar: (MessageEntity) -> Unit = {},
+    onReact: (String) -> Unit = {},
+    onReply: (MessageEntity) -> Unit,
+    onForward: (MessageEntity) -> Unit,
+    onCopy: (MessageEntity) -> Unit,
+    onDelete: (MessageEntity) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val quickEmojis = listOf("❤️", "👍", "🔥", "😂", "😮", "🙏")
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 6.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        modifier = Modifier
+            .padding(top = 4.dp, bottom = 4.dp)
+            .testTag("actions_row_${message.messageId}")
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Quick Emoji Reaction Bar
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.padding(bottom = 6.dp)
+            ) {
+                quickEmojis.forEach { emoji ->
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                            .clickable {
+                                onDismiss()
+                                onReact(emoji)
+                            }
+                            .testTag("reaction_opt_${emoji}_${message.messageId}"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = emoji, fontSize = 18.sp)
+                    }
+                }
+            }
+
+            // Subtle divider
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+            )
+
+            // Action Buttons
+            Row(
+                modifier = Modifier.padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                IconButton(
+                    onClick = {
+                        onDismiss()
+                        onToggleStar(message)
+                    },
+                    modifier = Modifier
+                        .size(36.dp)
+                        .testTag("action_star_${message.messageId}")
+                ) {
+                    Icon(
+                        imageVector = if (isStarred) Icons.Default.Star else Icons.Default.StarBorder,
+                        contentDescription = if (isStarred) "Unstar" else "Star",
+                        tint = if (isStarred) Color(0xFFF59E0B) else LenoEmeraldSent,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = {
+                        onDismiss()
+                        onReply(message)
+                    },
+                    modifier = Modifier
+                        .size(36.dp)
+                        .testTag("action_reply_${message.messageId}")
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_reply),
+                        contentDescription = "Reply",
+                        tint = LenoEmeraldSent,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = {
+                        onDismiss()
+                        onForward(message)
+                    },
+                    modifier = Modifier
+                        .size(36.dp)
+                        .testTag("action_forward_${message.messageId}")
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_forward),
+                        contentDescription = "Forward",
+                        tint = LenoEmeraldSent,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = {
+                        onDismiss()
+                        onCopy(message)
+                    },
+                    modifier = Modifier
+                        .size(36.dp)
+                        .testTag("action_copy_${message.messageId}")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Copy",
+                        tint = LenoEmeraldSent,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = {
+                        onDismiss()
+                        onDelete(message)
+                    },
+                    modifier = Modifier
+                        .size(36.dp)
+                        .testTag("action_delete_${message.messageId}")
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_delete),
+                        contentDescription = "Delete",
+                        tint = Color(0xFFEF4444),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -1517,21 +1871,86 @@ fun ChatDetailScreen(
 fun MessageBubble(
     message: MessageEntity,
     isFromMe: Boolean,
+    isStarred: Boolean = false,
+    onToggleStar: (MessageEntity) -> Unit = {},
+    reaction: String? = null,
+    onReact: (String) -> Unit = {},
     onRetry: () -> Unit = {},
     onReply: (MessageEntity) -> Unit = {},
     onForward: (MessageEntity) -> Unit = {},
+    onCopy: (MessageEntity) -> Unit = {},
     onDelete: (MessageEntity) -> Unit = {}
 ) {
     val isOfficialMsg = !isFromMe && (message.senderId == LenoRepository.OFFICIAL_LENO_ID || message.isSystemMessage)
     val align = if (isFromMe) Alignment.End else Alignment.Start
 
-    val sentBackground = Color(0xFF00A86B)
-    val receiveBackground = Color(0xFFF3F4F6)
+    val isDark = isSystemInDarkTheme()
+
+    // Leno Tailored Signature Shapes:
+    // Outgoing: 20dp smooth top, 20dp bottom-start, 5dp anchor bottom-end
+    // Incoming: 20dp smooth top, 5dp anchor bottom-start, 20dp bottom-end
+    val bubbleShape = if (isFromMe) {
+        RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 5.dp)
+    } else {
+        RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 5.dp, bottomEnd = 20.dp)
+    }
+
+    // Rich Leno gradients: jewel emerald for outgoing, pearl mint for incoming
+    val sentBrush = if (isDark) {
+        Brush.linearGradient(
+            colors = listOf(Color(0xFF0D7B55), Color(0xFF06563B)),
+            start = Offset(0f, 0f),
+            end = Offset(400f, 400f)
+        )
+    } else {
+        Brush.linearGradient(
+            colors = listOf(Color(0xFF10B981), Color(0xFF059669), Color(0xFF047857)),
+            start = Offset(0f, 0f),
+            end = Offset(400f, 400f)
+        )
+    }
+
+    val receiveBrush = if (isDark) {
+        Brush.linearGradient(
+            colors = listOf(Color(0xFF1E2D26), Color(0xFF16231E)),
+            start = Offset(0f, 0f),
+            end = Offset(400f, 400f)
+        )
+    } else {
+        Brush.linearGradient(
+            colors = listOf(Color(0xFFF7FCF9), Color(0xFFEDF8F2)),
+            start = Offset(0f, 0f),
+            end = Offset(400f, 400f)
+        )
+    }
+
+    val receiveBorder = if (isDark) Color(0xFF2C3E35) else Color(0xFFD2EFE1)
 
     val textColor = when {
-        isFromMe -> Color(0xFFFFFFFF)
         isOfficialMsg -> MaterialTheme.colorScheme.primary
-        else -> Color(0xFF111827)
+        isFromMe -> LenoEmeraldSentText
+        isDark -> Color(0xFFECFDF5)
+        else -> LenoDarkGreenText
+    }
+
+    // Time inside bubble
+    val timeColor = if (isFromMe) {
+        Color.White.copy(alpha = 0.92f)
+    } else {
+        if (isDark) Color(0xFFA7F3D0) else LenoDarkGreenTime
+    }
+
+    // Status ticks
+    val isRead = message.isRead || message.read || message.status.equals("READ", ignoreCase = true)
+    val isDelivered = message.status.equals("DELIVERED", ignoreCase = true)
+
+    val tickMuted = Color.White.copy(alpha = 0.85f)
+    val tickRead = LenoTickCyan
+
+    val (statusIcon, statusTint, statusDesc) = when {
+        isRead -> Triple(Icons.Default.DoneAll, tickRead, "Read")
+        isDelivered -> Triple(Icons.Default.DoneAll, tickMuted, "Delivered")
+        else -> Triple(Icons.Default.Done, tickMuted, "Sent")
     }
 
     val isVoiceMessage = !message.audioUrl.isNullOrBlank() ||
@@ -1539,7 +1958,9 @@ fun MessageBubble(
             message.text.contains("Voice Note", ignoreCase = true) ||
             message.text.contains("🎤")
 
-    var showActionsRow by remember { mutableStateOf(false) }
+    var showActionsRow by remember(message.messageId) {
+        mutableStateOf(false)
+    }
 
     val formattedTime = remember(message.timestamp) {
         val sdf = SimpleDateFormat("h:mm a", Locale.getDefault())
@@ -1547,262 +1968,335 @@ fun MessageBubble(
     }
 
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
-    val bubbleMaxWidth = screenWidth * 0.75f
-
-    val bubbleShape = if (isFromMe) {
-        RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp)
-    } else {
-        RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 4.dp, bottomEnd = 18.dp)
-    }
-
-    // Status logic: if status=='sent' -> single ✓ grey, if status=='delivered' -> double ✓✓ grey, if status=='read' -> double ✓✓ BLUE #93C5FD
-    val statusLower = message.status.lowercase()
-    val isRead = message.isRead || message.read || statusLower == "read"
-    val isDelivered = statusLower == "delivered"
-
-    val statusIcon = when {
-        isRead -> Icons.Default.DoneAll
-        isDelivered -> Icons.Default.DoneAll
-        else -> Icons.Default.Done
-    }
-    val statusTint = when {
-        isRead -> Color(0xFF93C5FD) // BLUE #93C5FD
-        isDelivered -> Color(0xFFD1D5DB) // double ✓✓ grey
-        else -> Color(0xFFD1D5DB) // single ✓ grey
-    }
-    val timeColorSent = Color.White.copy(alpha = 0.8f)
+    val bubbleMaxWidth = screenWidth * 0.78f
 
     if (isVoiceMessage) {
-        // RECEIVED voice: container #F3F4F6 bubble, border 1px solid #E5E7EB, width 260px, height 56px, rounded 18px bottom-left 4px, margin 6px 12px
-        // SENT voice: container #00A86B, rounded 18px bottom-right 4px, width 260px, height 56px
+        // Voice Note Player Bubble
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 3.dp),
+                .padding(vertical = 3.dp),
             horizontalAlignment = align
         ) {
             Column(
-                modifier = Modifier.width(260.dp),
+                modifier = Modifier.widthIn(max = bubbleMaxWidth),
                 horizontalAlignment = if (isFromMe) Alignment.End else Alignment.Start
             ) {
                 Surface(
                     shape = bubbleShape,
-                    color = if (isFromMe) sentBackground else receiveBackground,
-                    border = if (!isFromMe) BorderStroke(1.dp, Color(0xFFE5E7EB)) else null,
-                    shadowElevation = 0.5.dp,
-                    modifier = Modifier
-                        .width(260.dp)
-                        .height(56.dp)
-                        .testTag("chat_bubble_${message.messageId}")
+                    color = Color.Transparent,
+                    border = if (isFromMe) BorderStroke(0.5.dp, Color.White.copy(alpha = 0.22f)) else BorderStroke(1.dp, receiveBorder),
+                    shadowElevation = if (isFromMe) 2.dp else 1.dp,
+                    modifier = Modifier.testTag("chat_bubble_${message.messageId}")
                 ) {
-                    Box(
+                    Column(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .background(if (isFromMe) sentBackground else receiveBackground)
+                            .background(if (isFromMe) sentBrush else receiveBrush)
                             .combinedClickable(
                                 onClick = {},
                                 onLongClick = { showActionsRow = !showActionsRow }
                             )
+                            .padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 10.dp)
                     ) {
                         VoiceNotePlayerView(
                             message = message,
-                            isFromMe = isFromMe,
-                            formattedTime = formattedTime,
-                            isRead = isRead,
-                            isDelivered = isDelivered,
-                            statusIcon = statusIcon,
-                            statusTint = statusTint,
-                            timeTint = timeColorSent
+                            isFromMe = isFromMe
                         )
-                    }
-                }
 
-                // Small action menu (reply, forward, trash icons) below voice note
-                AnimatedVisibility(
-                    visible = showActionsRow,
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(24.dp),
-                        color = Color.White,
-                        shadowElevation = 3.dp,
-                        modifier = Modifier
-                            .padding(top = 4.dp)
-                            .testTag("actions_row_${message.messageId}")
-                    ) {
+                        // Bottom right time and check mark inside frosted pill
                         Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            modifier = Modifier
+                                .align(Alignment.End)
+                                .padding(top = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            IconButton(
-                                onClick = {
-                                    showActionsRow = false
-                                    onReply(message)
-                                },
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .testTag("action_reply_${message.messageId}")
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isFromMe) Color.Black.copy(alpha = 0.16f) else (if (isDark) Color.White.copy(alpha = 0.06f) else Color(0xFF16A36A).copy(alpha = 0.08f))
                             ) {
-                                Icon(
-                                    painter = painterResource(id = R.drawable.ic_reply),
-                                    contentDescription = "Reply",
-                                    tint = Color(0xFF00A86B),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-
-                            IconButton(
-                                onClick = {
-                                    showActionsRow = false
-                                    onForward(message)
-                                },
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .testTag("action_forward_${message.messageId}")
-                            ) {
-                                Icon(
-                                    painter = painterResource(id = R.drawable.ic_forward),
-                                    contentDescription = "Forward",
-                                    tint = Color(0xFF00A86B),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-
-                            IconButton(
-                                onClick = {
-                                    showActionsRow = false
-                                    onDelete(message)
-                                },
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .testTag("action_delete_${message.messageId}")
-                            ) {
-                                Icon(
-                                    painter = painterResource(id = R.drawable.ic_delete),
-                                    contentDescription = "Delete",
-                                    tint = Color(0xFFEF4444),
-                                    modifier = Modifier.size(20.dp)
-                                )
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (isStarred) {
+                                        Icon(
+                                            imageVector = Icons.Default.Star,
+                                            contentDescription = "Starred",
+                                            tint = Color(0xFFF59E0B),
+                                            modifier = Modifier
+                                                .size(11.dp)
+                                                .padding(end = 2.dp)
+                                        )
+                                    }
+                                    Text(
+                                        text = formattedTime,
+                                        fontSize = 10.sp,
+                                        color = timeColor,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    if (isFromMe) {
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Icon(
+                                            imageVector = statusIcon,
+                                            contentDescription = statusDesc,
+                                            tint = statusTint,
+                                            modifier = Modifier
+                                                .size(14.dp)
+                                                .testTag("voice_message_status_${message.messageId}")
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
+                }
+
+                // Reaction Chip anchored to the bubble
+                if (reaction != null) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isFromMe) Color(0xFF064E3B) else Color.White,
+                        border = BorderStroke(1.dp, if (isFromMe) Color(0xFF10B981).copy(alpha = 0.6f) else Color(0xFFE2E8F0)),
+                        shadowElevation = 2.dp,
+                        modifier = Modifier
+                            .padding(top = 2.dp, start = if (isFromMe) 0.dp else 8.dp, end = if (isFromMe) 8.dp else 0.dp)
+                            .clickable { onReact(reaction) }
+                            .testTag("reaction_badge_${message.messageId}")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                        ) {
+                            Text(text = reaction, fontSize = 13.sp)
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = "1",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isFromMe) Color.White.copy(alpha = 0.9f) else Color(0xFF4B5563)
+                            )
+                        }
+                    }
+                }
+
+                // Simple message actions: Reply, Forward, Copy, Delete + Emoji reactions
+                AnimatedVisibility(
+                    visible = showActionsRow,
+                    modifier = Modifier.align(if (isFromMe) Alignment.End else Alignment.Start)
+                ) {
+                    MessageActionsToolbar(
+                        message = message,
+                        isStarred = isStarred,
+                        onToggleStar = onToggleStar,
+                        onReact = onReact,
+                        onReply = onReply,
+                        onForward = onForward,
+                        onCopy = onCopy,
+                        onDelete = onDelete,
+                        onDismiss = { showActionsRow = false }
+                    )
                 }
             }
         }
     } else {
-        // RECEIVED text (left): bubble #F3F4F6, border 1px solid #E5E7EB, text #111827 15px, padding 10px 14px, rounded 18px bottom-left 4px, max-width 75%, time 10px #6B7280 inside bottom-right, margin 6px 12px
-        // SENT text (right): bubble #00A86B, text white 15px, same padding (10px 14px), rounded 18px bottom-right 4px, time + check inside 10px white 80% (blue #93C5FD if read)
+        // Text / Photo Bubble
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = if (isOfficialMsg) 4.dp else 3.dp),
+                .padding(vertical = if (isOfficialMsg) 4.dp else 2.dp),
             horizontalAlignment = align
         ) {
-            Surface(
-                shape = bubbleShape,
-                color = if (isFromMe) sentBackground else receiveBackground,
-                border = if (!isFromMe) BorderStroke(1.dp, Color(0xFFE5E7EB)) else null,
-                shadowElevation = 0.5.dp,
-                modifier = Modifier
-                    .widthIn(min = 72.dp, max = bubbleMaxWidth)
-                    .testTag("chat_bubble_${message.messageId}")
+            Column(
+                modifier = Modifier.widthIn(max = bubbleMaxWidth),
+                horizontalAlignment = if (isFromMe) Alignment.End else Alignment.Start
             ) {
-                Box(
-                    modifier = Modifier
-                        .background(if (isFromMe) sentBackground else receiveBackground)
-                        .combinedClickable(
-                            onClick = {},
-                            onLongClick = { showActionsRow = !showActionsRow }
-                        )
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                Surface(
+                    shape = bubbleShape,
+                    color = Color.Transparent,
+                    border = if (isFromMe) BorderStroke(0.5.dp, Color.White.copy(alpha = 0.22f)) else BorderStroke(1.dp, receiveBorder),
+                    shadowElevation = if (isFromMe) 2.dp else 1.dp,
+                    modifier = Modifier.testTag("chat_bubble_${message.messageId}")
                 ) {
-                    Column {
-                        if (isOfficialMsg) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-                            ) {
-                                LenoAvatar(
-                                    avatarUrl = null,
-                                    isOfficial = true,
-                                    size = 24.dp,
-                                    contentDescription = "Official Leno"
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Official Leno",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                OfficialVerifiedBadge(size = 14.dp)
-                                Spacer(modifier = Modifier.weight(1f))
-                                Surface(
-                                    shape = RoundedCornerShape(4.dp),
-                                    color = LenoPrimaryLight
+                    Box(
+                        modifier = Modifier
+                            .background(if (isFromMe) sentBrush else receiveBrush)
+                            .combinedClickable(
+                                onClick = {},
+                                onLongClick = { showActionsRow = !showActionsRow }
+                            )
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                    ) {
+                        Column {
+                            if (isOfficialMsg) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
                                 ) {
-                                    Text(
-                                        text = "ANNOUNCEMENT",
-                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                                        fontWeight = FontWeight.Bold,
-                                        color = LenoOfficialBadge,
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                    LenoAvatar(
+                                        avatarUrl = null,
+                                        isOfficial = true,
+                                        size = 24.dp,
+                                        contentDescription = "Official Leno"
                                     )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Official Leno",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    OfficialVerifiedBadge(size = 14.dp)
+                                    Spacer(modifier = Modifier.weight(1f))
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = LenoPrimaryLight
+                                    ) {
+                                        Text(
+                                            text = "ANNOUNCEMENT",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                            fontWeight = FontWeight.Bold,
+                                            color = LenoOfficialBadge,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (!message.imageUrl.isNullOrBlank()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(190.dp)
+                                        .clip(RoundedCornerShape(14.dp))
+                                ) {
+                                    AsyncImage(
+                                        model = message.imageUrl,
+                                        contentDescription = "Photo Attachment",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                    // Subtle gradient vignette at bottom of photo
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                            .align(Alignment.BottomCenter)
+                                            .background(
+                                                Brush.verticalGradient(
+                                                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.5f))
+                                                )
+                                            )
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+
+                            if (message.text.isNotBlank()) {
+                                Text(
+                                    text = message.text,
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontSize = 15.sp,
+                                        lineHeight = 21.sp
+                                    ),
+                                    color = textColor
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            // Bottom right time and check mark inside frosted pill
+                            Row(
+                                modifier = Modifier.align(Alignment.End),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (isFromMe) Color.Black.copy(alpha = 0.16f) else (if (isDark) Color.White.copy(alpha = 0.06f) else Color(0xFF16A36A).copy(alpha = 0.08f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        if (isStarred) {
+                                            Icon(
+                                                imageVector = Icons.Default.Star,
+                                                contentDescription = "Starred",
+                                                tint = Color(0xFFF59E0B),
+                                                modifier = Modifier
+                                                    .size(11.dp)
+                                                    .padding(end = 2.dp)
+                                            )
+                                        }
+                                        Text(
+                                            text = formattedTime,
+                                            fontSize = 10.sp,
+                                            color = timeColor,
+                                            fontWeight = FontWeight.Medium
+                                        )
+
+                                        if (isFromMe) {
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Icon(
+                                                imageVector = statusIcon,
+                                                contentDescription = statusDesc,
+                                                tint = statusTint,
+                                                modifier = Modifier
+                                                    .size(14.dp)
+                                                    .testTag("message_status_${message.messageId}")
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
+                    }
+                }
 
-                        if (!message.imageUrl.isNullOrBlank()) {
-                            AsyncImage(
-                                model = message.imageUrl,
-                                contentDescription = "Photo Attachment",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(180.dp)
-                                    .clip(RoundedCornerShape(12.dp)),
-                                contentScale = ContentScale.Crop
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                        }
-
-                        if (message.text.isNotBlank()) {
-                            Text(
-                                text = message.text,
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontSize = 15.sp,
-                                    lineHeight = 21.sp
-                                ),
-                                color = textColor
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(4.dp))
-
+                // Reaction Chip anchored to the bubble
+                if (reaction != null) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isFromMe) Color(0xFF064E3B) else Color.White,
+                        border = BorderStroke(1.dp, if (isFromMe) Color(0xFF10B981).copy(alpha = 0.6f) else Color(0xFFE2E8F0)),
+                        shadowElevation = 2.dp,
+                        modifier = Modifier
+                            .padding(top = 2.dp, start = if (isFromMe) 0.dp else 8.dp, end = if (isFromMe) 8.dp else 0.dp)
+                            .clickable { onReact(reaction) }
+                            .testTag("reaction_badge_${message.messageId}")
+                    ) {
                         Row(
-                            modifier = Modifier.align(Alignment.End),
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
                         ) {
+                            Text(text = reaction, fontSize = 13.sp)
+                            Spacer(modifier = Modifier.width(3.dp))
                             Text(
-                                text = formattedTime,
-                                fontSize = 10.sp,
-                                color = if (isFromMe) timeColorSent else Color(0xFF6B7280)
+                                text = "1",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isFromMe) Color.White.copy(alpha = 0.9f) else Color(0xFF4B5563)
                             )
-
-                            if (isFromMe) {
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Icon(
-                                    imageVector = statusIcon,
-                                    contentDescription = if (isRead) "Read" else (if (isDelivered) "Delivered" else "Sent"),
-                                    tint = statusTint,
-                                    modifier = Modifier
-                                        .size(if (isRead || isDelivered) 14.dp else 11.dp)
-                                        .testTag("message_status_${message.messageId}")
-                                )
-                            }
                         }
                     }
+                }
+
+                // Simple message actions: Reply, Forward, Copy, Delete + Quick Reactions
+                AnimatedVisibility(
+                    visible = showActionsRow,
+                    modifier = Modifier.align(if (isFromMe) Alignment.End else Alignment.Start)
+                ) {
+                    MessageActionsToolbar(
+                        message = message,
+                        isStarred = isStarred,
+                        onToggleStar = onToggleStar,
+                        onReact = onReact,
+                        onReply = onReply,
+                        onForward = onForward,
+                        onCopy = onCopy,
+                        onDelete = onDelete,
+                        onDismiss = { showActionsRow = false }
+                    )
                 }
             }
         }
@@ -1812,13 +2306,7 @@ fun MessageBubble(
 @Composable
 fun VoiceNotePlayerView(
     message: MessageEntity,
-    isFromMe: Boolean = false,
-    formattedTime: String = "",
-    isRead: Boolean = false,
-    isDelivered: Boolean = false,
-    statusIcon: ImageVector = Icons.Default.Done,
-    statusTint: Color = Color.White.copy(alpha = 0.6f),
-    timeTint: Color = Color.White.copy(alpha = 0.6f)
+    isFromMe: Boolean = false
 ) {
     val context = LocalContext.current
     var isPlaying by remember { mutableStateOf(false) }
@@ -1836,139 +2324,221 @@ fun VoiceNotePlayerView(
         }
     }
 
-    // 28 bars with height variation from 3px to 16px
+    // Playback Speed Toggle
+    val speeds = listOf(1.0f to "1.0x", 1.5f to "1.5x", 2.0f to "2.0x")
+    var speedIndex by remember { mutableIntStateOf(0) }
+
+    // Breathing pulse ring animation when audio is playing
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse_trans")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.35f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1100, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "pulse_scale"
+    )
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1100, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "pulse_alpha"
+    )
+
+    // 32 sculpted frequency amplitude bars with natural vocal contour
     val waveformHeights = remember {
         listOf(
-            4, 8, 13, 6, 3, 10, 16, 8, 5, 12, 10, 6, 15, 12,
-            4, 9, 14, 3, 7, 12, 16, 8, 5, 11, 7, 13, 8, 4
+            6, 9, 14, 18, 12, 8, 15, 20, 16, 11,
+            7, 14, 19, 22, 17, 12, 8, 15, 21, 18,
+            13, 9, 16, 20, 14, 10, 7, 12, 15, 10,
+            6, 4
         )
     }
 
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 10.dp, vertical = 6.dp)
-    ) {
-        // Play button circle: 36x36 (White on sent green bubble, #00A86B on received bubble)
-        Box(
+    Column(modifier = Modifier.fillMaxWidth()) {
+        // Voice Note Pill Header
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(if (isFromMe) Color.White else Color(0xFF00A86B))
-                .clickable {
-                    if (isPlaying) {
-                        audioPlayerHelper.pause()
-                        isPlaying = false
-                    } else {
-                        isPlaying = true
-                        audioPlayerHelper.playAudio(
-                            filePathOrUri = message.audioUrl,
-                            expectedDurationSeconds = durationSec,
-                            onProgress = { posMs, totalMs ->
-                                currentPosSec = posMs / 1000
-                                if (totalMs > 0) {
-                                    progressFraction = (posMs.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f)
-                                }
-                            },
-                            onCompletion = {
-                                isPlaying = false
-                                currentPosSec = 0
-                                progressFraction = 0f
-                            },
-                            onError = {
-                                isPlaying = false
-                            }
-                        )
-                    }
-                },
-            contentAlignment = Alignment.Center
+                .fillMaxWidth()
+                .padding(bottom = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Icon(
-                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                contentDescription = if (isPlaying) "Pause" else "Play",
-                tint = if (isFromMe) Color(0xFF00A86B) else Color.White,
-                modifier = Modifier.size(20.dp)
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Mic,
+                    contentDescription = null,
+                    tint = if (isFromMe) Color.White.copy(alpha = 0.85f) else LenoPrimary,
+                    modifier = Modifier.size(13.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "Voice Note",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (isFromMe) Color.White.copy(alpha = 0.9f) else LenoDarkGreenText
+                )
+            }
+
+            // Speed Chip Pill
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = if (isFromMe) Color.White.copy(alpha = 0.22f) else LenoPrimaryLight,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable {
+                        speedIndex = (speedIndex + 1) % speeds.size
+                        audioPlayerHelper.setPlaybackSpeed(speeds[speedIndex].first)
+                    }
+                    .testTag("voice_speed_toggle_${message.messageId}")
+            ) {
+                Text(
+                    text = speeds[speedIndex].second,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isFromMe) Color.White else LenoPrimaryDark,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
         }
 
-        Spacer(modifier = Modifier.width(8.dp))
-
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.Center
+        // Main Player Row: Play/Pause button + Waveform & Timers
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            // Waveform: thin bars 2px wide, height 3px to 14px, smooth rounded tops, 28 bars
-            Canvas(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(16.dp)
+            // Animated Pulse Button Container
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.size(46.dp)
             ) {
-                val barWidth = 2.dp.toPx()
-                val barCount = waveformHeights.size
-                val totalWidth = size.width
-                val spacing = if (barCount > 1) {
-                    ((totalWidth - (barWidth * barCount)) / (barCount - 1)).coerceAtLeast(1f)
-                } else 0f
-                val cornerRadius = CornerRadius(1.dp.toPx(), 1.dp.toPx())
-
-                val playedColor = if (isFromMe) Color.White else Color(0xFF00A86B)
-                val unplayedColor = if (isFromMe) Color.White.copy(alpha = 0.5f) else Color(0xFFD1D5DB)
-
-                waveformHeights.forEachIndexed { index, h ->
-                    val hPx = h.dp.toPx().coerceIn(3.dp.toPx(), 16.dp.toPx())
-                    val x = index * (barWidth + spacing)
-                    val y = (size.height - hPx) / 2f
-                    val isPlayed = (index.toFloat() / barCount.toFloat()) <= progressFraction
-
-                    drawRoundRect(
-                        color = if (isPlayed) playedColor else unplayedColor,
-                        topLeft = Offset(x, y),
-                        size = Size(barWidth, hPx),
-                        cornerRadius = cornerRadius
+                if (isPlaying) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp * pulseScale)
+                            .clip(CircleShape)
+                            .background(
+                                (if (isFromMe) Color.White else LenoEmeraldSent).copy(alpha = pulseAlpha)
+                            )
                     )
+                }
+
+                Surface(
+                    shape = CircleShape,
+                    color = if (isFromMe) Color.White else LenoEmeraldSent,
+                    shadowElevation = 3.dp,
+                    border = if (isFromMe) BorderStroke(1.dp, Color.White.copy(alpha = 0.9f)) else null,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .clickable {
+                            if (isPlaying) {
+                                audioPlayerHelper.pause()
+                                isPlaying = false
+                            } else {
+                                isPlaying = true
+                                audioPlayerHelper.playAudio(
+                                    filePathOrUri = message.audioUrl,
+                                    expectedDurationSeconds = durationSec,
+                                    onProgress = { posMs, totalMs ->
+                                        currentPosSec = posMs / 1000
+                                        if (totalMs > 0) {
+                                            progressFraction = (posMs.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f)
+                                        }
+                                    },
+                                    onCompletion = {
+                                        isPlaying = false
+                                        currentPosSec = 0
+                                        progressFraction = 0f
+                                    },
+                                    onError = {
+                                        isPlaying = false
+                                    }
+                                )
+                                audioPlayerHelper.setPlaybackSpeed(speeds[speedIndex].first)
+                            }
+                        }
+                        .testTag("voice_play_pause_btn_${message.messageId}"),
+                    contentColor = if (isFromMe) LenoEmeraldSent else Color.White
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (isPlaying) "Pause" else "Play",
+                            tint = if (isFromMe) LenoEmeraldSent else Color.White,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(2.dp))
+            Spacer(modifier = Modifier.width(10.dp))
 
-            // Duration on left, Time + Check on right inside bubble
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Duration 0:05 below waveform, 10px font
-                val displaySec = if (isPlaying) currentPosSec else (if (durationSec > 0) durationSec else 5)
-                val mins = displaySec / 60
-                val secs = displaySec % 60
-                Text(
-                    text = String.format(Locale.getDefault(), "%d:%02d", mins, secs),
-                    fontSize = 10.sp,
-                    color = if (isFromMe) Color.White.copy(alpha = 0.8f) else Color(0xFF6B7280),
-                    fontWeight = FontWeight.Normal
-                )
+            // Interactive Waveform & Position
+            Column(modifier = Modifier.weight(1f)) {
+                Canvas(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(24.dp)
+                        .pointerInput(Unit) {
+                            detectTapGestures { offset ->
+                                val frac = (offset.x / size.width).coerceIn(0f, 1f)
+                                progressFraction = frac
+                                val targetMs = (frac * (durationSec * 1000)).toInt()
+                                currentPosSec = targetMs / 1000
+                                audioPlayerHelper.seekTo(targetMs)
+                            }
+                        }
+                ) {
+                    val barWidth = 2.5.dp.toPx()
+                    val barCount = waveformHeights.size
+                    val totalWidth = size.width
+                    val spacing = if (barCount > 1) {
+                        ((totalWidth - (barWidth * barCount)) / (barCount - 1)).coerceAtLeast(1f)
+                    } else 0f
+                    val cornerRadius = CornerRadius(1.2.dp.toPx(), 1.2.dp.toPx())
 
-                // Time + Check INSIDE bottom-right
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = formattedTime,
-                        fontSize = 10.sp,
-                        color = if (isFromMe) timeTint else Color(0xFF6B7280),
-                        fontWeight = FontWeight.Normal
-                    )
-                    if (isFromMe) {
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Icon(
-                            imageVector = statusIcon,
-                            contentDescription = if (isRead) "Read" else (if (isDelivered) "Delivered" else "Sent"),
-                            tint = statusTint,
-                            modifier = Modifier
-                                .size(if (isRead || isDelivered) 14.dp else 11.dp)
-                                .testTag("voice_status_${message.messageId}")
+                    val playedColor = if (isFromMe) Color.White else LenoDarkGreenText
+                    val unplayedColor = if (isFromMe) Color.White.copy(alpha = 0.38f) else Color(0xFFA5D6A7)
+
+                    waveformHeights.forEachIndexed { index, h ->
+                        val hPx = h.dp.toPx().coerceIn(4.dp.toPx(), 20.dp.toPx())
+                        val x = index * (barWidth + spacing)
+                        val y = (size.height - hPx) / 2f
+                        val isPlayed = (index.toFloat() / barCount.toFloat()) <= progressFraction
+
+                        drawRoundRect(
+                            color = if (isPlayed) playedColor else unplayedColor,
+                            topLeft = Offset(x, y),
+                            size = Size(barWidth, hPx),
+                            cornerRadius = cornerRadius
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.height(3.dp))
+
+                // Time indicators: Elapsed / Total
+                val elapsedMins = currentPosSec / 60
+                val elapsedSecs = currentPosSec % 60
+                val totalMins = durationSec / 60
+                val totalSecs = durationSec % 60
+                val durationText = if (isPlaying || progressFraction > 0f) {
+                    String.format(Locale.getDefault(), "%d:%02d / %d:%02d", elapsedMins, elapsedSecs, totalMins, totalSecs)
+                } else {
+                    String.format(Locale.getDefault(), "%d:%02d", totalMins, totalSecs)
+                }
+
+                Text(
+                    text = durationText,
+                    fontSize = 10.sp,
+                    color = if (isFromMe) LenoEmeraldSentTime else LenoDarkGreenTime,
+                    fontWeight = FontWeight.Medium
+                )
             }
         }
     }

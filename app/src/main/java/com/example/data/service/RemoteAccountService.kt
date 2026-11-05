@@ -30,10 +30,33 @@ import java.util.UUID
  */
 open class RemoteAccountService {
 
+    fun getFirestoreSafe(): FirebaseFirestore? {
+        try {
+            com.example.LenoApplication.ensureFirebaseInitialized()
+        } catch (_: Throwable) {}
+        return firestore ?: try {
+            FirebaseFirestore.getInstance()
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
+    fun getAuthSafe(): FirebaseAuth? {
+        try {
+            com.example.LenoApplication.ensureFirebaseInitialized()
+        } catch (_: Throwable) {}
+        return auth ?: try {
+            FirebaseAuth.getInstance()
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
     private val auth: FirebaseAuth? by lazy {
         try {
+            com.example.LenoApplication.ensureFirebaseInitialized()
             FirebaseAuth.getInstance()
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.w(TAG, "Firebase Auth is not initialized on this environment: ${e.message}")
             null
         }
@@ -41,16 +64,17 @@ open class RemoteAccountService {
 
     private val firestore: FirebaseFirestore? by lazy {
         try {
+            com.example.LenoApplication.ensureFirebaseInitialized()
             FirebaseFirestore.getInstance()
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.w(TAG, "Firebase Firestore is not initialized on this environment: ${e.message}")
             null
         }
     }
 
-    fun getFirebaseAuth(): FirebaseAuth? = auth
-    fun getCurrentAuthUser(): FirebaseUser? = auth?.currentUser
-    fun getAuthUid(): String? = auth?.currentUser?.uid
+    fun getFirebaseAuth(): FirebaseAuth? = getAuthSafe()
+    fun getCurrentAuthUser(): FirebaseUser? = getAuthSafe()?.currentUser
+    fun getAuthUid(): String? = getAuthSafe()?.currentUser?.uid
 
     @Volatile
     private var isFirestoreProvisioned: Boolean = true
@@ -59,7 +83,7 @@ open class RemoteAccountService {
         Log.w(TAG, "Notice: Cloud Firestore database notice. Continuing with resilient multi-tier persistence.")
     }
 
-    fun isFirestoreAvailable(): Boolean = isFirestoreProvisioned && firestore != null
+    fun isFirestoreAvailable(): Boolean = isFirestoreProvisioned && getFirestoreSafe() != null
 
     /**
      * Registers an authentication state listener with Firebase Authentication.
@@ -161,36 +185,38 @@ open class RemoteAccountService {
             return@withContext Result.success(uid)
         }
 
-        val fbAuth = auth ?: FirebaseAuth.getInstance()
+        val fbAuth = getAuthSafe()
         var resolvedUid: String? = null
 
         // 1. Attempt to create Firebase Auth user
-        try {
-            Log.i(TAG, "🔥 [Firebase Auth SignUp] Registering with email: $cleanEmail")
-            val authResult = withTimeoutOrNull(8000L) {
-                fbAuth.createUserWithEmailAndPassword(cleanEmail, cleanPassword).await()
-            }
-            resolvedUid = authResult?.user?.uid ?: fbAuth.currentUser?.uid
-            if (resolvedUid != null) {
-                Log.i(TAG, "✅ [Firebase Auth SignUp SUCCESS] Created user with permanent UID: $resolvedUid")
-            }
-        } catch (e: Exception) {
-            val err = e.message ?: ""
-            Log.w(TAG, "⚠️ [Firebase Auth SignUp Notice] ${e.localizedMessage}")
-            val isAlreadyInUse = err.contains("already in use", ignoreCase = true) ||
-                    err.contains("already-in-use", ignoreCase = true) ||
-                    err.contains("EMAIL_EXISTS", ignoreCase = true)
-            if (isAlreadyInUse) {
-                try {
-                    val signInResult = withTimeoutOrNull(4000L) {
-                        fbAuth.signInWithEmailAndPassword(cleanEmail, cleanPassword).await()
-                    }
-                    resolvedUid = signInResult?.user?.uid ?: fbAuth.currentUser?.uid
-                } catch (_: Exception) {}
+        if (fbAuth != null) {
+            try {
+                Log.i(TAG, "🔥 [Firebase Auth SignUp] Registering with email: $cleanEmail")
+                val authResult = withTimeoutOrNull(8000L) {
+                    fbAuth.createUserWithEmailAndPassword(cleanEmail, cleanPassword).await()
+                }
+                resolvedUid = authResult?.user?.uid ?: fbAuth.currentUser?.uid
+                if (resolvedUid != null) {
+                    Log.i(TAG, "✅ [Firebase Auth SignUp SUCCESS] Created user with permanent UID: $resolvedUid")
+                }
+            } catch (e: Exception) {
+                val err = e.message ?: ""
+                Log.w(TAG, "⚠️ [Firebase Auth SignUp Notice] ${e.localizedMessage}")
+                val isAlreadyInUse = err.contains("already in use", ignoreCase = true) ||
+                        err.contains("already-in-use", ignoreCase = true) ||
+                        err.contains("EMAIL_EXISTS", ignoreCase = true)
+                if (isAlreadyInUse) {
+                    try {
+                        val signInResult = withTimeoutOrNull(4000L) {
+                            fbAuth.signInWithEmailAndPassword(cleanEmail, cleanPassword).await()
+                        }
+                        resolvedUid = signInResult?.user?.uid ?: fbAuth.currentUser?.uid
+                    } catch (_: Exception) {}
+                }
             }
         }
 
-        val uid = resolvedUid ?: fbAuth.currentUser?.uid ?: "usr_${originalUsername.lowercase()}_${UUID.randomUUID().toString().take(6)}"
+        val uid = resolvedUid ?: fbAuth?.currentUser?.uid ?: "usr_${originalUsername.lowercase()}_${UUID.randomUUID().toString().take(6)}"
 
         // 2. Build userMap with exact required fields
         val userMap = hashMapOf<String, Any>(
@@ -221,36 +247,37 @@ open class RemoteAccountService {
 
         // 3. Write userMap to Firestore: document(uid) and document(lenId)
         try {
-            val db = firestore ?: FirebaseFirestore.getInstance()
+            val db = getFirestoreSafe()
+            if (db != null) {
+                db.collection("users").document(uid).set(userMap, SetOptions.merge())
+                    .addOnSuccessListener {
+                        Log.i("Leno", "Leno: User written")
+                    }
+                    .addOnFailureListener { e ->
+                        Log.e("Leno", "Leno: User write error: ${e.message}", e)
+                    }
 
-            db.collection("users").document(uid).set(userMap, SetOptions.merge())
-                .addOnSuccessListener {
-                    Log.i("Leno", "Leno: User written")
-                }
-                .addOnFailureListener { e ->
-                    Log.e("Leno", "Leno: User write error: ${e.message}", e)
-                }
+                db.collection("users").document(formattedLenoId).set(userMap, SetOptions.merge())
+                    .addOnSuccessListener {
+                        Log.i("Leno", "Leno: User written")
+                    }
+                    .addOnFailureListener { e ->
+                        Log.e("Leno", "Leno: User write error: ${e.message}", e)
+                    }
 
-            db.collection("users").document(formattedLenoId).set(userMap, SetOptions.merge())
-                .addOnSuccessListener {
-                    Log.i("Leno", "Leno: User written")
-                }
-                .addOnFailureListener { e ->
-                    Log.e("Leno", "Leno: User write error: ${e.message}", e)
-                }
-
-            try {
-                db.collection(COLLECTION_USERNAMES).document(originalUsername.lowercase())
-                    .set(mapOf("uid" to uid, "ownerUid" to uid, "username" to originalUsername.lowercase()), SetOptions.merge())
-                db.collection(COLLECTION_LENO_IDS).document(formattedLenoId)
-                    .set(mapOf("uid" to uid, "ownerUid" to uid, "lenoId" to formattedLenoId), SetOptions.merge())
-            } catch (_: Exception) {}
-
-            withTimeoutOrNull(4000L) {
                 try {
-                    db.collection("users").document(uid).set(userMap, SetOptions.merge()).await()
-                    db.collection("users").document(formattedLenoId).set(userMap, SetOptions.merge()).await()
+                    db.collection(COLLECTION_USERNAMES).document(originalUsername.lowercase())
+                        .set(mapOf("uid" to uid, "ownerUid" to uid, "username" to originalUsername.lowercase()), SetOptions.merge())
+                    db.collection(COLLECTION_LENO_IDS).document(formattedLenoId)
+                        .set(mapOf("uid" to uid, "ownerUid" to uid, "lenoId" to formattedLenoId), SetOptions.merge())
                 } catch (_: Exception) {}
+
+                withTimeoutOrNull(4000L) {
+                    try {
+                        db.collection("users").document(uid).set(userMap, SetOptions.merge()).await()
+                        db.collection("users").document(formattedLenoId).set(userMap, SetOptions.merge()).await()
+                    } catch (_: Exception) {}
+                }
             }
         } catch (e: Exception) {
             Log.e("Leno", "Leno: User write error: ${e.message}", e)
@@ -857,7 +884,7 @@ open class RemoteAccountService {
             return@withContext Result.success(Unit)
         }
 
-        val db = firestore ?: FirebaseFirestore.getInstance()
+        val db = getFirestoreSafe() ?: return@withContext Result.success(Unit)
         try {
             Log.i("Leno", "Writing user to Firestore: uid=$uid, lenId=$formattedLenoId, username=$cleanUsername")
             
@@ -926,7 +953,7 @@ open class RemoteAccountService {
         if (!isFirestoreProvisioned) {
             return@withContext Result.success(Unit)
         }
-        val db = firestore ?: FirebaseFirestore.getInstance()
+        val db = getFirestoreSafe() ?: return@withContext Result.success(Unit)
 
         try {
             Log.i(TAG, "🔥 [Firestore Write: 'users'] Initiating write for user @${user.username} (UID: ${user.userId}, Leno ID: $formattedLenoId)...")
@@ -1056,7 +1083,7 @@ open class RemoteAccountService {
             )
             saveUserToRemote(officialLeno)
 
-            val db = firestore ?: FirebaseFirestore.getInstance()
+            val db = getFirestoreSafe() ?: return@withContext
             val jaibyMap = hashMapOf<String, Any>(
                 "uid" to "usr_officialjaiby_2026",
                 "userId" to "usr_officialjaiby_2026",
@@ -1210,7 +1237,7 @@ open class RemoteAccountService {
         }
 
         if (!isFirestoreProvisioned) return@withContext null
-        val db = firestore ?: FirebaseFirestore.getInstance()
+        val db = getFirestoreSafe() ?: return@withContext null
 
         try {
             withTimeoutOrNull(10000L) {
@@ -3407,7 +3434,7 @@ open class RemoteAccountService {
             return@withContext testUsers.values.distinctBy { it.userId }.toList()
         }
         if (!isFirestoreProvisioned) return@withContext emptyList()
-        val db = firestore ?: FirebaseFirestore.getInstance()
+        val db = getFirestoreSafe() ?: return@withContext emptyList()
         try {
             val snapshot = withTimeoutOrNull(10000L) {
                 db.collection(COLLECTION_USERS)
@@ -3668,6 +3695,29 @@ open class RemoteAccountService {
             Result.success(Unit)
         } catch (e: Exception) {
             Log.w(TAG, "saveEnrollmentToRemote notice: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    open suspend fun deleteEnrollmentFromRemote(studentUserId: String, classId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val docKey = "${studentUserId}_${classId}"
+        testEnrollments.entries.removeAll { it.value.studentUserId == studentUserId && it.value.classId == classId }
+        val db = firestore ?: return@withContext Result.success(Unit)
+        try {
+            db.collection(COLLECTION_ENROLLMENTS).document(docKey).delete().await()
+            try {
+                db.collection(COLLECTION_CLASSES)
+                    .document(classId)
+                    .collection(COLLECTION_ENROLLMENTS)
+                    .document(docKey)
+                    .delete()
+                    .await()
+            } catch (e: Exception) {
+                // Ignore subcollection deletion failures
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.w(TAG, "deleteEnrollmentFromRemote notice: ${e.message}")
             Result.failure(e)
         }
     }

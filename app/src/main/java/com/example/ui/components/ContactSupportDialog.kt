@@ -912,7 +912,7 @@ private fun FaqListTab() {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         FaqItemCard(
             question = "How do I become an approved Teacher?",
-            answer = "Go to your Profile and tap 'Apply to Become Teacher'. Select your single subject (e.g. Maths, Quran, JAMB, Skills, Online Skills, Content Creator), enter your qualifications and experience. You can apply once per account. Once submitted, your application status will show PENDING until reviewed by our administrators."
+            answer = "Go to your Profile and tap 'Apply to Become Teacher'. Select your single subject (e.g. Physics, Chemistry, English, Maths, Biology, Quran, JAMB, Computer Science, Economics, Skills, Online Skills, Content Creator, or specify your custom subject), enter your qualifications and experience. You can apply once per account. Once submitted, your application status will show PENDING until reviewed by our administrators."
         )
 
         FaqItemCard(

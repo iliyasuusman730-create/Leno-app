@@ -86,18 +86,24 @@ class MainActivity : ComponentActivity() {
     private fun handleIntent(intent: Intent?) {
         val partnerId = intent?.getStringExtra("chat_partner_id")
         if (!partnerId.isNullOrEmpty()) {
-            viewModel.openChat(partnerId)
+            try {
+                viewModel.openChat(partnerId)
+            } catch (_: Exception) {}
         }
     }
 
     override fun onResume() {
         super.onResume()
-        viewModel.setUserPresence(true)
+        try {
+            viewModel.setUserPresence(true)
+        } catch (_: Exception) {}
     }
 
     override fun onPause() {
         super.onPause()
-        viewModel.setUserPresence(false)
+        try {
+            viewModel.setUserPresence(false)
+        } catch (_: Exception) {}
     }
 
     private fun checkAndRequestNotificationPermission() {

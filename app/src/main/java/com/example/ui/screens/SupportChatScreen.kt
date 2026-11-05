@@ -3,6 +3,7 @@ package com.example.ui.screens
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -70,6 +71,14 @@ import com.example.data.model.SupportMessageItem
 import com.example.ui.theme.LenoPrimary
 import com.example.ui.theme.LenoPrimaryDark
 import com.example.ui.theme.LenoPrimaryVeryLight
+import com.example.ui.theme.LenoDarkGreenText
+import com.example.ui.theme.LenoDarkGreenTime
+import com.example.ui.theme.LenoEmeraldSent
+import com.example.ui.theme.LenoEmeraldSentText
+import com.example.ui.theme.LenoEmeraldSentTime
+import com.example.ui.theme.LenoSoftMintReceived
+import com.example.ui.theme.LenoSoftMintReceivedBorder
+import com.example.ui.theme.LenoTickCyan
 import com.example.viewmodel.LenoViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -392,13 +401,28 @@ private fun SupportMessageBubble(
         }
     }
 
-    // Bubble Colors: .sent { background: #00A86B; color: #FFFFFF; } and .receive { background: #F3F4F6; color: #111827; }
-    val sentBackground = Color(0xFF00A86B)
-    val receiveBackground = Color(0xFFF3F4F6)
-    val bubbleBorder = if (isSelf) {
-        BorderStroke(1.dp, Color(0x30FFFFFF))
+    val isDark = isSystemInDarkTheme()
+    val sentBackground = if (isDark) Color(0xFF065F46) else LenoEmeraldSent
+    val receiveBackground = if (isDark) Color(0xFF1E2E28) else LenoSoftMintReceived
+    val receiveBorder = if (isDark) Color(0xFF2D4A3E) else LenoSoftMintReceivedBorder
+    val bubbleBorder = if (isSelf) null else BorderStroke(0.5.dp, receiveBorder)
+
+    // Delivery check marks: single tick sent, double tick delivered, vibrant cyan double tick read
+    val isRead = message.read
+    val tickMuted = Color.White.copy(alpha = 0.85f)
+    val tickRead = LenoTickCyan
+    val statusIcon = if (isRead) Icons.Default.DoneAll else Icons.Default.Done
+    val statusTint = if (isRead) tickRead else tickMuted
+
+    val textColor = when {
+        isSelf -> LenoEmeraldSentText
+        isDark -> Color(0xFFD1FAE5)
+        else -> LenoDarkGreenText
+    }
+    val timeColor = if (isSelf) {
+        LenoEmeraldSentTime
     } else {
-        BorderStroke(1.dp, Color(0xFFE5E7EB))
+        if (isDark) Color(0xFFA7F3D0) else LenoDarkGreenTime
     }
 
     Box(
@@ -443,7 +467,7 @@ private fun SupportMessageBubble(
                 shape = bubbleShape,
                 color = if (isSelf) sentBackground else receiveBackground,
                 border = bubbleBorder,
-                shadowElevation = 2.dp,
+                shadowElevation = 0.5.dp,
                 modifier = Modifier.testTag("support_message_bubble")
             ) {
                 Box(
@@ -452,7 +476,7 @@ private fun SupportMessageBubble(
                     Column(modifier = Modifier.padding(14.dp)) {
                         Text(
                             text = message.text,
-                            color = if (isSelf) Color(0xFFFFFFFF) else Color(0xFF111827),
+                            color = textColor,
                             fontSize = 15.sp,
                             lineHeight = 20.sp
                         )
@@ -467,15 +491,15 @@ private fun SupportMessageBubble(
                             Text(
                                 text = formattedTime,
                                 fontSize = 10.sp,
-                                color = if (isSelf) Color.White.copy(alpha = 0.85f) else Color(0xFF6B7280)
+                                color = timeColor
                             )
                             if (isSelf) {
                                 Spacer(modifier = Modifier.width(3.dp))
                                 Icon(
-                                    imageVector = if (message.read) Icons.Default.DoneAll else Icons.Default.Done,
-                                    contentDescription = if (message.read) "Read" else "Sent",
-                                    tint = Color.White.copy(alpha = 0.85f),
-                                    modifier = Modifier.size(12.dp)
+                                    imageVector = statusIcon,
+                                    contentDescription = if (isRead) "Read" else "Sent",
+                                    tint = statusTint,
+                                    modifier = Modifier.size(14.dp)
                                 )
                             }
                         }

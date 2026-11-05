@@ -18,53 +18,37 @@ class LenoApplication : Application() {
         private const val TAG = "FirebaseStartup"
         var instance: LenoApplication? = null
             private set
-    }
 
-    override fun onCreate() {
-        super.onCreate()
-        instance = this
-        NotificationHelper.createNotificationChannels(this)
-        initFirebase()
-    }
-
-    private fun initFirebase() {
-        Log.i(TAG, "==================================================")
-        Log.i(TAG, "🔥 [Firebase Startup] Initializing Firebase Services...")
-
-        try {
-            if (FirebaseApp.getApps(this).isEmpty()) {
-                try {
-                    // Initialize from google-services.json configuration
-                    FirebaseApp.initializeApp(this)
-                    Log.i(TAG, "✅ [Firebase Startup] FirebaseApp initialized from google-services.json")
-                } catch (e: Exception) {
-                    Log.w(TAG, "⚠️ [Firebase Startup] Default config not found, initializing with project fallback: ${e.message}")
+        fun ensureFirebaseInitialized(context: android.content.Context? = null) {
+            val ctx = context ?: instance ?: return
+            try {
+                if (FirebaseApp.getApps(ctx).isEmpty()) {
                     val apiKey = try {
                         if (BuildConfig.FIREBASE_API_KEY.isNotBlank() && !BuildConfig.FIREBASE_API_KEY.startsWith("AIzaSy_YOUR")) {
                             BuildConfig.FIREBASE_API_KEY
                         } else {
-                            "AIzaSy_Leno_Default_Key"
+                            "AIzaSyB9oI7Amr9C8WqUBgpettT6UA23d89qMao"
                         }
-                    } catch (_: Exception) {
-                        "AIzaSy_Leno_Default_Key"
+                    } catch (_: Throwable) {
+                        "AIzaSyB9oI7Amr9C8WqUBgpettT6UA23d89qMao"
                     }
 
                     val projectId = try {
-                        if (BuildConfig.FIREBASE_PROJECT_ID.isNotBlank()) BuildConfig.FIREBASE_PROJECT_ID else "leno-app"
-                    } catch (_: Exception) {
-                        "leno-app"
+                        if (BuildConfig.FIREBASE_PROJECT_ID.isNotBlank()) BuildConfig.FIREBASE_PROJECT_ID else "leno-9235f"
+                    } catch (_: Throwable) {
+                        "leno-9235f"
                     }
 
                     val appId = try {
-                        if (BuildConfig.FIREBASE_APP_ID.isNotBlank()) BuildConfig.FIREBASE_APP_ID else "1:123456789012:android:lenoapp"
-                    } catch (_: Exception) {
-                        "1:123456789012:android:lenoapp"
+                        if (BuildConfig.FIREBASE_APP_ID.isNotBlank()) BuildConfig.FIREBASE_APP_ID else "1:92383670612:android:23fc556e98ea1440a498c1"
+                    } catch (_: Throwable) {
+                        "1:92383670612:android:23fc556e98ea1440a498c1"
                     }
 
                     val senderId = try {
-                        if (BuildConfig.FIREBASE_MESSAGING_SENDER_ID.isNotBlank()) BuildConfig.FIREBASE_MESSAGING_SENDER_ID else "123456789012"
-                    } catch (_: Exception) {
-                        "123456789012"
+                        if (BuildConfig.FIREBASE_MESSAGING_SENDER_ID.isNotBlank()) BuildConfig.FIREBASE_MESSAGING_SENDER_ID else "92383670612"
+                    } catch (_: Throwable) {
+                        "92383670612"
                     }
 
                     val options = FirebaseOptions.Builder()
@@ -72,19 +56,53 @@ class LenoApplication : Application() {
                         .setApplicationId(appId)
                         .setProjectId(projectId)
                         .setGcmSenderId(senderId)
+                        .setStorageBucket("leno-9235f.firebasestorage.app")
                         .build()
 
-                    FirebaseApp.initializeApp(this, options)
-                    Log.i(TAG, "✅ [Firebase Startup] Firebase manually initialized for project '$projectId'")
+                    FirebaseApp.initializeApp(ctx, options)
+                    Log.i(TAG, "✅ [Firebase Startup] Firebase initialized with options for project '$projectId'")
                 }
+            } catch (e: Throwable) {
+                Log.w(TAG, "⚠️ [Firebase Startup Notice] ${e.message}")
             }
+        }
+    }
 
-            val currentApp = FirebaseApp.getInstance()
-            val options = currentApp.options
-            Log.i(TAG, "✅ [Firebase Startup ACTIVE] App Name: ${currentApp.name}")
-            Log.i(TAG, "   • Project ID: ${options.projectId}")
-            Log.i(TAG, "   • Application ID: ${options.applicationId}")
-            Log.i(TAG, "   • GCM Sender ID: ${options.gcmSenderId}")
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
+        try {
+            NotificationHelper.createNotificationChannels(this)
+        } catch (e: Exception) {
+            Log.w(TAG, "Notification channels notice: ${e.message}")
+        }
+        try {
+            com.example.util.LessonProgressManager.init(this)
+        } catch (_: Exception) {}
+        try {
+            initFirebase()
+        } catch (e: Exception) {
+            Log.w(TAG, "initFirebase notice: ${e.message}")
+        }
+    }
+
+    private fun initFirebase() {
+        Log.i(TAG, "==================================================")
+        Log.i(TAG, "🔥 [Firebase Startup] Initializing Firebase Services...")
+
+        try {
+            ensureFirebaseInitialized(this)
+
+            try {
+                val currentApp = FirebaseApp.getInstance()
+                val options = currentApp.options
+                Log.i(TAG, "✅ [Firebase Startup ACTIVE] App Name: ${currentApp.name}")
+                Log.i(TAG, "   • Project ID: ${options.projectId}")
+                Log.i(TAG, "   • Application ID: ${options.applicationId}")
+                Log.i(TAG, "   • GCM Sender ID: ${options.gcmSenderId}")
+            } catch (e: Exception) {
+                Log.w(TAG, "⚠️ [Firebase Startup Notice] ${e.message}")
+            }
 
             // Verify and check FirebaseAuth
             try {

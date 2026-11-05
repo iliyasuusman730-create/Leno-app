@@ -42,6 +42,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,6 +59,17 @@ import com.example.ui.theme.LenoPrimaryDark
 import com.example.ui.theme.LenoPrimaryLight
 import com.example.ui.theme.LenoPrimaryVeryLight
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.WorkspacePremium
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.ui.platform.LocalContext
+import com.example.util.LessonProgressManager
+
 @Composable
 fun ClassDetailDialog(
     classItem: ClassEntity,
@@ -65,13 +77,20 @@ fun ClassDetailDialog(
     isInstructor: Boolean = false,
     isAdmin: Boolean = false,
     lessons: List<LessonEntity> = emptyList(),
+    currentUserId: String = "",
     onDismiss: () -> Unit,
     onJoin: () -> Unit,
     onChatWithInstructor: () -> Unit,
     onEnterClassroom: (() -> Unit)? = null,
     onOpenLesson: (LessonEntity) -> Unit = {},
-    onAddLesson: () -> Unit = {}
+    onAddLesson: () -> Unit = {},
+    onOpenCertificate: ((ClassEntity) -> Unit)? = null
 ) {
+    val context = LocalContext.current
+    val classCode = remember(classItem.classId) {
+        LessonProgressManager.formatClassCode(classItem.classId)
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -95,18 +114,37 @@ fun ClassDetailDialog(
                         )
                     }
 
-                    val displayFee = if (classItem.price.isNotBlank() && classItem.price != "Free") classItem.price else "₦1,500"
+                    // Shareable Class Code Pill with copy on click
                     Surface(
                         shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFFFFF3E0)
+                        color = Color(0xFFF3F4F6),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                        modifier = Modifier.clickable {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                            val clip = ClipData.newPlainText("Class Code", classCode)
+                            clipboard?.setPrimaryClip(clip)
+                            Toast.makeText(context, "Class Code $classCode copied! 📋", Toast.LENGTH_SHORT).show()
+                        }
                     ) {
-                        Text(
-                            text = displayFee,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFFE65100),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Code: $classCode",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF374151)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = "Copy code",
+                                tint = LenoPrimary,
+                                modifier = Modifier.size(11.dp)
+                            )
+                        }
                     }
                 }
 
@@ -331,12 +369,130 @@ fun ClassDetailDialog(
                             )
                         }
                     } else {
+                        // Learning progress tracker for enrolled students
+                        if (isEnrolled && currentUserId.isNotBlank()) {
+                            val completedCount = remember(lessons, currentUserId) {
+                                LessonProgressManager.getCompletedCount(context, currentUserId, classItem.classId)
+                            }
+                            val progressFraction = if (lessons.isNotEmpty()) (completedCount.toFloat() / lessons.size.toFloat()).coerceIn(0f, 1f) else 0f
+                            val progressPercent = (progressFraction * 100).toInt()
+
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color(0xFFF0FDF4),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF86EFAC)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 10.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Your Learning Progress",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF15803D)
+                                        )
+                                        Text(
+                                            text = "$completedCount of ${lessons.size} Completed ($progressPercent%)",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color(0xFF166534)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    LinearProgressIndicator(
+                                        progress = { progressFraction },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(6.dp)
+                                            .clip(RoundedCornerShape(3.dp)),
+                                        color = Color(0xFF22C55E),
+                                        trackColor = Color(0xFFDCFCE7)
+                                    )
+
+                                    val isCertAwarded = remember(classItem.classId, currentUserId) {
+                                        LessonProgressManager.isCertificateAwarded(context, classItem.classId, currentUserId)
+                                    }
+
+                                    if (isCertAwarded && onOpenCertificate != null) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Button(
+                                            onClick = { onOpenCertificate.invoke(classItem) },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag("view_certificate_btn")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.WorkspacePremium,
+                                                contentDescription = null,
+                                                tint = Color.White,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = "View Awarded Certificate 🎓",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White
+                                            )
+                                        }
+                                    } else if (progressPercent == 100 && lessons.isNotEmpty()) {
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = Color(0xFFFEF3C7),
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFDE68A)),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.WorkspacePremium,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFFD97706),
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = "Lessons completed! Your teacher will review your work and award your official certificate.",
+                                                    fontSize = 11.sp,
+                                                    color = Color(0xFF92400E),
+                                                    lineHeight = 14.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             lessons.forEach { lesson ->
+                                val isLessonDone = remember(lesson.lessonId, currentUserId) {
+                                    if (currentUserId.isNotBlank()) {
+                                        LessonProgressManager.isLessonCompleted(context, currentUserId, classItem.classId, lesson.lessonId)
+                                    } else false
+                                }
+
+                                val quizScore = remember(lesson.lessonId, currentUserId) {
+                                    if (currentUserId.isNotBlank()) {
+                                        LessonProgressManager.getQuizScore(context, currentUserId, classItem.classId, lesson.lessonId)
+                                    } else null
+                                }
+
                                 Card(
                                     shape = RoundedCornerShape(10.dp),
                                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, LenoPrimaryLight),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isLessonDone) Color(0xFF86EFAC) else LenoPrimaryLight),
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable { onOpenLesson(lesson) }
@@ -356,13 +512,13 @@ fun ClassDetailDialog(
                                                 modifier = Modifier
                                                     .size(28.dp)
                                                     .clip(CircleShape)
-                                                    .background(LenoPrimaryVeryLight),
+                                                    .background(if (isLessonDone) Color(0xFFDCFCE7) else LenoPrimaryVeryLight),
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Icon(
-                                                    imageVector = Icons.Default.Book,
+                                                    imageVector = if (isLessonDone) Icons.Default.Check else Icons.Default.Book,
                                                     contentDescription = null,
-                                                    tint = LenoPrimaryDark,
+                                                    tint = if (isLessonDone) Color(0xFF15803D) else LenoPrimaryDark,
                                                     modifier = Modifier.size(14.dp)
                                                 )
                                             }
@@ -384,12 +540,55 @@ fun ClassDetailDialog(
                                             }
                                         }
 
-                                        Text(
-                                            text = "Read →",
-                                            fontSize = 11.sp,
-                                            color = LenoPrimary,
-                                            fontWeight = FontWeight.Bold
-                                        )
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            if (quizScore != null) {
+                                                Surface(
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    color = Color(0xFFFEF3C7),
+                                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF59E0B))
+                                                ) {
+                                                    Text(
+                                                        text = "Quiz $quizScore ⭐",
+                                                        fontSize = 9.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color(0xFFB45309),
+                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            if (isLessonDone) {
+                                                Surface(
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    color = Color(0xFFDCFCE7),
+                                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF22C55E))
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF16A34A), modifier = Modifier.size(11.dp))
+                                                        Spacer(modifier = Modifier.width(2.dp))
+                                                        Text(
+                                                            text = "Done ✓",
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = Color(0xFF166534)
+                                                        )
+                                                    }
+                                                }
+                                            } else {
+                                                Text(
+                                                    text = "Read →",
+                                                    fontSize = 11.sp,
+                                                    color = LenoPrimary,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -463,6 +662,7 @@ fun ClassDetailDialog(
                         Text("Enter Classroom 👥", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 } else {
+                    val isPaid = classItem.isPaid && !classItem.price.equals("FREE", ignoreCase = true)
                     Button(
                         onClick = onJoin,
                         colors = ButtonDefaults.buttonColors(containerColor = LenoPrimary),
@@ -471,7 +671,11 @@ fun ClassDetailDialog(
                     ) {
                         Icon(Icons.Default.School, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Join Free (Launch Offer)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(
+                            text = if (isPaid) "Pay & Join (${classItem.price})" else "Join Free",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
                     }
                 }
             }

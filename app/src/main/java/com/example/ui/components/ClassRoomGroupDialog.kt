@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -87,10 +88,14 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
@@ -98,6 +103,9 @@ import com.example.data.service.FirebaseStorageService
 import com.example.util.AudioPlayerHelper
 import com.example.util.AudioRecorderHelper
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import androidx.compose.material3.CircularProgressIndicator
@@ -109,6 +117,8 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.example.util.LessonProgressManager
+import com.example.viewmodel.LenoViewModel
 
 @Composable
 fun ClassRoomGroupDialog(
@@ -124,9 +134,17 @@ fun ClassRoomGroupDialog(
     onDismiss: () -> Unit,
     onChatWithInstructor: () -> Unit,
     onOpenLesson: (LessonEntity) -> Unit,
-    onAddLesson: () -> Unit = {}
+    onAddLesson: () -> Unit = {},
+    onOpenCertificate: ((ClassEntity) -> Unit)? = null,
+    viewModel: LenoViewModel? = null,
+    onRemoveStudent: ((studentUserId: String, studentName: String) -> Unit)? = null,
+    onAddStudent: ((studentUserId: String, studentLinoId: String, studentName: String) -> Unit)? = null
 ) {
+    val context = LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) }
+    var studentForCertificateAward by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var studentToRemove by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var showAddStudentDialog by remember { mutableStateOf(false) }
     val tabs = listOf("❓ Q&A (${questions.size})", "📚 Lessons (${lessons.size})", "👥 Members", "ℹ️ About")
 
     val currentUserName = currentUser?.displayName?.ifBlank { currentUser.username } ?: "You"
@@ -322,8 +340,10 @@ fun ClassRoomGroupDialog(
                             classItem = classItem,
                             lessons = lessons,
                             isInstructor = effectiveInstructor,
+                            currentUserId = currentUser?.userId ?: "",
                             onOpenLesson = onOpenLesson,
-                            onAddLesson = onAddLesson
+                            onAddLesson = onAddLesson,
+                            onOpenCertificate = onOpenCertificate
                         )
 
                         2 -> ClassMembersTab(
@@ -333,13 +353,93 @@ fun ClassRoomGroupDialog(
                             currentUserLinoId = currentUserLinoId,
                             enrolledStudents = enrolledStudents,
                             isInstructor = effectiveInstructor,
-                            onChatWithInstructor = onChatWithInstructor
+                            onChatWithInstructor = onChatWithInstructor,
+                            onOpenCertificate = onOpenCertificate,
+                            onAwardCertificate = { sId, sName ->
+                                studentForCertificateAward = Pair(sId, sName)
+                            },
+                            onShowAddStudent = { showAddStudentDialog = true },
+                            onPromptRemoveStudent = { sId, sName ->
+                                studentToRemove = Pair(sId, sName)
+                            }
                         )
 
                         3 -> ClassAboutTab(classItem = classItem)
                     }
                 }
             }
+        }
+
+        studentForCertificateAward?.let { (studentId, studentName) ->
+            AwardStudentCertificateDialog(
+                classItem = classItem,
+                studentName = studentName,
+                studentUserId = studentId,
+                teacherName = classItem.instructorName,
+                onDismiss = { studentForCertificateAward = null },
+                onAward = { awardTitle, commendation ->
+                    LessonProgressManager.awardCertificate(
+                        context = context,
+                        classId = classItem.classId,
+                        studentUserId = studentId,
+                        studentName = studentName,
+                        teacherUserId = currentUser?.userId ?: classItem.instructorUserId,
+                        teacherName = classItem.instructorName,
+                        awardTitle = awardTitle,
+                        teacherCommendation = commendation
+                    )
+                    Toast.makeText(context, "Certificate awarded to $studentName! 🎓", Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
+
+        studentToRemove?.let { (studentId, studentName) ->
+            AlertDialog(
+                onDismissRequest = { studentToRemove = null },
+                title = {
+                    Text(
+                        text = "Remove Student",
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFDC2626)
+                    )
+                },
+                text = {
+                    Text(
+                        text = "Are you sure you want to remove $studentName from ${classItem.title}?\n\nThey will no longer have access to classroom lessons, Q&A, and discussions.",
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            studentToRemove = null
+                            onRemoveStudent?.invoke(studentId, studentName)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("Remove Student", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { studentToRemove = null }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        if (showAddStudentDialog && viewModel != null) {
+            AddStudentToClassDialog(
+                classItem = classItem,
+                viewModel = viewModel,
+                enrolledStudentUserIds = enrolledStudents.map { it.userId }.toSet(),
+                onDismiss = { showAddStudentDialog = false },
+                onAddStudent = { sId, sLinoId, sName ->
+                    onAddStudent?.invoke(sId, sLinoId, sName)
+                }
+            )
         }
     }
 }
@@ -1475,9 +1575,13 @@ private fun ClassLessonsTab(
     classItem: ClassEntity,
     lessons: List<LessonEntity>,
     isInstructor: Boolean,
+    currentUserId: String = "",
     onOpenLesson: (LessonEntity) -> Unit,
-    onAddLesson: () -> Unit
+    onAddLesson: () -> Unit,
+    onOpenCertificate: ((ClassEntity) -> Unit)? = null
 ) {
+    val context = LocalContext.current
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1497,6 +1601,95 @@ private fun ClassLessonsTab(
                 Text("Add New Lesson to Class", fontWeight = FontWeight.Bold, fontSize = 12.sp)
             }
             Spacer(modifier = Modifier.height(10.dp))
+        }
+
+        // Student learning progress bar
+        if (currentUserId.isNotBlank() && lessons.isNotEmpty()) {
+            val completedCount = remember(lessons, currentUserId) {
+                LessonProgressManager.getCompletedCount(context, currentUserId, classItem.classId)
+            }
+            val progressFraction = if (lessons.isNotEmpty()) (completedCount.toFloat() / lessons.size.toFloat()).coerceIn(0f, 1f) else 0f
+            val progressPercent = (progressFraction * 100).toInt()
+
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = Color(0xFFF0FDF4),
+                border = BorderStroke(1.dp, Color(0xFF86EFAC)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 10.dp)
+            ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (completedCount >= lessons.size) "🎓 All Lessons Completed!" else "Your Progress",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (completedCount >= lessons.size) Color(0xFF15803D) else Color(0xFF166534)
+                        )
+                        Text(
+                            text = "$completedCount of ${lessons.size} Lessons ($progressPercent%)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF166534)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LinearProgressIndicator(
+                        progress = { progressFraction },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp)),
+                        color = Color(0xFF22C55E),
+                        trackColor = Color(0xFFDCFCE7)
+                    )
+
+                    val isCertAwarded = remember(classItem.classId, currentUserId) {
+                        LessonProgressManager.isCertificateAwarded(context, classItem.classId, currentUserId)
+                    }
+
+                    if (isCertAwarded && onOpenCertificate != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = { onOpenCertificate(classItem) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(34.dp)
+                                .testTag("classroom_view_cert_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.WorkspacePremium,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "View Teacher-Awarded Certificate 🎓",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "🎓 Certificates are officially awarded by your teacher based on your hard work, quiz scores, and course results.",
+                            fontSize = 10.sp,
+                            color = Color(0xFF166534),
+                            lineHeight = 14.sp
+                        )
+                    }
+                }
+            }
         }
 
         if (lessons.isEmpty()) {
@@ -1527,10 +1720,16 @@ private fun ClassLessonsTab(
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(lessons) { lesson ->
+                    val isDone = remember(lesson.lessonId, currentUserId) {
+                        if (currentUserId.isNotBlank()) {
+                            LessonProgressManager.isLessonCompleted(context, currentUserId, classItem.classId, lesson.lessonId)
+                        } else false
+                    }
+
                     Card(
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                        border = BorderStroke(1.dp, if (isDone) Color(0xFF86EFAC) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onOpenLesson(lesson) }
@@ -1548,15 +1747,24 @@ private fun ClassLessonsTab(
                                     modifier = Modifier
                                         .size(36.dp)
                                         .clip(CircleShape)
-                                        .background(LenoPrimaryVeryLight),
+                                        .background(if (isDone) Color(0xFFDCFCE7) else LenoPrimaryVeryLight),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text(
-                                        text = "${lesson.orderIndex}",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 14.sp,
-                                        color = LenoPrimaryDark
-                                    )
+                                    if (isDone) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = Color(0xFF15803D),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    } else {
+                                        Text(
+                                            text = "${lesson.orderIndex}",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                            color = LenoPrimaryDark
+                                        )
+                                    }
                                 }
 
                                 Spacer(modifier = Modifier.width(10.dp))
@@ -1577,17 +1785,39 @@ private fun ClassLessonsTab(
                                 }
                             }
 
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = LenoPrimary
-                            ) {
-                                Text(
-                                    text = "Read →",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                                )
+                            if (isDone) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFFDCFCE7),
+                                    border = BorderStroke(1.dp, Color(0xFF22C55E))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF16A34A), modifier = Modifier.size(12.dp))
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Text(
+                                            text = "Done ✓",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF166534)
+                                        )
+                                    }
+                                }
+                            } else {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = LenoPrimary
+                                ) {
+                                    Text(
+                                        text = "Read →",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -1608,22 +1838,27 @@ private fun ClassMembersTab(
     currentUserLinoId: String,
     enrolledStudents: List<UserEntity> = emptyList(),
     isInstructor: Boolean,
-    onChatWithInstructor: () -> Unit
+    onChatWithInstructor: () -> Unit,
+    onOpenCertificate: ((ClassEntity) -> Unit)? = null,
+    onAwardCertificate: (studentId: String, studentName: String) -> Unit = { _, _ -> },
+    onShowAddStudent: () -> Unit = {},
+    onPromptRemoveStudent: (studentId: String, studentName: String) -> Unit = { _, _ -> }
 ) {
+    val context = LocalContext.current
     val otherEnrolled = enrolledStudents.filter { it.userId != currentUser?.userId && it.userId != classItem.instructorUserId }
-    val displayedClassmates: List<Pair<String, String>> = if (otherEnrolled.isNotEmpty()) {
+    val displayedClassmates: List<Triple<String, String, String>> = if (otherEnrolled.isNotEmpty()) {
         otherEnrolled.map { student ->
             val name = student.displayName.ifBlank { student.username }
             val linoId = student.linoId.ifBlank { "LEN-${student.userId.replace("usr_", "").padEnd(8, '0').take(8).uppercase()}" }
-            Pair(name, linoId)
+            Triple(student.userId, name, linoId)
         }
     } else {
         listOf(
-            Pair("Fatima Dahiru", "LEN-84920153"),
-            Pair("Abubakar Sani", "LEN-93041285"),
-            Pair("Maryam Bello", "LEN-47103829"),
-            Pair("Usman Aliyu", "LEN-62947103"),
-            Pair("Zainab Kabir", "LEN-51829470")
+            Triple("std_fatima", "Fatima Dahiru", "LEN-84920153"),
+            Triple("std_abubakar", "Abubakar Sani", "LEN-93041285"),
+            Triple("std_maryam", "Maryam Bello", "LEN-47103829"),
+            Triple("std_usman", "Usman Aliyu", "LEN-62947103"),
+            Triple("std_zainab", "Zainab Kabir", "LEN-51829470")
         )
     }
 
@@ -1728,18 +1963,48 @@ private fun ClassMembersTab(
 
         item { Spacer(modifier = Modifier.height(6.dp)) }
 
+        // Enrolled Students Header with Add Student button for teachers
         item {
-            Text(
-                text = "ENROLLED STUDENTS IN THIS CLASS",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                letterSpacing = 1.sp
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "ENROLLED STUDENTS (${displayedClassmates.size})",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    letterSpacing = 1.sp
+                )
+
+                if (isInstructor) {
+                    Button(
+                        onClick = onShowAddStudent,
+                        colors = ButtonDefaults.buttonColors(containerColor = LenoPrimary),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PersonAdd,
+                            contentDescription = "Add Student",
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("+ Add Student", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
 
         // YOU (Current User) Member Card
         item {
+            val myCertAwarded = remember(classItem.classId, currentUser?.userId) {
+                if (currentUser?.userId.isNullOrBlank()) false
+                else LessonProgressManager.isCertificateAwarded(context, classItem.classId, currentUser?.userId!!)
+            }
+
             Card(
                 shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
@@ -1804,12 +2069,24 @@ private fun ClassMembersTab(
                         }
                     }
 
-                    Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = "Active Member",
-                        tint = Color(0xFF2E7D32),
-                        modifier = Modifier.size(20.dp)
-                    )
+                    if (myCertAwarded && onOpenCertificate != null) {
+                        Button(
+                            onClick = { onOpenCertificate(classItem) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Text("Cert 🎓", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = "Active Member",
+                            tint = Color(0xFF2E7D32),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
         }
@@ -1824,53 +2101,113 @@ private fun ClassMembersTab(
             ) {
                 Row(
                     modifier = Modifier.padding(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceVariant),
-                        contentAlignment = Alignment.Center
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Text(
-                            text = classmate.first.take(1).uppercase(),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(10.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                            contentAlignment = Alignment.Center
+                        ) {
                             Text(
-                                text = classmate.first,
-                                fontWeight = FontWeight.SemiBold,
+                                text = classmate.second.take(1).uppercase(),
+                                fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Surface(
-                                shape = RoundedCornerShape(4.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant
-                            ) {
+                        }
+
+                        Spacer(modifier = Modifier.width(10.dp))
+
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    text = "Student",
-                                    fontSize = 9.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                    text = classmate.second,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant
+                                ) {
+                                    Text(
+                                        text = "Student",
+                                        fontSize = 9.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                    )
+                                }
+                            }
+
+                            Text(
+                                text = "Leno ID: ${classmate.third}",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    if (isInstructor) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            val isCertAwarded = remember(classItem.classId, classmate.first) {
+                                LessonProgressManager.isCertificateAwarded(context, classItem.classId, classmate.first)
+                            }
+                            if (isCertAwarded) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFFFEF3C7),
+                                    border = BorderStroke(1.dp, Color(0xFFF59E0B)),
+                                    modifier = Modifier.clickable { onOpenCertificate?.invoke(classItem) }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.WorkspacePremium, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(13.dp))
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Text("Awarded 🎓", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF92400E))
+                                    }
+                                }
+                            } else {
+                                OutlinedButton(
+                                    onClick = { onAwardCertificate(classmate.first, classmate.second) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(30.dp)
+                                ) {
+                                    Icon(Icons.Default.WorkspacePremium, contentDescription = null, tint = LenoPrimary, modifier = Modifier.size(12.dp))
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text("Award Cert", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = LenoPrimary)
+                                }
+                            }
+
+                            // Teacher Remove Student Button
+                            IconButton(
+                                onClick = { onPromptRemoveStudent(classmate.first, classmate.second) },
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .background(Color(0xFFFEE2E2), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DeleteOutline,
+                                    contentDescription = "Remove student",
+                                    tint = Color(0xFFDC2626),
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
                         }
-
-                        Text(
-                            text = "Leno ID: ${classmate.second}",
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                 }
             }
@@ -1879,15 +2216,125 @@ private fun ClassMembersTab(
 }
 
 // ----------------------------------------------------
-// TAB 3: ABOUT / CLASS INFO
+// TAB 3: ABOUT / CLASS INFO & SCHOOL SHARING
 // ----------------------------------------------------
 @Composable
 private fun ClassAboutTab(classItem: ClassEntity) {
+    val context = LocalContext.current
+    val classCode = remember(classItem.classId) {
+        LessonProgressManager.formatClassCode(classItem.classId)
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(14.dp)
     ) {
+        // School & Private Class Share Card
+        Card(
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = LenoPrimaryVeryLight),
+            border = BorderStroke(1.dp, LenoPrimaryLight),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "School & Class Access Code",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = LenoPrimaryDark
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (classItem.status.equals("PRIVATE", ignoreCase = true)) Color(0xFFF3F4F6) else LenoPrimaryLight
+                    ) {
+                        Text(
+                            text = if (classItem.status.equals("PRIVATE", ignoreCase = true)) "🔒 Private Class" else "🌐 Public Class",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (classItem.status.equals("PRIVATE", ignoreCase = true)) Color(0xFF4B5563) else LenoPrimaryDark,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Students can find this class easily by searching the Class Code or your Teacher ID in the Class Search Bar.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 15.sp
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.White,
+                        border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                val clip = ClipData.newPlainText("Class Code", classCode)
+                                clipboard?.setPrimaryClip(clip)
+                                Toast.makeText(context, "Class Code $classCode copied! 📋", Toast.LENGTH_SHORT).show()
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text("Class Code", fontSize = 9.sp, color = Color.Gray)
+                                Text(classCode, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                            }
+                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = LenoPrimary, modifier = Modifier.size(14.dp))
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.White,
+                        border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                val clip = ClipData.newPlainText("Teacher ID", classItem.instructorLinoId)
+                                clipboard?.setPrimaryClip(clip)
+                                Toast.makeText(context, "Teacher ID ${classItem.instructorLinoId} copied! 📋", Toast.LENGTH_SHORT).show()
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text("Teacher ID", fontSize = 9.sp, color = Color.Gray)
+                                Text(classItem.instructorLinoId, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                            }
+                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = LenoPrimary, modifier = Modifier.size(14.dp))
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
         Card(
             shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
@@ -1914,7 +2361,8 @@ private fun ClassAboutTab(classItem: ClassEntity) {
 
         Card(
             shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = LenoPrimaryVeryLight),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
@@ -1922,7 +2370,7 @@ private fun ClassAboutTab(classItem: ClassEntity) {
                     text = "Class Schedule & Details",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    color = LenoPrimaryDark
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
@@ -1941,7 +2389,7 @@ private fun ClassAboutTab(classItem: ClassEntity) {
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "• Fee: ${if (classItem.price.isNotBlank() && classItem.price != "Free") classItem.price else "₦1,500"}",
+                    text = "• Access: ${if (classItem.isPaid) classItem.price else "Free"}",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface
                 )

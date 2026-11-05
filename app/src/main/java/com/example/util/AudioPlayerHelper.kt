@@ -323,6 +323,18 @@ class AudioPlayerHelper(private val context: Context) {
         }
     }
 
+    fun setPlaybackSpeed(speed: Float) {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                mediaPlayer?.let { player ->
+                    player.playbackParams = player.playbackParams.setSpeed(speed)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("AudioPlayerHelper", "Error setting playback speed: ${e.message}")
+        }
+    }
+
     fun stop() {
         stopProgressTracker()
         pcmPlaybackJob?.cancel()

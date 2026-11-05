@@ -332,18 +332,30 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
-                    context.applicationContext,
-                    AppDatabase::class.java,
-                    "leno_database.db"
-                )
-                .addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19)
-                .fallbackToDestructiveMigration(dropAllTables = false)
-                .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = false)
-                .addCallback(DatabaseCallback())
-                .build()
-                INSTANCE = instance
-                instance
+                try {
+                    val instance = Room.databaseBuilder(
+                        context.applicationContext,
+                        AppDatabase::class.java,
+                        "leno_database.db"
+                    )
+                    .addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19)
+                    .fallbackToDestructiveMigration()
+                    .fallbackToDestructiveMigrationOnDowngrade()
+                    .addCallback(DatabaseCallback())
+                    .build()
+                    INSTANCE = instance
+                    instance
+                } catch (e: Throwable) {
+                    android.util.Log.e("AppDatabase", "Error opening database, falling back to in-memory: ${e.message}", e)
+                    val fallback = Room.inMemoryDatabaseBuilder(
+                        context.applicationContext,
+                        AppDatabase::class.java
+                    )
+                    .fallbackToDestructiveMigration()
+                    .build()
+                    INSTANCE = fallback
+                    fallback
+                }
             }
         }
 

@@ -878,8 +878,14 @@ fun AdminTeacherApplicationsDialog(
         val isCurrentlyTeacher = target.isTeacher || target.role.equals("TEACHER", ignoreCase = true)
         val standardSubjects = listOf(
             "Maths",
+            "Physics",
+            "Chemistry",
+            "English",
+            "Biology",
             "Quran",
             "JAMB",
+            "Computer Science",
+            "Economics",
             "Skills",
             "Online Skills",
             "Content Creator"

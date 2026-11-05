@@ -39,6 +39,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -246,7 +247,9 @@ fun parseLessonContentToBlocks(rawContent: String): List<LessonBlock> {
 fun LessonContentRenderer(
     content: String,
     modifier: Modifier = Modifier,
-    isInteractive: Boolean = true
+    isInteractive: Boolean = true,
+    onAskAboutFormula: ((String) -> Unit)? = null,
+    onQuizAnswered: ((question: String, isCorrect: Boolean) -> Unit)? = null
 ) {
     val blocks = remember(content) { parseLessonContentToBlocks(content) }
 
@@ -267,13 +270,21 @@ fun LessonContentRenderer(
                     is LessonBlock.Heading2 -> Heading2BlockView(block.text)
                     is LessonBlock.Paragraph -> ParagraphBlockView(block.text)
                     is LessonBlock.BulletItem -> BulletBlockView(block.text)
-                    is LessonBlock.Formula -> FormulaBlockView(block.formula)
+                    is LessonBlock.Formula -> FormulaBlockView(block.formula, onAskAboutFormula)
                     is LessonBlock.NoteBlock -> GreyNoteBlockView(block.text)
                     is LessonBlock.ImageBlock -> ImageBlockView(block.urlOrPath, block.caption)
                     is LessonBlock.VideoBlock -> VideoBlockView(block.videoUrl, block.title)
                     is LessonBlock.VoiceBlock -> VoiceBlockView(block.audioUrl, block.durationSec)
                     is LessonBlock.FileBlock -> FileBlockView(block.fileName, block.filePath)
-                    is LessonBlock.QuizBlock -> QuizBlockView(block.question, block.options, block.correctIndex, isInteractive)
+                    is LessonBlock.QuizBlock -> QuizBlockView(
+                        question = block.question,
+                        options = block.options,
+                        correctIndex = block.correctIndex,
+                        isInteractive = isInteractive,
+                        onAnswerChecked = { isCorrect ->
+                            onQuizAnswered?.invoke(block.question, isCorrect)
+                        }
+                    )
                     is LessonBlock.CodeBlock -> CodeBlockView(block.code, block.language)
                 }
             }
@@ -332,7 +343,10 @@ fun BulletBlockView(text: String) {
 }
 
 @Composable
-fun FormulaBlockView(formula: String) {
+fun FormulaBlockView(
+    formula: String,
+    onAskAboutFormula: ((String) -> Unit)? = null
+) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
@@ -341,8 +355,9 @@ fun FormulaBlockView(formula: String) {
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
                     text = "FORMULA / EQUATION",
@@ -350,6 +365,27 @@ fun FormulaBlockView(formula: String) {
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF16A34A)
                 )
+
+                if (onAskAboutFormula != null) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFFDCFCE7),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF22C55E)),
+                        modifier = Modifier.clickable { onAskAboutFormula(formula) }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "💬 Ask Teacher",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF15803D)
+                            )
+                        }
+                    }
+                }
             }
             Spacer(modifier = Modifier.height(6.dp))
             Text(
@@ -614,7 +650,8 @@ fun QuizBlockView(
     question: String,
     options: List<String>,
     correctIndex: Int,
-    isInteractive: Boolean
+    isInteractive: Boolean,
+    onAnswerChecked: ((isCorrect: Boolean) -> Unit)? = null
 ) {
     var selectedOption by remember { mutableIntStateOf(-1) }
     var hasChecked by remember { mutableStateOf(!isInteractive) }
@@ -626,32 +663,54 @@ fun QuizBlockView(
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.HelpOutline,
-                    contentDescription = null,
-                    tint = Color(0xFF22C55E),
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "LESSON QUIZ / PRACTICE",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF22C55E)
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.HelpOutline,
+                        contentDescription = null,
+                        tint = Color(0xFF22C55E),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "LESSON QUIZ / PRACTICE",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF22C55E)
+                    )
+                }
+
+                if (hasChecked) {
+                    val isCorrect = selectedOption == correctIndex
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (isCorrect) Color(0xFFDCFCE7) else Color(0xFFFEE2E2)
+                    ) {
+                        Text(
+                            text = if (isCorrect) "Passed ✓" else "Try Again",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isCorrect) Color(0xFF16A34A) else Color(0xFFDC2626),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
                 text = question,
-                fontSize = 16.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color(0xFF111827)
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             options.forEachIndexed { idx, opt ->
                 val isSelected = selectedOption == idx
@@ -709,7 +768,7 @@ fun QuizBlockView(
 
                         Text(
                             text = opt,
-                            fontSize = 14.sp,
+                            fontSize = 13.sp,
                             color = Color(0xFF1F2937),
                             modifier = Modifier.weight(1f)
                         )
@@ -726,15 +785,65 @@ fun QuizBlockView(
                 }
             }
 
-            if (isInteractive && !hasChecked && selectedOption != -1) {
+            if (isInteractive) {
                 Spacer(modifier = Modifier.height(10.dp))
-                Button(
-                    onClick = { hasChecked = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E)),
-                    shape = RoundedCornerShape(50),
-                    modifier = Modifier.align(Alignment.End)
-                ) {
-                    Text("Check Answer", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+
+                if (!hasChecked && selectedOption != -1) {
+                    Button(
+                        onClick = {
+                            hasChecked = true
+                            onAnswerChecked?.invoke(selectedOption == correctIndex)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E)),
+                        shape = RoundedCornerShape(50),
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text("Check Answer", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                } else if (hasChecked) {
+                    val isCorrect = selectedOption == correctIndex
+                    if (isCorrect) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFFDCFCE7),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "🎉 Correct! You mastered this question!",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF15803D),
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                    } else {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFFFEE2E2),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "Not quite! The correct answer is Option ${('A'.code + correctIndex).toChar()}: ${options.getOrElse(correctIndex) { "" }}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFFB91C1C),
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    hasChecked = false
+                                    selectedOption = -1
+                                },
+                                shape = RoundedCornerShape(50),
+                                modifier = Modifier.align(Alignment.End)
+                            ) {
+                                Text("Try Again 🔄", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
                 }
             }
         }

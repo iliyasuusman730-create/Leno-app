@@ -2234,6 +2234,7 @@ fun ProfileScreen(
             isEnrolled = true,
             isInstructor = currentUser?.userId == detailClass.instructorUserId,
             lessons = classLessons,
+            currentUserId = currentUser?.userId ?: "",
             onDismiss = { selectedClassForDetail = null },
             onJoin = {},
             onChatWithInstructor = {

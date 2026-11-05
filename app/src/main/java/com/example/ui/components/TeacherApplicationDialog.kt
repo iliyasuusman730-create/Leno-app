@@ -91,11 +91,18 @@ fun TeacherApplicationDialog(
 ) {
     val allowedSubjects = listOf(
         "Maths",
+        "Physics",
+        "Chemistry",
+        "English",
+        "Biology",
         "Quran",
         "JAMB",
+        "Computer Science",
+        "Economics",
         "Skills",
         "Online Skills",
-        "Content Creator"
+        "Content Creator",
+        "Other / Custom Subject"
     )
 
     val isPending = (teacherRole?.isPending == true) ||
@@ -449,6 +456,7 @@ fun TeacherApplicationDialog(
 
     // CASE 4: Normal Form - User can apply (First time only)
     var selectedSubject by remember { mutableStateOf(allowedSubjects[0]) }
+    var customSubjectName by remember { mutableStateOf("") }
     var subjectMenuExpanded by remember { mutableStateOf(false) }
     val context = LocalContext.current
     var teachingLevel by remember { mutableStateOf("Secondary & JAMB Prep") }
@@ -664,6 +672,21 @@ fun TeacherApplicationDialog(
                     }
                 }
 
+                if (selectedSubject == "Other / Custom Subject") {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = customSubjectName,
+                        onValueChange = { customSubjectName = it },
+                        label = { Text("Specify Your Subject *") },
+                        placeholder = { Text("e.g. Further Maths, Literature, Government, Arabic") },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("custom_subject_input"),
+                        singleLine = true
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(12.dp))
 
                 // Teaching Level
@@ -868,12 +891,23 @@ fun TeacherApplicationDialog(
                         return@Button
                     }
 
+                    val finalSubject = if (selectedSubject == "Other / Custom Subject") {
+                        val clean = customSubjectName.trim()
+                        if (clean.isBlank()) {
+                            errorMessage = "Please specify your subject name."
+                            return@Button
+                        }
+                        clean
+                    } else {
+                        selectedSubject
+                    }
+
                     val finalDoc = if (certificatePhotoPath.isNotBlank()) {
                         "${certificateDocumentName.ifBlank { "Credential Document" }} [Photo: $certificatePhotoPath]"
                     } else certificateDocumentName
 
                     onSubmit(
-                        selectedSubject,
+                        finalSubject,
                         teachingLevel,
                         educationQualification,
                         teachingExperience,

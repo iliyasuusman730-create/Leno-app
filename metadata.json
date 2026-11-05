@@ -1,6 +1,6 @@
 {
   "name": "Leno",
-  "description": "A modern, simple, and fast real-time social private messaging app.",
+  "description": "Leno Chat with voice notes, message bubbles, and real-time read receipts",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

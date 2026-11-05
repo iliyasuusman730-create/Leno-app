@@ -104,7 +104,7 @@ class MessageAdapter(
             actionsParams.gravity = Gravity.END
         } else {
             holder.messageText.setBackgroundResource(R.drawable.bubble_glass_other)
-            holder.messageText.setTextColor(Color.parseColor("#111827"))
+            holder.messageText.setTextColor(Color.parseColor("#183A2D"))
             bubbleParams.gravity = Gravity.START
             actionsParams.gravity = Gravity.START
         }

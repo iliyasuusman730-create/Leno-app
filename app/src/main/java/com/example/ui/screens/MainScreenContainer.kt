@@ -83,6 +83,7 @@ fun MainScreenContainer(
     val userSettings by viewModel.userSettings.collectAsState()
     val notificationMsg by viewModel.notification.collectAsState()
     val unreadNotifCount by viewModel.unreadNotificationCount.collectAsState()
+    val totalUnreadChatCount by viewModel.totalUnreadChatCount.collectAsState()
     val pendingReqs by viewModel.pendingRequests.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -160,7 +161,7 @@ fun MainScreenContainer(
                         modifier = Modifier.padding(top = 16.dp, bottom = 12.dp)
                     ) {
                         androidx.compose.foundation.Image(
-                            painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.ic_leno_logo),
+                            painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.ic_leno_sparkle_star),
                             contentDescription = "Leno Logo",
                             modifier = Modifier.size(28.dp)
                         )
@@ -193,6 +194,12 @@ fun MainScreenContainer(
                                     imageVector = (if (selected) item.selectedIcon else item.unselectedIcon)!!,
                                     contentDescription = item.title
                                 )
+                                if (item.route == Screen.ChatsTab.route && totalUnreadChatCount > 0) {
+                                    Badge(
+                                        containerColor = androidx.compose.ui.graphics.Color(0xFF25D366),
+                                        contentColor = androidx.compose.ui.graphics.Color.White
+                                    ) { Text(if (totalUnreadChatCount > 99) "99+" else totalUnreadChatCount.toString()) }
+                                }
                                 if (item.route == Screen.ContactsTab.route) {
                                     val totalBadges = pendingReqs.size
                                     if (totalBadges > 0) {
@@ -255,7 +262,7 @@ fun MainScreenContainer(
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             androidx.compose.foundation.Image(
-                                painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.ic_leno_logo),
+                                painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.ic_leno_sparkle_star),
                                 contentDescription = "Leno Logo",
                                 modifier = Modifier.size(if (isSmall) 20.dp else 24.dp)
                             )
@@ -326,6 +333,13 @@ fun MainScreenContainer(
                                             contentDescription = item.title,
                                             modifier = Modifier.size(if (isSmall) 22.dp else 24.dp)
                                         )
+                                        // Show badge on Chats tab for total unread messages
+                                        if (item.route == Screen.ChatsTab.route && totalUnreadChatCount > 0) {
+                                            Badge(
+                                                containerColor = androidx.compose.ui.graphics.Color(0xFF25D366),
+                                                contentColor = androidx.compose.ui.graphics.Color.White
+                                            ) { Text(if (totalUnreadChatCount > 99) "99+" else totalUnreadChatCount.toString()) }
+                                        }
                                         // Show badge on Contacts tab for pending requests
                                         if (item.route == Screen.ContactsTab.route) {
                                             val totalBadges = pendingReqs.size

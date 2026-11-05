@@ -35,7 +35,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -73,6 +77,62 @@ class LenoRepository(
     private val syncChatsMutex = Mutex()
 
     var activeChatPartnerIdSupplier: (() -> String?)? = null
+
+    val unreadCountCache = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
+    fun getCachedUnreadCount(otherUserId: String): Int = unreadCountCache[otherUserId] ?: 0
+
+    private val chatPrefs by lazy {
+        context?.getSharedPreferences("leno_chat_features_prefs", Context.MODE_PRIVATE)
+    }
+
+    private val _pinnedChatIds = MutableStateFlow<Set<String>>(
+        chatPrefs?.getStringSet("pinned_chat_ids", emptySet())?.toSet() ?: emptySet()
+    )
+    val pinnedChatIds: StateFlow<Set<String>> = _pinnedChatIds.asStateFlow()
+
+    fun togglePinChat(partnerId: String): Boolean {
+        if (partnerId.isBlank()) return false
+        val current = _pinnedChatIds.value.toMutableSet()
+        val willPin = if (current.contains(partnerId)) {
+            current.remove(partnerId)
+            false
+        } else {
+            if (current.size >= 3) {
+                val first = current.first()
+                current.remove(first)
+            }
+            current.add(partnerId)
+            true
+        }
+        _pinnedChatIds.value = current
+        chatPrefs?.edit()?.putStringSet("pinned_chat_ids", current)?.apply()
+        return willPin
+    }
+
+    fun isChatPinned(partnerId: String): Boolean = _pinnedChatIds.value.contains(partnerId)
+
+    private val _starredMessageIds = MutableStateFlow<Set<String>>(
+        chatPrefs?.getStringSet("starred_msg_ids", emptySet())?.toSet() ?: emptySet()
+    )
+    val starredMessageIds: StateFlow<Set<String>> = _starredMessageIds.asStateFlow()
+
+    fun toggleStarMessage(messageId: String): Boolean {
+        if (messageId.isBlank()) return false
+        val current = _starredMessageIds.value.toMutableSet()
+        val willStar = if (current.contains(messageId)) {
+            current.remove(messageId)
+            false
+        } else {
+            current.add(messageId)
+            true
+        }
+        _starredMessageIds.value = current
+        chatPrefs?.edit()?.putStringSet("starred_msg_ids", current)?.apply()
+        return willStar
+    }
+
+    fun isMessageStarred(messageId: String): Boolean = _starredMessageIds.value.contains(messageId)
 
     val currentUser: Flow<UserEntity?> = userDao.getCurrentUser().map { roomUser ->
         if (roomUser != null && roomUser.isCurrentUser) {
@@ -238,6 +298,34 @@ class LenoRepository(
                         }
                     }
                 }
+
+                // If still no user is active (e.g. clean start/emulator preview), restore usr_officialjaiby_2026
+                if (userDao.getCurrentUserSync() == null) {
+                    val defaultOwner = userDao.getUserByIdSync("usr_officialjaiby_2026")
+                        ?: userDao.getUserByUsernameSync("officialjaiby")
+                        ?: UserEntity(
+                            userId = "usr_officialjaiby_2026",
+                            username = "officialjaiby",
+                            displayName = "Official Jaiby",
+                            bio = "Leno Platform Founder & Developer 🌟",
+                            linoId = "LEN-50638964",
+                            email = "officialjaiby@leno.chat",
+                            role = "OWNER",
+                            isOfficial = true,
+                            isOnline = true,
+                            isCurrentUser = true,
+                            createdAt = 1700000000000L
+                        )
+                    val activeOwner = defaultOwner.copy(userId = "usr_officialjaiby_2026", isCurrentUser = true, isOnline = true)
+                    userDao.insertUser(activeOwner)
+                    userDao.setCurrentUser("usr_officialjaiby_2026")
+                    userDao.updateOnlineStatus("usr_officialjaiby_2026", true)
+                    sessionManager?.saveActiveUserId("usr_officialjaiby_2026")
+                    accountBackupStore?.saveAccount(activeOwner)
+                    syncRemoteContactsIntoRoom("usr_officialjaiby_2026")
+                    syncAllUserChatsAndMessages("usr_officialjaiby_2026")
+                    ensureInitialOfficialMessageForUser("usr_officialjaiby_2026")
+                }
             } catch (e: Exception) {
                 Log.w("LenoRepository", "Repository init exception: ${e.message}")
             }
@@ -346,6 +434,18 @@ class LenoRepository(
                 return
             }
         }
+
+        if (userDao.getCurrentUserSync() == null) {
+            val jaiby = userDao.getUserByIdSync("usr_officialjaiby_2026")
+                ?: userDao.getUserByUsernameSync("officialjaiby")
+            if (jaiby != null) {
+                val restored = jaiby.copy(userId = "usr_officialjaiby_2026", isCurrentUser = true, isOnline = true)
+                userDao.insertUser(restored)
+                userDao.setCurrentUser("usr_officialjaiby_2026")
+                sessionManager?.saveActiveUserId("usr_officialjaiby_2026")
+                userDao.updateOnlineStatus("usr_officialjaiby_2026", true)
+            }
+        }
     }
 
     suspend fun syncRemoteContactsIntoRoom(userId: String) {
@@ -388,23 +488,28 @@ class LenoRepository(
                     val partnerAliases = getUserAliasesSync(otherUserId).toSet()
                     val isChatActive = activePartner != null && (activePartner == otherUserId || activePartner in partnerAliases)
 
-                    val adjustedMessages = if (isChatActive) {
-                        remoteMessages.map { msg ->
-                            if (msg.receiverId == current.userId || msg.senderId == otherUserId || msg.senderId in partnerAliases) {
-                                msg.copy(status = "READ")
-                            } else {
-                                msg
-                            }
+                    val existingLocalMessages = messageDao.getMessagesBetweenUserAliasesSync(
+                        listOf(current.userId) + getUserAliasesSync(current.userId),
+                        listOf(otherUserId) + partnerAliases
+                    ).associateBy { it.messageId }
+
+                    val adjustedMessages = remoteMessages.map { msg ->
+                        val local = existingLocalMessages[msg.messageId]
+                        val isAlreadyReadLocally = local != null && (local.status.equals("READ", ignoreCase = true) || local.read || local.isRead)
+                        if (isChatActive || isAlreadyReadLocally) {
+                            msg.copy(status = "READ", read = true)
+                        } else {
+                            msg
                         }
-                    } else {
-                        remoteMessages
                     }
 
                     messageDao.insertMessages(adjustedMessages)
                     messageBackupStore?.saveMessages(adjustedMessages)
                     remoteMessages.forEach { msg ->
-                        if (msg.receiverId == current.userId && msg.status == "SENT") {
-                            if (isChatActive) {
+                        if (msg.receiverId == current.userId && (msg.status == "SENT" || msg.status == "DELIVERED")) {
+                            val local = existingLocalMessages[msg.messageId]
+                            val isAlreadyReadLocally = local != null && (local.status.equals("READ", ignoreCase = true) || local.read || local.isRead)
+                            if (isChatActive || isAlreadyReadLocally) {
                                 messageDao.updateMessageStatus(msg.messageId, "READ")
                                 remoteAccountService.markMessageReadInRemote(chatId, msg.messageId, msg.senderId)
                             } else {
@@ -522,23 +627,28 @@ class LenoRepository(
                     val partnerAliases = getUserAliasesSync(otherUserId).toSet()
                     val isChatActive = activePartner != null && (activePartner == otherUserId || activePartner in partnerAliases)
 
-                    val adjustedMessages = if (isChatActive) {
-                        remoteMessages.map { msg ->
-                            if (msg.receiverId == myUserId || msg.senderId == otherUserId || msg.senderId in partnerAliases) {
-                                msg.copy(status = "READ")
-                            } else {
-                                msg
-                            }
+                    val existingLocalMessages = messageDao.getMessagesBetweenUserAliasesSync(
+                        listOf(myUserId) + aliases,
+                        listOf(otherUserId) + partnerAliases
+                    ).associateBy { it.messageId }
+
+                    val adjustedMessages = remoteMessages.map { msg ->
+                        val local = existingLocalMessages[msg.messageId]
+                        val isAlreadyReadLocally = local != null && (local.status.equals("READ", ignoreCase = true) || local.read || local.isRead)
+                        if (isChatActive || isAlreadyReadLocally) {
+                            msg.copy(status = "READ", read = true)
+                        } else {
+                            msg
                         }
-                    } else {
-                        remoteMessages
                     }
 
                     messageDao.insertMessages(adjustedMessages)
                     messageBackupStore?.saveMessages(adjustedMessages)
                     remoteMessages.forEach { msg ->
-                        if (msg.receiverId == myUserId && msg.status == "SENT") {
-                            if (isChatActive) {
+                        if (msg.receiverId == myUserId && (msg.status == "SENT" || msg.status == "DELIVERED")) {
+                            val local = existingLocalMessages[msg.messageId]
+                            val isAlreadyReadLocally = local != null && (local.status.equals("READ", ignoreCase = true) || local.read || local.isRead)
+                            if (isChatActive || isAlreadyReadLocally) {
                                 messageDao.updateMessageStatus(msg.messageId, "READ")
                                 remoteAccountService.markMessageReadInRemote(chatId, msg.messageId, msg.senderId)
                             } else {
@@ -565,7 +675,8 @@ class LenoRepository(
             sender?.let { messageBackupStore?.saveChatPartnerProfile(it) }
 
             val statusToSet = if (isChatActiveWithSender) "READ" else "DELIVERED"
-            val updatedMsg = message.copy(status = statusToSet)
+            val readToSet = isChatActiveWithSender
+            val updatedMsg = message.copy(status = statusToSet, read = readToSet)
             messageDao.insertMessage(updatedMsg)
             messageBackupStore?.saveMessage(updatedMsg)
 
@@ -1005,12 +1116,14 @@ class LenoRepository(
             emit(0)
             return@flow
         }
+
         val myAliases = (getUserAliasesSync(currentUserId) + currentUserId).filter { it.isNotBlank() }.distinct()
         val partnerAliases = (getUserAliasesSync(otherUserId) + otherUserId).filter { it.isNotBlank() }.distinct()
         val partnerSet = partnerAliases.toSet()
 
         val activePartner = activeChatPartnerIdSupplier?.invoke()
         if (activePartner != null && (activePartner in partnerSet || activePartner == otherUserId)) {
+            unreadCountCache[otherUserId] = 0
             emit(0)
             return@flow
         }
@@ -1021,13 +1134,24 @@ class LenoRepository(
                 otherUserIds = partnerAliases
             ).map { count ->
                 val currentActive = activeChatPartnerIdSupplier?.invoke()
-                if (currentActive != null && (currentActive in partnerSet || currentActive == otherUserId)) {
+                val finalCount = if (currentActive != null && (currentActive in partnerSet || currentActive == otherUserId)) {
                     0
                 } else {
                     count
                 }
-            }
+                unreadCountCache[otherUserId] = finalCount
+                finalCount
+            }.distinctUntilChanged()
         )
+    }
+
+    fun getTotalUnreadChatCount(currentUserId: String): Flow<Int> = flow {
+        if (currentUserId.isBlank()) {
+            emit(0)
+            return@flow
+        }
+        val myAliases = (getUserAliasesSync(currentUserId) + currentUserId).filter { it.isNotBlank() }.distinct()
+        emitAll(messageDao.getTotalUnreadCountForUserAliases(myAliases))
     }
 
     fun getFriendships(userId: String): Flow<List<FriendshipEntity>> =
@@ -2282,6 +2406,7 @@ class LenoRepository(
 
     suspend fun markMessagesAsRead(currentUserId: String, otherUserId: String) {
         if (currentUserId.isBlank() || otherUserId.isBlank()) return
+        unreadCountCache[otherUserId] = 0
         val myAliases = (getUserAliasesSync(currentUserId) + currentUserId).filter { it.isNotBlank() }.distinct()
         val partnerAliases = (getUserAliasesSync(otherUserId) + otherUserId).filter { it.isNotBlank() }.distinct()
 
@@ -3616,6 +3741,17 @@ class LenoRepository(
             val priceStr = targetClass?.price ?: "₦1,500"
             val priceClean = priceStr.replace("₦", "").replace(",", "").trim().toDoubleOrNull() ?: 1500.0
             teacherRoleDao.creditTeacherEarnings(resolvedTeacherId, priceClean)
+        }
+        return true
+    }
+
+    suspend fun removeStudentFromClass(studentUserId: String, classId: String): Boolean {
+        enrollmentDao.deleteEnrollment(studentUserId, classId)
+        classDao.decrementEnrolledStudents(classId)
+        try {
+            remoteAccountService.deleteEnrollmentFromRemote(studentUserId, classId)
+        } catch (e: Exception) {
+            Log.w("LenoRepository", "Firestore enrollment removal notice: ${e.message}")
         }
         return true
     }

@@ -5,8 +5,13 @@ import com.example.ui.components.AddContactDialog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.platform.LocalContext
+import android.widget.Toast
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -106,16 +112,17 @@ fun ChatsListScreen(
     val chatPartnersList by viewModel.chatPartners.collectAsState()
     val contactsList by viewModel.contactsList.collectAsState()
     val isFetchingUsers by viewModel.isFetchingUserData.collectAsState()
+    val pinnedChatIds by viewModel.pinnedChatIds.collectAsState()
     var chatFilterQuery by remember { mutableStateOf("") }
     val isSmall = isSmallScreen()
 
     val myId = currentUser?.userId ?: ""
-    val chatPartners = remember(chatPartnersList, chatFilterQuery, myId) {
+    val chatPartners = remember(chatPartnersList, chatFilterQuery, myId, pinnedChatIds) {
         val filtered = chatPartnersList
             .distinctBy { it.userId }
             .filter { it.userId != myId && it.userId.isNotBlank() }
 
-        if (chatFilterQuery.isBlank()) {
+        val matches = if (chatFilterQuery.isBlank()) {
             filtered
         } else {
             filtered.filter {
@@ -124,6 +131,7 @@ fun ChatsListScreen(
                 it.linoId.contains(chatFilterQuery, ignoreCase = true)
             }
         }
+        matches.sortedWith(compareByDescending<UserEntity> { pinnedChatIds.contains(it.userId) })
     }
 
     androidx.compose.runtime.LaunchedEffect(currentUser?.userId) {
@@ -476,6 +484,7 @@ fun ChatsListScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatItemRow(
     viewModel: LenoViewModel,
@@ -484,8 +493,25 @@ fun ChatItemRow(
     onOpenChat: (String) -> Unit,
     onOpenProfile: (String) -> Unit = {}
 ) {
-    val lastMessage by viewModel.repository.getLastMessageBetween(myId, partner.userId).collectAsState(initial = null)
-    val unreadCount by viewModel.repository.getUnreadCount(myId, partner.userId).collectAsState(initial = 0)
+    val context = LocalContext.current
+    val lastMsgFlow = remember(myId, partner.userId) {
+        viewModel.repository.getLastMessageBetween(myId, partner.userId)
+    }
+    val lastMessage by lastMsgFlow.collectAsState(initial = null)
+
+    val unreadFlow = remember(myId, partner.userId) {
+        viewModel.repository.getUnreadCount(myId, partner.userId)
+    }
+    val unreadCount by unreadFlow.collectAsState(
+        initial = viewModel.repository.getCachedUnreadCount(partner.userId)
+    )
+
+    val pinnedChatIds by viewModel.pinnedChatIds.collectAsState()
+    val isPinned = remember(pinnedChatIds, partner.userId) {
+        pinnedChatIds.contains(partner.userId)
+    }
+
+    var showContextMenu by remember { mutableStateOf(false) }
 
     val timeFormatted = remember(lastMessage?.timestamp) {
         if (lastMessage == null) ""
@@ -498,14 +524,21 @@ fun ChatItemRow(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable {
-                viewModel.markChatRead(partner.userId)
-                onOpenChat(partner.userId)
-            }
+            .combinedClickable(
+                onClick = {
+                    viewModel.markChatRead(partner.userId)
+                    onOpenChat(partner.userId)
+                },
+                onLongClick = {
+                    showContextMenu = true
+                }
+            )
             .testTag("chat_row_${partner.username}"),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        colors = CardDefaults.cardColors(
+            containerColor = if (isPinned) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f) else MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isPinned) 2.dp else 1.dp)
     ) {
         Row(
             modifier = Modifier
@@ -559,11 +592,24 @@ fun ChatItemRow(
                             OfficialVerifiedBadge(size = 16.dp)
                         }
                     }
-                    Text(
-                        text = timeFormatted,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (isPinned) {
+                            Icon(
+                                imageVector = Icons.Default.PushPin,
+                                contentDescription = "Pinned",
+                                tint = Color(0xFFF59E0B),
+                                modifier = Modifier
+                                    .size(14.dp)
+                                    .padding(end = 3.dp)
+                            )
+                        }
+                        Text(
+                            text = timeFormatted,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (unreadCount > 0) Color(0xFF25D366) else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = if (unreadCount > 0) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(4.dp))
@@ -577,16 +623,15 @@ fun ChatItemRow(
                     if (msg != null && msg.senderId == myId) {
                         val isLastMsgRead = msg.isRead || msg.read || msg.status.equals("READ", ignoreCase = true)
                         val statusUpper = msg.status.uppercase()
+                        val isLastMsgDelivered = statusUpper == "DELIVERED"
                         val icon = when {
-                            isLastMsgRead -> Icons.Default.DoneAll
-                            statusUpper == "DELIVERED" -> Icons.Default.DoneAll
+                            isLastMsgRead || isLastMsgDelivered -> Icons.Default.DoneAll
                             statusUpper == "SENT" -> Icons.Default.Done
-                            else -> Icons.Default.Schedule
+                            else -> Icons.Default.Done
                         }
                         val tint = when {
-                            isLastMsgRead -> LenoMessageStatusSeen
-                            statusUpper == "DELIVERED" || statusUpper == "SENT" -> LenoMessageStatusSent
-                            else -> LenoMessageStatusSent.copy(alpha = 0.50f)
+                            isLastMsgRead -> Color(0xFF34B7F1) // WhatsApp blue double tick
+                            else -> Color(0xFF8696A0) // WhatsApp gray tick
                         }
                         Icon(
                             imageVector = icon,
@@ -607,23 +652,156 @@ fun ChatItemRow(
                     Text(
                         text = messageSnippet,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (unreadCount > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if (unreadCount > 0) FontWeight.Medium else FontWeight.Normal,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
 
+                    // Fix 3: Badge: unread count badge on chat list
                     if (unreadCount > 0) {
                         Spacer(modifier = Modifier.width(8.dp))
-                        Badge(
-                            containerColor = LenoBadgeNotificationBg,
-                            contentColor = LenoBadgeNotificationText
+                        Box(
+                            modifier = Modifier
+                                .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF25D366))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                .testTag("unread_badge_${partner.userId}"),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Text(unreadCount.toString(), fontWeight = FontWeight.Bold)
+                            Text(
+                                text = if (unreadCount > 99) "99+" else unreadCount.toString(),
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
                         }
                     }
                 }
             }
         }
     }
+
+    if (showContextMenu) {
+        AlertDialog(
+            onDismissRequest = { showContextMenu = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LenoAvatar(
+                        avatarUrl = partner.avatarUrl,
+                        isOfficial = partner.hasVerifiedBadge || partner.isOfficial || partner.userId == LenoRepository.OFFICIAL_LENO_ID,
+                        size = 36.dp,
+                        contentDescription = partner.displayName,
+                        username = partner.username
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = partner.displayName,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    TextButton(
+                        onClick = {
+                            showContextMenu = false
+                            val pinned = viewModel.togglePinChat(partner.userId)
+                            val msg = if (pinned) "Chat pinned to top 📌" else "Chat unpinned"
+                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("ctx_pin_${partner.userId}")
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PushPin,
+                                contentDescription = null,
+                                tint = Color(0xFFF59E0B),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = if (isPinned) "Unpin Chat" else "Pin Chat to Top (Max 3)",
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+
+                    TextButton(
+                        onClick = {
+                            showContextMenu = false
+                            viewModel.markChatRead(partner.userId)
+                            Toast.makeText(context, "Marked as read", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("ctx_read_${partner.userId}")
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DoneAll,
+                                contentDescription = null,
+                                tint = Color(0xFF34B7F1),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "Mark as Read",
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+
+                    TextButton(
+                        onClick = {
+                            showContextMenu = false
+                            onOpenProfile(partner.userId)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("ctx_profile_${partner.userId}")
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "View Profile",
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showContextMenu = false }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
 }
+

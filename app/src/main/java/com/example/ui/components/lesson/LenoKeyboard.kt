@@ -55,10 +55,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 enum class KeyboardTab(val label: String) {
-    ABC("ABC"),
+    ABC("English"),
     MATH("Math"),
-    CHEM("Chem"),
     PHYSICS("Physics"),
+    CHEM("Chem"),
+    BIO("Biology"),
     QURAN("Quran"),
     ONLINE_SKILLS("Online Skills"),
     DRAW("Draw")
@@ -92,8 +93,9 @@ fun LenoKeyboard(
         activeTab = tab
         currentFormula = when (tab) {
             KeyboardTab.MATH -> "∫ (x² + ½) dx = "
-            KeyboardTab.CHEM -> "CO₂ + H₂O → "
             KeyboardTab.PHYSICS -> "F = m × a"
+            KeyboardTab.CHEM -> "CO₂ + H₂O → "
+            KeyboardTab.BIO -> "6CO₂ + 6H₂O ──▷ C₆H₁₂O₆ + 6O₂"
             KeyboardTab.QURAN -> "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ"
             KeyboardTab.ONLINE_SKILLS -> "HTML • CSS • React • Python • AI Tools"
             KeyboardTab.ABC -> ""
@@ -187,12 +189,13 @@ fun LenoKeyboard(
                 }
             }
 
-            // === TABS ROW: 40px fixed (ABC, Math, Chem, Physics, Quran, Online Skills, Draw) ===
+            // === TABS ROW: 40px fixed (English, Math, Physics, Chem, Biology, Quran, Online Skills, Draw) ===
             val tabs = listOf(
                 KeyboardTab.ABC,
                 KeyboardTab.MATH,
-                KeyboardTab.CHEM,
                 KeyboardTab.PHYSICS,
+                KeyboardTab.CHEM,
+                KeyboardTab.BIO,
                 KeyboardTab.QURAN,
                 KeyboardTab.ONLINE_SKILLS,
                 KeyboardTab.DRAW
@@ -307,6 +310,28 @@ fun LenoKeyboard(
                             items = physicsKeyItems,
                             onKeyClick = { key ->
                                 currentFormula += key
+                            },
+                            onInsert = {
+                                if (currentFormula.isNotEmpty()) {
+                                    onInsertText(currentFormula)
+                                }
+                            },
+                            onBackspace = {
+                                if (currentFormula.isNotEmpty()) {
+                                    currentFormula = currentFormula.dropLast(1)
+                                } else {
+                                    onBackspace()
+                                }
+                            },
+                            onClear = { currentFormula = "" },
+                            onSpace = { currentFormula += " " }
+                        )
+                    }
+                    KeyboardTab.BIO -> {
+                        FourColumnKeyGrid(
+                            items = bioKeyItems,
+                            onKeyClick = { key ->
+                                currentFormula += if (currentFormula.isEmpty() || currentFormula.endsWith(" ")) key else " $key"
                             },
                             onInsert = {
                                 if (currentFormula.isNotEmpty()) {
@@ -624,6 +649,53 @@ private val physicsKeyItems = listOf(
     KeyItem("c", color = Color(0xFF27272A)),
     KeyItem("Δt", color = Color(0xFF27272A)),
     KeyItem("Δx", color = Color(0xFF27272A))
+)
+
+private val bioKeyItems = listOf(
+    // Genetics & DNA
+    KeyItem("DNA", "DNA [A-T, G-C]", color = Color(0xFF065F46)),
+    KeyItem("RNA", "mRNA / tRNA", color = Color(0xFF065F46)),
+    KeyItem("♂ Male", "♂", color = Color(0xFF1E293B)),
+    KeyItem("♀ Female", "♀", color = Color(0xFF1E293B)),
+
+    KeyItem("Aa (Hetero)", "Aa", color = Color(0xFF1E293B)),
+    KeyItem("AA (Homo)", "AA", color = Color(0xFF1E293B)),
+    KeyItem("aa (Recess)", "aa", color = Color(0xFF1E293B)),
+    KeyItem("Punnett", "┌───┬───┐\n│ A │ a │\n├───┼───┤\n│ A │ a │\n└───┴───┘", color = Color(0xFF065F46)),
+
+    // Key Bio Equations
+    KeyItem("Photosynthesis", "6CO₂ + 6H₂O ──(light/chlorophyll)──▷ C₆H₁₂O₆ + 6O₂", color = Color(0xFF166534)),
+    KeyItem("Respiration", "C₆H₁₂O₆ + 6O₂ ──▷ 6CO₂ + 6H₂O + 38 ATP", color = Color(0xFF166534)),
+    KeyItem("ATP", "ATP ⇌ ADP + Pi + Energy", color = Color(0xFF166534)),
+    KeyItem("Enzyme", "Substrate + Enzyme ⇌ [ES Complex] ──▷ Product + Enzyme", color = Color(0xFF166534)),
+
+    // Cell Biology & Organelles
+    KeyItem("Cell Membrane", color = Color(0xFF27272A)),
+    KeyItem("Nucleus", color = Color(0xFF27272A)),
+    KeyItem("Mitochondria", color = Color(0xFF27272A)),
+    KeyItem("Chloroplast", color = Color(0xFF27272A)),
+
+    KeyItem("Ribosome", color = Color(0xFF27272A)),
+    KeyItem("Vacuole", color = Color(0xFF27272A)),
+    KeyItem("Cytoplasm", color = Color(0xFF27272A)),
+    KeyItem("Cell Wall", color = Color(0xFF27272A)),
+
+    // Processes & Systems
+    KeyItem("Osmosis", color = Color(0xFF1E1B4B)),
+    KeyItem("Diffusion", color = Color(0xFF1E1B4B)),
+    KeyItem("Mitosis", color = Color(0xFF1E1B4B)),
+    KeyItem("Meiosis", color = Color(0xFF1E1B4B)),
+
+    KeyItem("Transpiration", color = Color(0xFF1E1B4B)),
+    KeyItem("Peristalsis", color = Color(0xFF1E1B4B)),
+    KeyItem("Homeostasis", color = Color(0xFF1E1B4B)),
+    KeyItem("Reflex Arc", "Receptor ──▷ Sensory ──▷ Relay ──▷ Motor ──▷ Effector", color = Color(0xFF1E1B4B)),
+
+    // Lab & Microscope
+    KeyItem("×100", "×100 magnification", color = Color(0xFF3F3F46)),
+    KeyItem("×400", "×400 magnification", color = Color(0xFF3F3F46)),
+    KeyItem("pH 7.0", "pH ", color = Color(0xFF3F3F46)),
+    KeyItem("μm (Micron)", "μm", color = Color(0xFF3F3F46))
 )
 
 private val drawKeyItems = listOf(

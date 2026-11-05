@@ -95,8 +95,9 @@ fun CreateClassDialog(
     var imageUrl by remember { mutableStateOf("") }
     var optionalImages by remember { mutableStateOf("") }
     var videoUrl by remember { mutableStateOf("") }
-    var isPaid by remember { mutableStateOf(true) }
+    var isPaid by remember { mutableStateOf(false) } // Default Free or Paid teacher choice
     var price by remember { mutableStateOf("₦1,500") }
+    var isPublicClass by remember { mutableStateOf(true) } // Public vs Private choice
     var schedule by remember { mutableStateOf("Self-paced") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
@@ -333,23 +334,86 @@ fun CreateClassDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Paid vs Free Toggle
-                // Enrollment Fee (Required: students must pay to join class)
-                OutlinedTextField(
-                    value = price,
-                    onValueChange = { price = it },
-                    label = { Text("Class Enrollment Fee *") },
-                    placeholder = { Text("e.g. ₦1,500") },
+                // Paid vs Free Choice (Teacher's choice)
+                Text("Class Pricing & Access *", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    supportingText = {
-                        Text(
-                            text = "Students must pay this enrollment fee to join your class.",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = !isPaid,
+                        onClick = { isPaid = false },
+                        label = { Text("🟢 Free Class", fontWeight = if (!isPaid) FontWeight.Bold else FontWeight.Normal, fontSize = 12.sp) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    FilterChip(
+                        selected = isPaid,
+                        onClick = { isPaid = true },
+                        label = { Text("💳 Paid Class", fontWeight = if (isPaid) FontWeight.Bold else FontWeight.Normal, fontSize = 12.sp) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                if (isPaid) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = price,
+                        onValueChange = { price = it },
+                        label = { Text("Class Enrollment Fee *") },
+                        placeholder = { Text("e.g. ₦1,500") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        supportingText = {
+                            Text(
+                                text = "Students must pay this enrollment fee to join your class.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    )
+                } else {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Students can join this class completely free of charge.",
+                        fontSize = 11.sp,
+                        color = Color(0xFF15803D),
+                        modifier = Modifier.padding(start = 4.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Public vs Private Class Visibility
+                Text("Class Visibility *", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = isPublicClass,
+                        onClick = { isPublicClass = true },
+                        label = { Text("🌐 Public", fontWeight = if (isPublicClass) FontWeight.Bold else FontWeight.Normal, fontSize = 12.sp) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    FilterChip(
+                        selected = !isPublicClass,
+                        onClick = { isPublicClass = false },
+                        label = { Text("🔒 Private", fontWeight = if (!isPublicClass) FontWeight.Bold else FontWeight.Normal, fontSize = 12.sp) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Text(
+                    text = if (isPublicClass) {
+                        "Published on Explore Classes tab for all students to discover."
+                    } else {
+                        "Private / Unlisted: not shown on public Explore tab. Enrolled students and teacher access directly."
+                    },
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 4.dp, top = 2.dp)
                 )
 
                 if (errorMessage != null) {
@@ -363,6 +427,9 @@ fun CreateClassDialog(
             }
         },
         confirmButton = {
+            val finalPrice = if (isPaid) price.trim().ifBlank { "₦1,500" } else "FREE"
+            val finalStatus = if (isPublicClass) "PUBLISHED" else "PRIVATE"
+
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     onClick = {
@@ -384,8 +451,8 @@ fun CreateClassDialog(
                             imageUrl,
                             optionalImages,
                             videoUrl,
-                            true,
-                            price.trim().ifBlank { "₦1,500" },
+                            isPaid,
+                            finalPrice,
                             schedule,
                             selectedLessonType,
                             "DRAFT"
@@ -417,11 +484,11 @@ fun CreateClassDialog(
                             imageUrl,
                             optionalImages,
                             videoUrl,
-                            true,
-                            price.trim().ifBlank { "₦1,500" },
+                            isPaid,
+                            finalPrice,
                             schedule,
                             selectedLessonType,
-                            "PUBLISHED"
+                            finalStatus
                         )
                         onDismiss()
                     },
@@ -429,7 +496,11 @@ fun CreateClassDialog(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.testTag("submit_create_class_btn")
                 ) {
-                    Text("Publish Class", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text(
+                        text = if (isPublicClass) "Publish Class" else "Create Private Class",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
                 }
             }
         },

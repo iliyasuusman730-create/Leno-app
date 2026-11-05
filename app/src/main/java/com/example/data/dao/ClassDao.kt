@@ -67,4 +67,7 @@ interface ClassDao {
 
     @Query("UPDATE classes SET enrolledStudentsCount = enrolledStudentsCount + 1 WHERE classId = :classId")
     suspend fun incrementEnrolledStudents(classId: String)
+
+    @Query("UPDATE classes SET enrolledStudentsCount = MAX(0, enrolledStudentsCount - 1) WHERE classId = :classId")
+    suspend fun decrementEnrolledStudents(classId: String)
 }

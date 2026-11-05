@@ -63,7 +63,9 @@ sealed class CallState {
     ) : CallState()
 }
 
-class LenoViewModel(application: Application) : AndroidViewModel(application) {
+class LenoViewModel @JvmOverloads constructor(
+    application: Application = com.example.LenoApplication.instance ?: Application()
+) : AndroidViewModel(application) {
     private val database = AppDatabase.getDatabase(application)
     val repository = LenoRepository(database, application)
     private val callAudioHelper = CallAudioHelper(application)
@@ -209,127 +211,6 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
             initialValue = emptyList()
         )
 
-    init {
-        repository.activeChatPartnerIdSupplier = { activeChatPartnerId.value }
-        authStateListener = repository.registerAuthStateListener { authUid ->
-            viewModelScope.launch {
-                if (authUid != null) {
-                    if (currentUser.value == null || currentUser.value?.userId != authUid) {
-                        repository.syncCurrentUserFromFirebase()
-                    }
-                }
-            }
-        }
-        viewModelScope.launch {
-            _isFetchingUserData.value = true
-            repository.ensureOfficialLenoAccountCreated()
-            repository.syncCurrentUserFromFirebase()
-            delay(600)
-            _isFetchingUserData.value = false
-        }
-        viewModelScope.launch {
-            currentUser.collect { user ->
-                if (user != null) {
-                    repository.ensureInitialOfficialMessageForUser(user.userId)
-                    // Start real-time Firestore incoming call listener
-                    incomingCallsListener?.remove()
-                    incomingCallsListener = repository.remoteAccountService.listenIncomingCalls(user.userId) { offer ->
-                        if (_callState.value is CallState.Idle) {
-                            currentCloudCallId = offer.callId
-                            val caller = UserEntity(
-                                userId = offer.callerId,
-                                username = offer.callerUsername,
-                                displayName = offer.callerName,
-                                avatarUrl = offer.callerAvatar,
-                                isOnline = true
-                            )
-                            receiveIncomingCall(caller)
-                            // Acknowledge receipt to caller
-                            viewModelScope.launch {
-                                repository.remoteAccountService.updateCallStatus(offer.callId, "RINGING")
-                            }
-                        }
-                    }
-
-                    // Start real-time Firestore incoming messages listener
-                    incomingMessagesListener?.remove()
-                    incomingMessagesListener = repository.remoteAccountService.listenToIncomingMessages(user.userId) { msg ->
-                        viewModelScope.launch {
-                            val isChatActive = activeChatPartnerId.value == msg.senderId
-                            repository.handleIncomingMessage(msg, isChatActive)
-                        }
-                    }
-
-                    // Start real-time Firestore sent receipts listener
-                    sentReceiptsListener?.remove()
-                    sentReceiptsListener = repository.remoteAccountService.listenToSentReceipts(user.userId) { msgId, status ->
-                        viewModelScope.launch {
-                            repository.handleSentReceipt(msgId, status, user.userId)
-                        }
-                    }
-
-                    // Start real-time Firestore user chats listener
-                    userChatsListener?.remove()
-                    userChatsListener = repository.remoteAccountService.listenToUserChats(user.userId) { _, otherUserId ->
-                        viewModelScope.launch {
-                            repository.syncRemoteChatMessages(otherUserId)
-                        }
-                    }
-
-                    // Start real-time Firestore user document listener so permissions and role update immediately without restart
-                    userDocumentListener?.remove()
-                    userDocumentListener = repository.listenToUserDocument(user.userId) { updatedRemoteUser ->
-                        viewModelScope.launch {
-                            repository.handleRemoteUserDocumentUpdate(updatedRemoteUser)
-                        }
-                    }
-
-                    // Start real-time Firestore classes listener
-                    classesListener?.remove()
-                    classesListener = repository.listenToRemoteClasses { }
-
-                    // Start real-time Firestore enrollments listener
-                    enrollmentsListener?.remove()
-                    enrollmentsListener = repository.listenToUserEnrollments(user.userId) { }
-
-                    // Initial background sync for all historical user chats, contacts, classes, and enrollments
-                    viewModelScope.launch {
-                        repository.syncAllUserChatsAndMessages(user.userId)
-                        repository.syncRemoteContactsIntoRoom(user.userId)
-                        repository.syncClassesFromRemote()
-                        repository.syncEnrollmentsFromRemote(user.userId)
-                    }
-
-                    if (user.isAdmin || user.isOwner) {
-                        startTeacherApplicationsMonitor()
-                    }
-                } else {
-                    classesListener?.remove()
-                    classesListener = null
-                    enrollmentsListener?.remove()
-                    enrollmentsListener = null
-                    viewModelScope.launch {
-                        repository.purgeDemoClasses()
-                    }
-                    teacherApplicationsListener?.remove()
-                    teacherApplicationsListener = null
-                    _isMonitoringApplications.value = false
-                    userDocumentListener?.remove()
-                    userDocumentListener = null
-                    incomingCallsListener?.remove()
-                    incomingCallsListener = null
-                    incomingMessagesListener?.remove()
-                    incomingMessagesListener = null
-                    sentReceiptsListener?.remove()
-                    sentReceiptsListener = null
-                    userChatsListener?.remove()
-                    userChatsListener = null
-                    activeChatMessagesListener?.remove()
-                    activeChatMessagesListener = null
-                }
-            }
-        }
-    }
 
     val searchQuery = MutableStateFlow("")
 
@@ -499,12 +380,179 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
             else flowOf(0)
         }.stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = SharingStarted.Eagerly,
             initialValue = 0
         )
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val totalUnreadChatCount: StateFlow<Int> = currentUser
+        .flatMapLatest { user ->
+            if (user != null) repository.getTotalUnreadChatCount(user.userId)
+            else flowOf(0)
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = 0
+        )
+
+    val pinnedChatIds: StateFlow<Set<String>> = repository.pinnedChatIds
+    val starredMessageIds: StateFlow<Set<String>> = repository.starredMessageIds
+
+    fun togglePinChat(partnerId: String): Boolean = repository.togglePinChat(partnerId)
+    fun isChatPinned(partnerId: String): Boolean = repository.isChatPinned(partnerId)
+
+    fun toggleStarMessage(messageId: String): Boolean = repository.toggleStarMessage(messageId)
+    fun isMessageStarred(messageId: String): Boolean = repository.isMessageStarred(messageId)
+
     private val _notification = MutableStateFlow<String?>(null)
     val notification: StateFlow<String?> = _notification.asStateFlow()
+
+    init {
+        try {
+            repository.activeChatPartnerIdSupplier = { activeChatPartnerId.value }
+            authStateListener = repository.registerAuthStateListener { authUid ->
+                viewModelScope.launch {
+                    try {
+                        if (authUid != null) {
+                            if (currentUser.value == null || currentUser.value?.userId != authUid) {
+                                repository.syncCurrentUserFromFirebase()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w("LenoViewModel", "Notice in authStateListener: ${e.message}")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("LenoViewModel", "Notice registering authStateListener: ${e.message}")
+        }
+
+        viewModelScope.launch {
+            try {
+                _isFetchingUserData.value = true
+                repository.ensureOfficialLenoAccountCreated()
+                repository.syncCurrentUserFromFirebase()
+                delay(600)
+                _isFetchingUserData.value = false
+            } catch (e: Exception) {
+                Log.w("LenoViewModel", "Notice in initial user sync: ${e.message}")
+                _isFetchingUserData.value = false
+            }
+        }
+
+        viewModelScope.launch {
+            try {
+                currentUser.collect { user ->
+                    if (user != null) {
+                        try {
+                            repository.ensureInitialOfficialMessageForUser(user.userId)
+                            // Start real-time Firestore incoming call listener
+                            incomingCallsListener?.remove()
+                            incomingCallsListener = repository.remoteAccountService.listenIncomingCalls(user.userId) { offer ->
+                                if (_callState.value is CallState.Idle) {
+                                    currentCloudCallId = offer.callId
+                                    val caller = UserEntity(
+                                        userId = offer.callerId,
+                                        username = offer.callerUsername,
+                                        displayName = offer.callerName,
+                                        avatarUrl = offer.callerAvatar,
+                                        isOnline = true
+                                    )
+                                    receiveIncomingCall(caller)
+                                    // Acknowledge receipt to caller
+                                    viewModelScope.launch {
+                                        repository.remoteAccountService.updateCallStatus(offer.callId, "RINGING")
+                                    }
+                                }
+                            }
+
+                            // Start real-time Firestore incoming messages listener
+                            incomingMessagesListener?.remove()
+                            incomingMessagesListener = repository.remoteAccountService.listenToIncomingMessages(user.userId) { msg ->
+                                viewModelScope.launch {
+                                    val isChatActive = activeChatPartnerId.value == msg.senderId
+                                    repository.handleIncomingMessage(msg, isChatActive)
+                                }
+                            }
+
+                            // Start real-time Firestore sent receipts listener
+                            sentReceiptsListener?.remove()
+                            sentReceiptsListener = repository.remoteAccountService.listenToSentReceipts(user.userId) { msgId, status ->
+                                viewModelScope.launch {
+                                    repository.handleSentReceipt(msgId, status, user.userId)
+                                }
+                            }
+
+                            // Start real-time Firestore user chats listener
+                            userChatsListener?.remove()
+                            userChatsListener = repository.remoteAccountService.listenToUserChats(user.userId) { _, otherUserId ->
+                                viewModelScope.launch {
+                                    repository.syncRemoteChatMessages(otherUserId)
+                                }
+                            }
+
+                            // Start real-time Firestore user document listener so permissions and role update immediately without restart
+                            userDocumentListener?.remove()
+                            userDocumentListener = repository.listenToUserDocument(user.userId) { updatedRemoteUser ->
+                                viewModelScope.launch {
+                                    repository.handleRemoteUserDocumentUpdate(updatedRemoteUser)
+                                }
+                            }
+
+                            // Start real-time Firestore classes listener
+                            classesListener?.remove()
+                            classesListener = repository.listenToRemoteClasses { }
+
+                            // Start real-time Firestore enrollments listener
+                            enrollmentsListener?.remove()
+                            enrollmentsListener = repository.listenToUserEnrollments(user.userId) { }
+
+                            // Initial background sync for all historical user chats, contacts, classes, and enrollments
+                            viewModelScope.launch {
+                                repository.syncAllUserChatsAndMessages(user.userId)
+                                repository.syncRemoteContactsIntoRoom(user.userId)
+                                repository.syncClassesFromRemote()
+                                repository.syncEnrollmentsFromRemote(user.userId)
+                            }
+
+                            if (user.isAdmin || user.isOwner) {
+                                startTeacherApplicationsMonitor()
+                            }
+                        } catch (e: Exception) {
+                            Log.w("LenoViewModel", "Notice syncing user resources: ${e.message}")
+                        }
+                    } else {
+                        classesListener?.remove()
+                        classesListener = null
+                        enrollmentsListener?.remove()
+                        enrollmentsListener = null
+                        viewModelScope.launch {
+                            try {
+                                repository.purgeDemoClasses()
+                            } catch (_: Exception) {}
+                        }
+                        teacherApplicationsListener?.remove()
+                        teacherApplicationsListener = null
+                        _isMonitoringApplications.value = false
+                        userDocumentListener?.remove()
+                        userDocumentListener = null
+                        incomingCallsListener?.remove()
+                        incomingCallsListener = null
+                        incomingMessagesListener?.remove()
+                        incomingMessagesListener = null
+                        sentReceiptsListener?.remove()
+                        sentReceiptsListener = null
+                        userChatsListener?.remove()
+                        userChatsListener = null
+                        activeChatMessagesListener?.remove()
+                        activeChatMessagesListener = null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("LenoViewModel", "Notice in currentUser collector: ${e.message}")
+            }
+        }
+    }
 
     fun showNotification(message: String) {
         _notification.value = message
@@ -1432,6 +1480,62 @@ class LenoViewModel(application: Application) : AndroidViewModel(application) {
             val linoId = user.linoId.ifBlank { "LEN-${user.userId.replace("usr_", "").padEnd(8, '0').take(8).uppercase()}" }
             val success = repository.enrollInClass(user.userId, linoId, classId, teacherUserId)
             onResult(success)
+        }
+    }
+
+    fun removeStudentFromClass(
+        classId: String,
+        studentUserId: String,
+        studentName: String = "Student",
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        val user = currentUser.value
+        if (user == null) {
+            onResult(false, "You must be signed in.")
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val success = repository.removeStudentFromClass(studentUserId, classId)
+                if (success) {
+                    onResult(true, "$studentName has been removed from the class.")
+                } else {
+                    onResult(false, "Could not remove student. Please try again.")
+                }
+            } catch (e: Exception) {
+                onResult(false, "Error removing student: ${e.message}")
+            }
+        }
+    }
+
+    fun enrollStudentByTeacher(
+        classId: String,
+        studentUserId: String,
+        studentLinoId: String,
+        studentName: String = "Student",
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        val user = currentUser.value
+        if (user == null) {
+            onResult(false, "You must be signed in.")
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val success = repository.enrollInClass(
+                    studentUserId = studentUserId,
+                    studentLinoId = studentLinoId,
+                    classId = classId,
+                    teacherUserId = user.userId
+                )
+                if (success) {
+                    onResult(true, "$studentName added to class successfully! 🎓")
+                } else {
+                    onResult(false, "Could not add student to class.")
+                }
+            } catch (e: Exception) {
+                onResult(false, "Error adding student: ${e.message}")
+            }
         }
     }
 
