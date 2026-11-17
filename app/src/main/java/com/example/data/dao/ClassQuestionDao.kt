@@ -32,4 +32,10 @@ interface ClassQuestionDao {
 
     @Query("DELETE FROM class_questions WHERE classId = :classId")
     suspend fun deleteQuestionsForClass(classId: String)
+
+    @Query("DELETE FROM class_questions WHERE questionId = :questionId")
+    suspend fun deleteQuestionById(questionId: String)
+
+    @Query("DELETE FROM class_questions WHERE classId = :classId AND questionId NOT IN (:questionIds)")
+    suspend fun deleteQuestionsNotIn(classId: String, questionIds: List<String>)
 }

@@ -30,6 +30,9 @@ interface LessonDao {
     @Query("DELETE FROM lessons WHERE classId = :classId")
     suspend fun deleteLessonsForClass(classId: String)
 
+    @Query("DELETE FROM lessons WHERE classId = :classId AND lessonId NOT IN (:lessonIds)")
+    suspend fun deleteLessonsNotIn(classId: String, lessonIds: List<String>)
+
     @Query("""
         DELETE FROM lessons 
         WHERE lessonId LIKE 'demo_%' 

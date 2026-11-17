@@ -4,17 +4,22 @@ import android.util.Log
 import com.example.data.entity.ClassEntity
 import com.example.data.entity.ClassQuestionEntity
 import com.example.data.entity.EnrollmentEntity
+import com.example.data.entity.FriendshipEntity
 import com.example.data.entity.LessonEntity
 import com.example.data.entity.MessageEntity
+import com.example.data.entity.NotificationEntity
 import com.example.data.entity.TeacherRoleEntity
 import com.example.data.entity.UserEntity
 import com.example.data.model.TeacherApplicationItem
 import com.example.util.AuthSecurity
+import com.example.util.LessonProgressManager
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
@@ -195,7 +200,7 @@ open class RemoteAccountService {
                 val authResult = withTimeoutOrNull(8000L) {
                     fbAuth.createUserWithEmailAndPassword(cleanEmail, cleanPassword).await()
                 }
-                resolvedUid = authResult?.user?.uid ?: fbAuth.currentUser?.uid
+                resolvedUid = authResult?.user?.uid
                 if (resolvedUid != null) {
                     Log.i(TAG, "✅ [Firebase Auth SignUp SUCCESS] Created user with permanent UID: $resolvedUid")
                 }
@@ -206,17 +211,17 @@ open class RemoteAccountService {
                         err.contains("already-in-use", ignoreCase = true) ||
                         err.contains("EMAIL_EXISTS", ignoreCase = true)
                 if (isAlreadyInUse) {
-                    try {
-                        val signInResult = withTimeoutOrNull(4000L) {
-                            fbAuth.signInWithEmailAndPassword(cleanEmail, cleanPassword).await()
-                        }
-                        resolvedUid = signInResult?.user?.uid ?: fbAuth.currentUser?.uid
-                    } catch (_: Exception) {}
+                    return@withContext Result.failure(
+                        Exception("This email address is already registered. Please log in with your password.", e)
+                    )
+                }
+                if (!isProviderDisabled(e)) {
+                    return@withContext Result.failure(e)
                 }
             }
         }
 
-        val uid = resolvedUid ?: fbAuth?.currentUser?.uid ?: "usr_${originalUsername.lowercase()}_${UUID.randomUUID().toString().take(6)}"
+        val uid = resolvedUid ?: "usr_${originalUsername.lowercase()}_${UUID.randomUUID().toString().take(6)}"
 
         // 2. Build userMap with exact required fields
         val userMap = hashMapOf<String, Any>(
@@ -1951,6 +1956,15 @@ open class RemoteAccountService {
     }
 
     fun listenToContacts(myUid: String, onUpdate: (List<UserEntity>) -> Unit): ListenerRegistration? {
+        return listenToContactsWithRemovals(myUid) { contacts, _ ->
+            onUpdate(contacts)
+        }
+    }
+
+    fun listenToContactsWithRemovals(
+        myUid: String,
+        onUpdate: (contacts: List<UserEntity>, removedIds: List<String>) -> Unit
+    ): ListenerRegistration? {
         if (!isFirestoreProvisioned) return null
         val db = firestore ?: return null
         if (myUid.isBlank()) return null
@@ -1958,16 +1972,30 @@ open class RemoteAccountService {
             db.collection(COLLECTION_USERS)
                 .document(myUid)
                 .collection("contacts")
-                .whereEqualTo("status", "ACCEPTED")
                 .addSnapshotListener { snapshot, error ->
                     if (error != null) {
                         if (isDatabaseNotProvisioned(error)) markDatabaseNotProvisioned()
                         Log.w(TAG, "Error listening to contacts: ${error.message}")
                         return@addSnapshotListener
                     }
+                    val removedIds = snapshot?.documentChanges
+                        ?.filter { it.type == DocumentChange.Type.REMOVED }
+                        ?.mapNotNull { change ->
+                            change.document.getString("contactUid")
+                                ?: change.document.getString("userId")
+                                ?: change.document.id
+                        }
+                        .orEmpty()
+                        .toMutableList()
+
                     val list = snapshot?.documents?.mapNotNull { doc ->
                         val data = doc.data ?: return@mapNotNull null
                         val uid = data["contactUid"] as? String ?: (data["userId"] as? String) ?: doc.id
+                        val status = data["status"] as? String ?: "ACCEPTED"
+                        if (!status.equals("ACCEPTED", ignoreCase = true)) {
+                            if (uid.isNotBlank()) removedIds.add(uid)
+                            return@mapNotNull null
+                        }
                         val uname = data["username"] as? String ?: ""
                         val dname = data["displayName"] as? String ?: (data["fullName"] as? String) ?: uname
                         val avatar = data["avatarUrl"] as? String ?: ""
@@ -1985,11 +2013,389 @@ open class RemoteAccountService {
                             isCurrentUser = false
                         )
                     } ?: emptyList()
+                    onUpdate(list, removedIds.distinct())
+                }
+        } catch (e: Exception) {
+            if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
+            Log.w(TAG, "listenToContactsWithRemovals failure: ${e.message}")
+            null
+        }
+    }
+
+    // ==========================================
+    // REAL-TIME PRESENCE, TYPING, FRIEND REQUESTS & NOTIFICATIONS
+    // ==========================================
+
+    open suspend fun updateUserPresenceInRemote(
+        userId: String,
+        isOnline: Boolean,
+        lastSeen: Long = System.currentTimeMillis()
+    ) = withContext(Dispatchers.IO) {
+        if (userId.isBlank()) return@withContext
+        val existing = testUsers[userId]
+        if (existing != null) {
+            val updated = existing.copy(isOnline = isOnline, lastSeen = lastSeen)
+            testUsers[userId] = updated
+            testUserDocumentListeners[userId]?.forEach { listener ->
+                try { listener.invoke(updated) } catch (_: Exception) {}
+            }
+        }
+        if (isTestEnvironment() || !isFirestoreProvisioned) return@withContext
+        val db = firestore ?: return@withContext
+        try {
+            db.collection(COLLECTION_USERS)
+                .document(userId)
+                .set(
+                    mapOf(
+                        "isOnline" to isOnline,
+                        "lastSeen" to lastSeen,
+                        "updatedAt" to lastSeen
+                    ),
+                    SetOptions.merge()
+                )
+                .await()
+        } catch (e: Exception) {
+            if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
+            Log.w(TAG, "updateUserPresenceInRemote notice: ${e.message}")
+        }
+    }
+
+    open suspend fun setTypingStatusInRemote(
+        chatId: String,
+        userId: String,
+        isTyping: Boolean
+    ) = withContext(Dispatchers.IO) {
+        if (chatId.isBlank() || userId.isBlank()) return@withContext
+        if (isTestEnvironment() || !isFirestoreProvisioned) return@withContext
+        val db = firestore ?: return@withContext
+        try {
+            val ts = if (isTyping) System.currentTimeMillis() else 0L
+            db.collection(COLLECTION_CHATS)
+                .document(chatId)
+                .set(
+                    mapOf("typing_$userId" to ts),
+                    SetOptions.merge()
+                )
+                .await()
+        } catch (e: Exception) {
+            if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
+            Log.w(TAG, "setTypingStatusInRemote notice: ${e.message}")
+        }
+    }
+
+    open fun listenToChatTyping(
+        chatId: String,
+        partnerId: String,
+        onTyping: (Boolean) -> Unit
+    ): ListenerRegistration? {
+        if (chatId.isBlank() || partnerId.isBlank()) return null
+        if (isTestEnvironment() || !isFirestoreProvisioned) return null
+        val db = firestore ?: return null
+        return try {
+            db.collection(COLLECTION_CHATS)
+                .document(chatId)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        if (isDatabaseNotProvisioned(error)) markDatabaseNotProvisioned()
+                        return@addSnapshotListener
+                    }
+                    val ts = (snapshot?.get("typing_$partnerId") as? Number)?.toLong() ?: 0L
+                    val active = ts > 0L && (System.currentTimeMillis() - ts) < 10_000L
+                    onTyping(active)
+                }
+        } catch (e: Exception) {
+            if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
+            null
+        }
+    }
+
+    open suspend fun sendFriendRequestToRemote(
+        senderId: String,
+        receiverId: String,
+        senderDisplayName: String = "",
+        senderUsername: String = "",
+        senderAvatarUrl: String = "",
+        senderLinoId: String = ""
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        if (senderId.isBlank() || receiverId.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Invalid user IDs"))
+        }
+        if (isTestEnvironment() || !isFirestoreProvisioned) return@withContext Result.success(Unit)
+        val db = firestore ?: return@withContext Result.success(Unit)
+        val docId = "${senderId}_${receiverId}"
+        val now = System.currentTimeMillis()
+        try {
+            val reqMap = hashMapOf<String, Any>(
+                "id" to docId,
+                "requesterId" to senderId,
+                "targetId" to receiverId,
+                "status" to "PENDING",
+                "createdAt" to now,
+                "senderDisplayName" to senderDisplayName,
+                "senderUsername" to senderUsername,
+                "senderAvatarUrl" to senderAvatarUrl,
+                "senderLinoId" to senderLinoId
+            )
+            val batch = db.batch()
+            batch.set(db.collection(COLLECTION_FRIEND_REQUESTS).document(docId), reqMap, SetOptions.merge())
+            batch.set(
+                db.collection(COLLECTION_USERS).document(receiverId)
+                    .collection(COLLECTION_FRIEND_REQUESTS).document(senderId),
+                reqMap,
+                SetOptions.merge()
+            )
+            batch.commit().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
+            Log.w(TAG, "sendFriendRequestToRemote notice: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    open suspend fun acceptFriendRequestInRemote(
+        currentUserId: String,
+        requesterId: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        if (currentUserId.isBlank() || requesterId.isBlank()) return@withContext Result.success(Unit)
+        if (isTestEnvironment() || !isFirestoreProvisioned) return@withContext Result.success(Unit)
+        val db = firestore ?: return@withContext Result.success(Unit)
+        val docId = "${requesterId}_${currentUserId}"
+        val now = System.currentTimeMillis()
+        try {
+            val updates = mapOf("status" to "ACCEPTED", "updatedAt" to now)
+            val batch = db.batch()
+            batch.set(
+                db.collection(COLLECTION_FRIEND_REQUESTS).document(docId),
+                mapOf(
+                    "id" to docId,
+                    "requesterId" to requesterId,
+                    "targetId" to currentUserId,
+                    "status" to "ACCEPTED",
+                    "updatedAt" to now
+                ),
+                SetOptions.merge()
+            )
+            batch.set(
+                db.collection(COLLECTION_USERS).document(currentUserId)
+                    .collection(COLLECTION_FRIEND_REQUESTS).document(requesterId),
+                updates,
+                SetOptions.merge()
+            )
+            batch.commit().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
+            Log.w(TAG, "acceptFriendRequestInRemote notice: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    open suspend fun declineFriendRequestInRemote(
+        currentUserId: String,
+        requesterId: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        if (currentUserId.isBlank() || requesterId.isBlank()) return@withContext Result.success(Unit)
+        if (isTestEnvironment() || !isFirestoreProvisioned) return@withContext Result.success(Unit)
+        val db = firestore ?: return@withContext Result.success(Unit)
+        try {
+            val batch = db.batch()
+            batch.delete(db.collection(COLLECTION_FRIEND_REQUESTS).document("${requesterId}_${currentUserId}"))
+            batch.delete(db.collection(COLLECTION_FRIEND_REQUESTS).document("${currentUserId}_${requesterId}"))
+            batch.delete(
+                db.collection(COLLECTION_USERS).document(currentUserId)
+                    .collection(COLLECTION_FRIEND_REQUESTS).document(requesterId)
+            )
+            batch.delete(
+                db.collection(COLLECTION_USERS).document(requesterId)
+                    .collection(COLLECTION_FRIEND_REQUESTS).document(currentUserId)
+            )
+            batch.commit().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
+            Log.w(TAG, "declineFriendRequestInRemote notice: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    fun listenToIncomingFriendRequests(
+        myUid: String,
+        onUpdate: (List<FriendshipEntity>) -> Unit
+    ): ListenerRegistration? {
+        if (myUid.isBlank() || isTestEnvironment() || !isFirestoreProvisioned) return null
+        val db = firestore ?: return null
+        return try {
+            db.collection(COLLECTION_FRIEND_REQUESTS)
+                .whereEqualTo("targetId", myUid)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        if (isDatabaseNotProvisioned(error)) markDatabaseNotProvisioned()
+                        Log.w(TAG, "listenToIncomingFriendRequests error: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    val list = snapshot?.documents?.mapNotNull { doc ->
+                        val reqId = doc.getString("requesterId") ?: return@mapNotNull null
+                        val tgtId = doc.getString("targetId") ?: myUid
+                        val status = doc.getString("status") ?: "PENDING"
+                        FriendshipEntity(
+                            id = doc.getString("id") ?: doc.id,
+                            requesterId = reqId,
+                            targetId = tgtId,
+                            status = status,
+                            createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis()
+                        )
+                    } ?: emptyList()
                     onUpdate(list)
                 }
         } catch (e: Exception) {
             if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
-            Log.w(TAG, "listenToContacts failure: ${e.message}")
+            null
+        }
+    }
+
+    fun listenToOutgoingFriendRequests(
+        myUid: String,
+        onUpdate: (List<FriendshipEntity>) -> Unit
+    ): ListenerRegistration? {
+        if (myUid.isBlank() || isTestEnvironment() || !isFirestoreProvisioned) return null
+        val db = firestore ?: return null
+        return try {
+            db.collection(COLLECTION_FRIEND_REQUESTS)
+                .whereEqualTo("requesterId", myUid)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        if (isDatabaseNotProvisioned(error)) markDatabaseNotProvisioned()
+                        Log.w(TAG, "listenToOutgoingFriendRequests error: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    val list = snapshot?.documents?.mapNotNull { doc ->
+                        val reqId = doc.getString("requesterId") ?: myUid
+                        val tgtId = doc.getString("targetId") ?: return@mapNotNull null
+                        val status = doc.getString("status") ?: "PENDING"
+                        FriendshipEntity(
+                            id = doc.getString("id") ?: doc.id,
+                            requesterId = reqId,
+                            targetId = tgtId,
+                            status = status,
+                            createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis()
+                        )
+                    } ?: emptyList()
+                    onUpdate(list)
+                }
+        } catch (e: Exception) {
+            if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
+            null
+        }
+    }
+
+    open suspend fun saveNotificationToRemote(notification: NotificationEntity): Result<Unit> = withContext(Dispatchers.IO) {
+        if (notification.userId.isBlank() || isTestEnvironment() || !isFirestoreProvisioned) {
+            return@withContext Result.success(Unit)
+        }
+        val db = firestore ?: return@withContext Result.success(Unit)
+        try {
+            val map = hashMapOf<String, Any?>(
+                "id" to notification.id,
+                "userId" to notification.userId,
+                "senderId" to notification.senderId,
+                "title" to notification.title,
+                "body" to notification.body,
+                "type" to notification.type,
+                "timestamp" to notification.timestamp,
+                "isRead" to notification.isRead
+            )
+            db.collection(COLLECTION_USERS)
+                .document(notification.userId)
+                .collection("notifications")
+                .document(notification.id)
+                .set(map, SetOptions.merge())
+                .await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
+            Log.w(TAG, "saveNotificationToRemote notice: ${e.message}")
+            Result.success(Unit)
+        }
+    }
+
+    open suspend fun markNotificationReadInRemote(userId: String, notificationId: String) = withContext(Dispatchers.IO) {
+        if (userId.isBlank() || notificationId.isBlank() || isTestEnvironment() || !isFirestoreProvisioned) return@withContext
+        val db = firestore ?: return@withContext
+        try {
+            db.collection(COLLECTION_USERS)
+                .document(userId)
+                .collection("notifications")
+                .document(notificationId)
+                .set(mapOf("isRead" to true), SetOptions.merge())
+                .await()
+        } catch (e: Exception) {
+            if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
+        }
+    }
+
+    open suspend fun markAllNotificationsReadInRemote(userId: String) = withContext(Dispatchers.IO) {
+        if (userId.isBlank() || isTestEnvironment() || !isFirestoreProvisioned) return@withContext
+        val db = firestore ?: return@withContext
+        try {
+            val snap = withTimeoutOrNull(4000L) {
+                db.collection(COLLECTION_USERS)
+                    .document(userId)
+                    .collection("notifications")
+                    .whereEqualTo("isRead", false)
+                    .get()
+                    .await()
+            } ?: return@withContext
+            if (snap.isEmpty) return@withContext
+            val batch = db.batch()
+            snap.documents.forEach { doc ->
+                batch.update(doc.reference, "isRead", true)
+            }
+            batch.commit().await()
+        } catch (e: Exception) {
+            if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
+        }
+    }
+
+    fun listenToUserNotifications(
+        userId: String,
+        onUpdate: (notifications: List<NotificationEntity>, removedIds: List<String>) -> Unit
+    ): ListenerRegistration? {
+        if (userId.isBlank() || isTestEnvironment() || !isFirestoreProvisioned) return null
+        val db = firestore ?: return null
+        return try {
+            db.collection(COLLECTION_USERS)
+                .document(userId)
+                .collection("notifications")
+                .orderBy("timestamp", Query.Direction.DESCENDING)
+                .limit(100)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        if (isDatabaseNotProvisioned(error)) markDatabaseNotProvisioned()
+                        Log.w(TAG, "listenToUserNotifications error: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    val removedIds = snapshot?.documentChanges
+                        ?.filter { it.type == DocumentChange.Type.REMOVED }
+                        ?.map { it.document.id }
+                        .orEmpty()
+                    val list = snapshot?.documents?.mapNotNull { doc ->
+                        val title = doc.getString("title") ?: return@mapNotNull null
+                        NotificationEntity(
+                            id = doc.getString("id") ?: doc.id,
+                            userId = doc.getString("userId") ?: userId,
+                            senderId = doc.getString("senderId"),
+                            title = title,
+                            body = doc.getString("body") ?: "",
+                            type = doc.getString("type") ?: "SYSTEM",
+                            timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis(),
+                            isRead = doc.getBoolean("isRead") ?: false
+                        )
+                    } ?: emptyList()
+                    onUpdate(list, removedIds)
+                }
+        } catch (e: Exception) {
+            if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
             null
         }
     }
@@ -2311,7 +2717,8 @@ open class RemoteAccountService {
                         return@addSnapshotListener
                     }
                     snapshot?.documents?.forEach { doc ->
-                        val isRead = doc.getBoolean("read") == true || doc.getString("status") == "READ"
+                        val isRead = doc.getBoolean("read") == true ||
+                            doc.getString("status")?.equals("READ", ignoreCase = true) == true
                         val status = if (isRead) "READ" else (doc.getString("status") ?: return@forEach)
                         onReceipt(doc.id, status)
                     }
@@ -2654,7 +3061,38 @@ open class RemoteAccountService {
         }
     }
 
+    open suspend fun deleteMessageFromRemote(
+        chatId: String?,
+        messageId: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        if (messageId.isBlank() || isTestEnvironment() || !isFirestoreProvisioned) return@withContext Result.success(Unit)
+        val db = firestore ?: return@withContext Result.success(Unit)
+        try {
+            val batch = db.batch()
+            if (!chatId.isNullOrBlank()) {
+                batch.delete(db.collection(COLLECTION_CHATS).document(chatId).collection("messages").document(messageId))
+                batch.delete(db.collection(COLLECTION_CONVERSATIONS).document(chatId).collection("messages").document(messageId))
+            }
+            batch.delete(db.collection("messages").document(messageId))
+            batch.commit().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
+            Log.w(TAG, "deleteMessageFromRemote notice: ${e.message}")
+            Result.success(Unit)
+        }
+    }
+
     fun listenToChatMessages(chatId: String, onMessages: (List<MessageEntity>) -> Unit): ListenerRegistration? {
+        return listenToChatMessagesWithRemovals(chatId) { msgs, _ ->
+            onMessages(msgs)
+        }
+    }
+
+    fun listenToChatMessagesWithRemovals(
+        chatId: String,
+        onMessages: (List<MessageEntity>, List<String>) -> Unit
+    ): ListenerRegistration? {
         if (!isFirestoreProvisioned) return null
         val db = firestore ?: return null
         return try {
@@ -2668,6 +3106,12 @@ open class RemoteAccountService {
                         Log.w(TAG, "Error listening to messages for $chatId: ${error.message}")
                         return@addSnapshotListener
                     }
+                    val removedIds = snapshot?.documentChanges
+                        ?.filter { it.type == DocumentChange.Type.REMOVED }
+                        ?.map { change ->
+                            change.document.getString("messageId") ?: change.document.id
+                        }
+                        .orEmpty()
                     val msgs = snapshot?.documents?.mapNotNull { doc ->
                         val data = doc.data ?: return@mapNotNull null
                         val mid = data["messageId"] as? String ?: doc.id
@@ -2696,11 +3140,11 @@ open class RemoteAccountService {
                             isSystemMessage = isSys
                         )
                     } ?: emptyList()
-                    onMessages(msgs)
+                    onMessages(msgs, removedIds)
                 }
         } catch (e: Exception) {
             if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
-            Log.w(TAG, "listenToChatMessages failure: ${e.message}")
+            Log.w(TAG, "listenToChatMessagesWithRemovals failure: ${e.message}")
             null
         }
     }
@@ -2956,6 +3400,16 @@ open class RemoteAccountService {
                 .set(applicationDoc, SetOptions.merge())
                 .await()
 
+            // Also save to alternate/legacy snake_case collection to ensure 100% receipt across all clients
+            try {
+                db.collection("teacher_applications")
+                    .document(userId)
+                    .set(applicationDoc, SetOptions.merge())
+                    .await()
+            } catch (e: Exception) {
+                Log.w(TAG, "Legacy teacher_applications write note: ${e.message}")
+            }
+
             // 2. Also keep teacher_roles collection in sync
             val appDoc = hashMapOf<String, Any>(
                 "userId" to userId,
@@ -3023,16 +3477,87 @@ open class RemoteAccountService {
     }
 
     /**
-     * Fetches all applications from the 'teacherApplications' collection in Firestore.
+     * Fetches all applications from both 'teacherApplications' and 'teacher_applications'
+     * and joins with pending users from the 'users' collection to guarantee admin receipt.
      */
     open suspend fun fetchTeacherApplicationsFromFirestore(): List<TeacherApplicationItem> = withContext(Dispatchers.IO) {
         if (!isFirestoreProvisioned) return@withContext testTeacherApplications.values.sortedByDescending { it.submittedAt }
         val db = firestore ?: return@withContext testTeacherApplications.values.sortedByDescending { it.submittedAt }
         try {
-            Log.i(TAG, "🔥 [Admin Query: teacherApplications] Querying all teacher applications...")
-            val snap = db.collection(COLLECTION_TEACHER_APPLICATIONS).get().await()
-            val list = snap.documents.mapNotNull { parseTeacherApplicationFromDoc(it.id, it.data) }
-            Log.i(TAG, "✅ [Admin Query Result] Found ${list.size} applications in Firestore.")
+            Log.i(TAG, "🔥 [Admin Query: teacherApplications] Querying all teacher applications across collections...")
+            val map = LinkedHashMap<String, TeacherApplicationItem>()
+
+            // 1. Query canonical 'teacherApplications'
+            try {
+                val snap1 = db.collection(COLLECTION_TEACHER_APPLICATIONS).get().await()
+                snap1.documents.mapNotNull { parseTeacherApplicationFromDoc(it.id, it.data) }.forEach {
+                    map[it.userId] = it
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Query teacherApplications: ${e.message}")
+            }
+
+            // 2. Query alternate/legacy 'teacher_applications'
+            try {
+                val snap2 = db.collection("teacher_applications").get().await()
+                snap2.documents.mapNotNull { parseTeacherApplicationFromDoc(it.id, it.data) }.forEach {
+                    if (!map.containsKey(it.userId)) {
+                        map[it.userId] = it
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Query teacher_applications: ${e.message}")
+            }
+
+            // 3. Query 'users' collection for any users with teacherStatus == 'PENDING'
+            try {
+                val pendingUsersSnap = db.collection(COLLECTION_USERS)
+                    .whereEqualTo("teacherStatus", "PENDING")
+                    .get()
+                    .await()
+                pendingUsersSnap.documents.forEach { doc ->
+                    val uid = doc.id
+                    if (!map.containsKey(uid)) {
+                        val data = doc.data
+                        val applicantName = (data?.get("displayName") as? String)?.ifBlank { null }
+                            ?: (data?.get("username") as? String) ?: "Leno Member"
+                        val subj = (data?.get("pendingSubject") as? String)?.ifBlank { null }
+                            ?: (data?.get("teacherSubject") as? String) ?: "Mathematics"
+                        val appItem = TeacherApplicationItem(
+                            applicationId = uid,
+                            applicantUid = uid,
+                            lenoId = (data?.get("linoId") as? String) ?: "",
+                            fullName = applicantName,
+                            username = (data?.get("username") as? String) ?: "",
+                            subject = subj,
+                            qualification = "Verified Applicant",
+                            experience = "Under Review",
+                            status = "PENDING",
+                            submittedAt = (data?.get("updatedAt") as? Number)?.toLong() ?: System.currentTimeMillis(),
+                            userId = uid,
+                            applicantName = applicantName,
+                            applicantEmail = (data?.get("email") as? String) ?: "",
+                            applicantUsername = (data?.get("username") as? String) ?: "",
+                            applicantAvatarUrl = (data?.get("avatarUrl") as? String) ?: "",
+                            approvedSubject = subj,
+                            teachingLevel = "All Levels"
+                        )
+                        map[uid] = appItem
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Query pending users: ${e.message}")
+            }
+
+            // 4. Merge in-memory applications
+            testTeacherApplications.values.forEach {
+                if (!map.containsKey(it.userId)) {
+                    map[it.userId] = it
+                }
+            }
+
+            val list = map.values.toList()
+            Log.i(TAG, "✅ [Admin Query Result] Found ${list.size} applications.")
             list.forEach { testTeacherApplications[it.userId] = it }
             list.sortedByDescending { it.submittedAt }
         } catch (e: Exception) {
@@ -3454,6 +3979,44 @@ open class RemoteAccountService {
         }
     }
 
+    open fun listenToAllUsers(
+        limit: Int = 300,
+        onUpdate: (users: List<UserEntity>, removedIds: List<String>) -> Unit
+    ): ListenerRegistration? {
+        if (isTestEnvironment()) {
+            onUpdate(testUsers.values.distinctBy { it.userId }.toList(), emptyList())
+            return null
+        }
+        if (!isFirestoreProvisioned) return null
+        val db = getFirestoreSafe() ?: return null
+        return try {
+            db.collection(COLLECTION_USERS)
+                .limit(limit.toLong())
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        if (isDatabaseNotProvisioned(error)) markDatabaseNotProvisioned()
+                        Log.w(TAG, "listenToAllUsers error: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    val removedIds = snapshot?.documentChanges
+                        ?.filter { it.type == DocumentChange.Type.REMOVED }
+                        ?.map { it.document.id }
+                        ?.filter { it.isNotBlank() }
+                        .orEmpty()
+                    val list = snapshot?.documents
+                        ?.mapNotNull { docToUser(it.data, it.id) }
+                        ?.filter { it.userId.isNotBlank() && !it.userId.endsWith("_teacher") && it.userId != "test_dummy_user_to_purge" }
+                        ?.distinctBy { it.userId }
+                        .orEmpty()
+                    onUpdate(list, removedIds)
+                }
+        } catch (e: Exception) {
+            if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
+            Log.w(TAG, "listenToAllUsers init error: ${e.message}")
+            null
+        }
+    }
+
     private fun parseTeacherApplicationFromDoc(docId: String, data: Map<String, Any?>?): TeacherApplicationItem? {
         if (data == null) return null
         val applicantUid = data["applicantUid"] as? String ?: data["userId"] as? String ?: docId
@@ -3580,23 +4143,37 @@ open class RemoteAccountService {
     }
 
     open fun listenToRemoteClasses(onClasses: (List<ClassEntity>) -> Unit): ListenerRegistration? {
+        return listenToRemoteClassesWithRemovals { classes, _ ->
+            onClasses(classes)
+        }
+    }
+
+    open fun listenToRemoteClassesWithRemovals(
+        onUpdate: (classes: List<ClassEntity>, removedIds: List<String>) -> Unit
+    ): ListenerRegistration? {
         val db = firestore ?: run {
-            onClasses(testClasses.values.toList())
+            onUpdate(testClasses.values.toList(), emptyList())
             return null
         }
         return try {
             db.collection(COLLECTION_CLASSES)
                 .addSnapshotListener { snapshot, error ->
                     if (error != null) {
-                        Log.w(TAG, "listenToRemoteClasses error: ${error.message}")
+                        Log.w(TAG, "listenToRemoteClassesWithRemovals error: ${error.message}")
                         return@addSnapshotListener
                     }
+                    val removedIds = snapshot?.documentChanges
+                        ?.filter { it.type == DocumentChange.Type.REMOVED }
+                        ?.map { it.document.id }
+                        ?.filter { it.isNotBlank() }
+                        .orEmpty()
+                    removedIds.forEach { testClasses.remove(it) }
                     val list = snapshot?.documents?.mapNotNull { parseClassFromDoc(it.id, it.data) } ?: emptyList()
                     list.forEach { testClasses[it.classId] = it }
-                    onClasses(list)
+                    onUpdate(list, removedIds)
                 }
         } catch (e: Exception) {
-            Log.w(TAG, "listenToRemoteClasses init failed: ${e.message}")
+            Log.w(TAG, "listenToRemoteClassesWithRemovals init failed: ${e.message}")
             null
         }
     }
@@ -3612,17 +4189,24 @@ open class RemoteAccountService {
         val optImg = data["optionalImages"] as? String ?: ""
         val vid = data["videoUrl"] as? String ?: ""
         val hasVid = data["hasVideo"] as? Boolean ?: false
-        val isPaid = data["isPaid"] as? Boolean ?: true
-        val price = data["price"] as? String ?: "₦1,500"
+        val priceRaw = (data["price"] as? String)?.trim() ?: ""
+        val isPaid = (data["isPaid"] as? Boolean) ?: (!priceRaw.equals("Free", ignoreCase = true) && !priceRaw.equals("FREE", ignoreCase = true) && priceRaw.isNotBlank())
+        val price = if (!isPaid || priceRaw.equals("Free", ignoreCase = true) || priceRaw.equals("FREE", ignoreCase = true)) {
+            "Free"
+        } else if (priceRaw.isNotBlank()) {
+            priceRaw
+        } else {
+            "₦1,500"
+        }
         val schedule = data["schedule"] as? String ?: "Self-paced"
         val lessonType = data["lessonType"] as? String ?: "Text lesson"
         val instructorUserId = (data["teacherUid"] as? String) ?: (data["instructorUserId"] as? String) ?: ""
         val instructorName = data["instructorName"] as? String ?: "Instructor"
         val instructorUsername = data["instructorUsername"] as? String ?: ""
         val instructorLinoId = (data["teacherLenoId"] as? String) ?: (data["instructorLinoId"] as? String) ?: ""
-        val enrolledCount = (data["enrolledStudentsCount"] as? Number)?.toInt() ?: 0
+        val enrolledCount = ((data["enrolledStudentsCount"] as? Number)?.toInt() ?: 0).coerceAtLeast(0)
         val status = data["status"] as? String ?: "PUBLISHED"
-        val lessonCount = (data["lessonCount"] as? Number)?.toInt() ?: 1
+        val lessonCount = ((data["lessonCount"] as? Number)?.toInt() ?: 1).coerceAtLeast(0)
         val createdAt = (data["createdAt"] as? Number)?.toLong() ?: System.currentTimeMillis()
 
         return ClassEntity(
@@ -3705,16 +4289,21 @@ open class RemoteAccountService {
         val db = firestore ?: return@withContext Result.success(Unit)
         try {
             db.collection(COLLECTION_ENROLLMENTS).document(docKey).delete().await()
+            val classEnrollmentsRef = db.collection(COLLECTION_CLASSES)
+                .document(classId)
+                .collection(COLLECTION_ENROLLMENTS)
+            try {
+                classEnrollmentsRef.document(studentUserId).delete().await()
+            } catch (_: Exception) {}
+            try {
+                classEnrollmentsRef.document(docKey).delete().await()
+            } catch (_: Exception) {}
             try {
                 db.collection(COLLECTION_CLASSES)
                     .document(classId)
-                    .collection(COLLECTION_ENROLLMENTS)
-                    .document(docKey)
-                    .delete()
+                    .update("enrolledStudentsCount", FieldValue.increment(-1))
                     .await()
-            } catch (e: Exception) {
-                // Ignore subcollection deletion failures
-            }
+            } catch (_: Exception) {}
             Result.success(Unit)
         } catch (e: Exception) {
             Log.w(TAG, "deleteEnrollmentFromRemote notice: ${e.message}")
@@ -3777,8 +4366,17 @@ open class RemoteAccountService {
     }
 
     open fun listenToUserEnrollments(studentUserId: String, onEnrollments: (List<EnrollmentEntity>) -> Unit): ListenerRegistration? {
+        return listenToUserEnrollmentsWithRemovals(studentUserId) { list, _ ->
+            onEnrollments(list)
+        }
+    }
+
+    open fun listenToUserEnrollmentsWithRemovals(
+        studentUserId: String,
+        onUpdate: (enrollments: List<EnrollmentEntity>, removedIds: List<String>) -> Unit
+    ): ListenerRegistration? {
         val db = firestore ?: run {
-            onEnrollments(testEnrollments.values.filter { it.studentUserId == studentUserId })
+            onUpdate(testEnrollments.values.filter { it.studentUserId == studentUserId }, emptyList())
             return null
         }
         return try {
@@ -3786,9 +4384,14 @@ open class RemoteAccountService {
                 .whereEqualTo("studentUserId", studentUserId)
                 .addSnapshotListener { snapshot, error ->
                     if (error != null) {
-                        Log.w(TAG, "listenToUserEnrollments error: ${error.message}")
+                        Log.w(TAG, "listenToUserEnrollmentsWithRemovals error: ${error.message}")
                         return@addSnapshotListener
                     }
+                    val removedIds = snapshot?.documentChanges
+                        ?.filter { it.type == DocumentChange.Type.REMOVED }
+                        ?.map { change -> change.document.getString("enrollmentId") ?: change.document.id }
+                        ?.filter { it.isNotBlank() }
+                        .orEmpty()
                     val list = snapshot?.documents?.mapNotNull { doc ->
                         val classId = doc.getString("classId") ?: return@mapNotNull null
                         EnrollmentEntity(
@@ -3802,11 +4405,57 @@ open class RemoteAccountService {
                             progress = (doc.getLong("progress") ?: 0L).toInt()
                         )
                     } ?: emptyList()
+                    removedIds.forEach { testEnrollments.remove(it) }
                     list.forEach { testEnrollments[it.enrollmentId] = it }
-                    onEnrollments(list)
+                    onUpdate(list, removedIds)
                 }
         } catch (e: Exception) {
-            Log.w(TAG, "listenToUserEnrollments init error: ${e.message}")
+            Log.w(TAG, "listenToUserEnrollmentsWithRemovals init error: ${e.message}")
+            null
+        }
+    }
+
+    open fun listenToClassEnrollments(
+        classId: String,
+        onUpdate: (enrollments: List<EnrollmentEntity>, removedIds: List<String>) -> Unit
+    ): ListenerRegistration? {
+        if (classId.isBlank()) return null
+        val db = firestore ?: run {
+            onUpdate(testEnrollments.values.filter { it.classId == classId }, emptyList())
+            return null
+        }
+        return try {
+            db.collection(COLLECTION_ENROLLMENTS)
+                .whereEqualTo("classId", classId)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.w(TAG, "listenToClassEnrollments error: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    val removedIds = snapshot?.documentChanges
+                        ?.filter { it.type == DocumentChange.Type.REMOVED }
+                        ?.map { change -> change.document.getString("enrollmentId") ?: change.document.id }
+                        ?.filter { it.isNotBlank() }
+                        .orEmpty()
+                    val list = snapshot?.documents?.mapNotNull { doc ->
+                        val studentUid = doc.getString("studentUserId") ?: return@mapNotNull null
+                        EnrollmentEntity(
+                            enrollmentId = doc.getString("enrollmentId") ?: doc.id,
+                            classId = classId,
+                            studentUserId = studentUid,
+                            studentLinoId = doc.getString("studentLinoId") ?: "",
+                            teacherUserId = doc.getString("teacherUserId") ?: "",
+                            status = doc.getString("status") ?: "ACTIVE",
+                            enrolledAt = doc.getLong("enrolledAt") ?: System.currentTimeMillis(),
+                            progress = (doc.getLong("progress") ?: 0L).toInt()
+                        )
+                    } ?: emptyList()
+                    removedIds.forEach { testEnrollments.remove(it) }
+                    list.forEach { testEnrollments[it.enrollmentId] = it }
+                    onUpdate(list, removedIds)
+                }
+        } catch (e: Exception) {
+            Log.w(TAG, "listenToClassEnrollments init error: ${e.message}")
             null
         }
     }
@@ -3844,6 +4493,29 @@ open class RemoteAccountService {
         }
     }
 
+    open suspend fun deleteLessonFromRemote(classId: String, lessonId: String): Boolean = withContext(Dispatchers.IO) {
+        if (classId.isBlank() || lessonId.isBlank()) return@withContext false
+        val db = firestore ?: return@withContext true
+        try {
+            db.collection(COLLECTION_CLASSES)
+                .document(classId)
+                .collection("lessons")
+                .document(lessonId)
+                .delete()
+                .await()
+            try {
+                db.collection(COLLECTION_CLASSES)
+                    .document(classId)
+                    .update("lessonCount", FieldValue.increment(-1))
+                    .await()
+            } catch (_: Exception) {}
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "deleteLessonFromRemote notice: ${e.message}")
+            false
+        }
+    }
+
     open suspend fun fetchLessonsForClassFromRemote(classId: String): List<LessonEntity> = withContext(Dispatchers.IO) {
         val db = firestore ?: return@withContext emptyList()
         try {
@@ -3872,6 +4544,15 @@ open class RemoteAccountService {
     }
 
     open fun listenToClassLessons(classId: String, onLessons: (List<LessonEntity>) -> Unit): ListenerRegistration? {
+        return listenToClassLessonsWithRemovals(classId) { list, _ ->
+            onLessons(list)
+        }
+    }
+
+    open fun listenToClassLessonsWithRemovals(
+        classId: String,
+        onUpdate: (lessons: List<LessonEntity>, removedIds: List<String>) -> Unit
+    ): ListenerRegistration? {
         val db = firestore ?: return null
         return try {
             db.collection(COLLECTION_CLASSES)
@@ -3880,9 +4561,14 @@ open class RemoteAccountService {
                 .orderBy("orderIndex")
                 .addSnapshotListener { snapshot, error ->
                     if (error != null) {
-                        Log.w(TAG, "listenToClassLessons error: ${error.message}")
+                        Log.w(TAG, "listenToClassLessonsWithRemovals error: ${error.message}")
                         return@addSnapshotListener
                     }
+                    val removedIds = snapshot?.documentChanges
+                        ?.filter { it.type == DocumentChange.Type.REMOVED }
+                        ?.map { it.document.id }
+                        ?.filter { it.isNotBlank() }
+                        .orEmpty()
                     val list = snapshot?.documents?.mapNotNull { doc ->
                         val title = doc.getString("title") ?: return@mapNotNull null
                         LessonEntity(
@@ -3895,10 +4581,10 @@ open class RemoteAccountService {
                             createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis()
                         )
                     } ?: emptyList()
-                    onLessons(list)
+                    onUpdate(list, removedIds)
                 }
         } catch (e: Exception) {
-            Log.w(TAG, "listenToClassLessons init error: ${e.message}")
+            Log.w(TAG, "listenToClassLessonsWithRemovals init error: ${e.message}")
             null
         }
     }
@@ -3971,7 +4657,33 @@ open class RemoteAccountService {
         }
     }
 
+    open suspend fun deleteQuestionFromRemote(classId: String, questionId: String): Boolean = withContext(Dispatchers.IO) {
+        if (classId.isBlank() || questionId.isBlank()) return@withContext false
+        val db = firestore ?: return@withContext true
+        try {
+            db.collection(COLLECTION_CLASSES)
+                .document(classId)
+                .collection("questions")
+                .document(questionId)
+                .delete()
+                .await()
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "deleteQuestionFromRemote notice: ${e.message}")
+            false
+        }
+    }
+
     open fun listenToClassQuestions(classId: String, onQuestions: (List<ClassQuestionEntity>) -> Unit): ListenerRegistration? {
+        return listenToClassQuestionsWithRemovals(classId) { list, _ ->
+            onQuestions(list)
+        }
+    }
+
+    open fun listenToClassQuestionsWithRemovals(
+        classId: String,
+        onUpdate: (questions: List<ClassQuestionEntity>, removedIds: List<String>) -> Unit
+    ): ListenerRegistration? {
         val db = firestore ?: return null
         return try {
             db.collection(COLLECTION_CLASSES)
@@ -3980,9 +4692,14 @@ open class RemoteAccountService {
                 .orderBy("timestamp")
                 .addSnapshotListener { snapshot, error ->
                     if (error != null) {
-                        Log.w(TAG, "listenToClassQuestions error: ${error.message}")
+                        Log.w(TAG, "listenToClassQuestionsWithRemovals error: ${error.message}")
                         return@addSnapshotListener
                     }
+                    val removedIds = snapshot?.documentChanges
+                        ?.filter { it.type == DocumentChange.Type.REMOVED }
+                        ?.map { it.document.id }
+                        ?.filter { it.isNotBlank() }
+                        .orEmpty()
                     val list = snapshot?.documents?.mapNotNull { doc ->
                         val qText = doc.getString("questionText") ?: return@mapNotNull null
                         ClassQuestionEntity(
@@ -4003,10 +4720,10 @@ open class RemoteAccountService {
                             timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis()
                         )
                     } ?: emptyList()
-                    onQuestions(list)
+                    onUpdate(list, removedIds)
                 }
         } catch (e: Exception) {
-            Log.w(TAG, "listenToClassQuestions init error: ${e.message}")
+            Log.w(TAG, "listenToClassQuestionsWithRemovals init error: ${e.message}")
             null
         }
     }
@@ -4037,6 +4754,235 @@ open class RemoteAccountService {
         } catch (e: Exception) {
             Log.w(TAG, "answerQuestionInRemote notice: ${e.message}")
             Result.failure(e)
+        }
+    }
+
+    // ==========================================
+    // REAL-TIME LESSON PROGRESS & CERTIFICATES
+    // ==========================================
+
+    open suspend fun saveLessonProgressToRemote(
+        userId: String,
+        classId: String,
+        completedLessonIds: Set<String>,
+        quizScores: Map<String, String>,
+        lastOpenedLessonId: String?,
+        lastOpenedClassId: String?,
+        streakDays: Int,
+        lastStudyDate: String
+    ) = withContext(Dispatchers.IO) {
+        if (userId.isBlank()) return@withContext
+        if (isTestEnvironment() || !isFirestoreProvisioned) return@withContext
+        val db = firestore ?: return@withContext
+        try {
+            val now = System.currentTimeMillis()
+            if (classId.isNotBlank()) {
+                val classProgressMap = hashMapOf<String, Any?>(
+                    "userId" to userId,
+                    "classId" to classId,
+                    "completedLessonIds" to completedLessonIds.toList(),
+                    "quizScores" to quizScores,
+                    "lastOpenedLessonId" to (lastOpenedLessonId ?: ""),
+                    "updatedAt" to now
+                )
+                db.collection(COLLECTION_USERS)
+                    .document(userId)
+                    .collection(COLLECTION_LESSON_PROGRESS)
+                    .document(classId)
+                    .set(classProgressMap, SetOptions.merge())
+                    .await()
+            }
+
+            val userSummaryMap = hashMapOf<String, Any?>(
+                "streakDays" to streakDays,
+                "lastStudyDate" to lastStudyDate,
+                "updatedAt" to now
+            )
+            if (!lastOpenedClassId.isNullOrBlank()) {
+                userSummaryMap["lastOpenedClassId"] = lastOpenedClassId
+            }
+            db.collection(COLLECTION_USERS)
+                .document(userId)
+                .collection(COLLECTION_LESSON_PROGRESS)
+                .document("_summary")
+                .set(userSummaryMap, SetOptions.merge())
+                .await()
+            db.collection(COLLECTION_USERS)
+                .document(userId)
+                .set(userSummaryMap, SetOptions.merge())
+                .await()
+        } catch (e: Exception) {
+            if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
+            Log.w(TAG, "saveLessonProgressToRemote notice: ${e.message}")
+        }
+    }
+
+    open fun listenToUserLessonProgress(
+        userId: String,
+        onStudyProfile: (streakDays: Int, lastStudyDate: String?, lastOpenedClassId: String?) -> Unit = { _, _, _ -> },
+        onProgressUpdate: (
+            classId: String,
+            completedIds: Set<String>,
+            quizScores: Map<String, String>,
+            lastOpenedLessonId: String?
+        ) -> Unit
+    ): ListenerRegistration? {
+        if (userId.isBlank() || isTestEnvironment() || !isFirestoreProvisioned) return null
+        val db = firestore ?: return null
+        return try {
+            db.collection(COLLECTION_USERS)
+                .document(userId)
+                .collection(COLLECTION_LESSON_PROGRESS)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        if (isDatabaseNotProvisioned(error)) markDatabaseNotProvisioned()
+                        Log.w(TAG, "listenToUserLessonProgress error: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    snapshot?.documents?.forEach { doc ->
+                        if (doc.id == "_summary") {
+                            val streakDays = (doc.getLong("streakDays") ?: 0L).toInt()
+                            val lastStudyDate = doc.getString("lastStudyDate")?.takeIf { it.isNotBlank() }
+                            val lastOpenedClassId = doc.getString("lastOpenedClassId")?.takeIf { it.isNotBlank() }
+                            onStudyProfile(streakDays, lastStudyDate, lastOpenedClassId)
+                            return@forEach
+                        }
+                        val classId = doc.getString("classId")?.takeIf { it.isNotBlank() } ?: doc.id
+                        @Suppress("UNCHECKED_CAST")
+                        val completedRaw = doc.get("completedLessonIds") as? List<*>
+                        val completedIds = completedRaw?.mapNotNull { it as? String }?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
+                        @Suppress("UNCHECKED_CAST")
+                        val quizRaw = doc.get("quizScores") as? Map<*, *>
+                        val quizScores = quizRaw?.entries
+                            ?.mapNotNull { entry ->
+                                val k = entry.key as? String
+                                val v = entry.value as? String
+                                if (!k.isNullOrBlank() && !v.isNullOrBlank()) k to v else null
+                            }
+                            ?.toMap()
+                            ?: emptyMap()
+                        val lastOpenedLessonId = doc.getString("lastOpenedLessonId")?.takeIf { it.isNotBlank() }
+                        onProgressUpdate(classId, completedIds, quizScores, lastOpenedLessonId)
+                    }
+                }
+        } catch (e: Exception) {
+            if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
+            Log.w(TAG, "listenToUserLessonProgress init error: ${e.message}")
+            null
+        }
+    }
+
+    open suspend fun saveCertificateToRemote(
+        cert: LessonProgressManager.AwardedCertificate
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        if (cert.classId.isBlank() || cert.studentUserId.isBlank()) {
+            return@withContext Result.failure(Exception("Invalid certificate target."))
+        }
+        if (isTestEnvironment() || !isFirestoreProvisioned) return@withContext Result.success(Unit)
+        val db = firestore ?: return@withContext Result.success(Unit)
+        try {
+            val map = hashMapOf<String, Any>(
+                "classId" to cert.classId,
+                "studentUserId" to cert.studentUserId,
+                "studentName" to cert.studentName,
+                "teacherUserId" to cert.teacherUserId,
+                "teacherName" to cert.teacherName,
+                "awardTitle" to cert.awardTitle,
+                "teacherCommendation" to cert.teacherCommendation,
+                "issueDate" to cert.issueDate,
+                "certificateId" to cert.certificateId,
+                "updatedAt" to System.currentTimeMillis()
+            )
+            db.collection(COLLECTION_CLASSES)
+                .document(cert.classId)
+                .collection(COLLECTION_CERTIFICATES)
+                .document(cert.studentUserId)
+                .set(map, SetOptions.merge())
+                .await()
+
+            db.collection(COLLECTION_USERS)
+                .document(cert.studentUserId)
+                .collection(COLLECTION_CERTIFICATES)
+                .document(cert.classId)
+                .set(map, SetOptions.merge())
+                .await()
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
+            Log.w(TAG, "saveCertificateToRemote notice: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    private fun parseCertificateFromDoc(data: Map<String, Any?>?): LessonProgressManager.AwardedCertificate? {
+        if (data == null) return null
+        val classId = data["classId"] as? String ?: return null
+        val studentUserId = data["studentUserId"] as? String ?: return null
+        return LessonProgressManager.AwardedCertificate(
+            classId = classId,
+            studentUserId = studentUserId,
+            studentName = data["studentName"] as? String ?: "Leno Scholar",
+            teacherUserId = data["teacherUserId"] as? String ?: "",
+            teacherName = data["teacherName"] as? String ?: "Teacher",
+            awardTitle = data["awardTitle"] as? String ?: "Certificate of Academic Excellence",
+            teacherCommendation = data["teacherCommendation"] as? String
+                ?: "Awarded in recognition of dedicated effort and academic achievement.",
+            issueDate = data["issueDate"] as? String ?: "",
+            certificateId = data["certificateId"] as? String
+                ?: LessonProgressManager.formatCertificateId(classId, studentUserId)
+        )
+    }
+
+    open fun listenToUserCertificates(
+        userId: String,
+        onCertificates: (List<LessonProgressManager.AwardedCertificate>) -> Unit
+    ): ListenerRegistration? {
+        if (userId.isBlank() || isTestEnvironment() || !isFirestoreProvisioned) return null
+        val db = firestore ?: return null
+        return try {
+            db.collection(COLLECTION_USERS)
+                .document(userId)
+                .collection(COLLECTION_CERTIFICATES)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        if (isDatabaseNotProvisioned(error)) markDatabaseNotProvisioned()
+                        Log.w(TAG, "listenToUserCertificates error: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    val list = snapshot?.documents?.mapNotNull { parseCertificateFromDoc(it.data) } ?: emptyList()
+                    onCertificates(list)
+                }
+        } catch (e: Exception) {
+            if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
+            Log.w(TAG, "listenToUserCertificates init error: ${e.message}")
+            null
+        }
+    }
+
+    open fun listenToClassCertificates(
+        classId: String,
+        onCertificates: (List<LessonProgressManager.AwardedCertificate>) -> Unit
+    ): ListenerRegistration? {
+        if (classId.isBlank() || isTestEnvironment() || !isFirestoreProvisioned) return null
+        val db = firestore ?: return null
+        return try {
+            db.collection(COLLECTION_CLASSES)
+                .document(classId)
+                .collection(COLLECTION_CERTIFICATES)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        if (isDatabaseNotProvisioned(error)) markDatabaseNotProvisioned()
+                        Log.w(TAG, "listenToClassCertificates error: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    val list = snapshot?.documents?.mapNotNull { parseCertificateFromDoc(it.data) } ?: emptyList()
+                    onCertificates(list)
+                }
+        } catch (e: Exception) {
+            if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
+            Log.w(TAG, "listenToClassCertificates init error: ${e.message}")
+            null
         }
     }
 
@@ -4122,6 +5068,9 @@ open class RemoteAccountService {
         const val COLLECTION_TEACHER_APPLICATIONS = "teacherApplications"
         const val COLLECTION_CLASSES = "classes"
         const val COLLECTION_ENROLLMENTS = "enrollments"
+        private const val COLLECTION_FRIEND_REQUESTS = "friend_requests"
+        private const val COLLECTION_LESSON_PROGRESS = "lesson_progress"
+        private const val COLLECTION_CERTIFICATES = "certificates"
 
         val testUsernames = java.util.concurrent.ConcurrentHashMap<String, String>()
         val testLenoIds = java.util.concurrent.ConcurrentHashMap<String, String>()

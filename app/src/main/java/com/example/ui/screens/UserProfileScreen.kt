@@ -63,6 +63,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -119,6 +120,13 @@ fun UserProfileScreen(
         viewModel.fetchAndSyncUserProfile(userId)
         kotlinx.coroutines.delay(300)
         hasLoaded = true
+    }
+
+    DisposableEffect(userId) {
+        viewModel.startObservingUserProfile(userId)
+        onDispose {
+            viewModel.stopObservingUserProfile()
+        }
     }
 
     val isOfficialChannel = userId == LenoRepository.OFFICIAL_LENO_ID

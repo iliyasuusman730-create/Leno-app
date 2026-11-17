@@ -33,6 +33,27 @@ interface FriendshipDao {
     @Query("DELETE FROM friendships WHERE requesterId = :userId OR targetId = :userId")
     suspend fun clearFriendshipsForUser(userId: String)
 
+    @Query("DELETE FROM friendships WHERE status = 'ACCEPTED' AND requesterId = :userId AND targetId NOT IN (:activeFriendIds)")
+    suspend fun deleteAcceptedOutgoingNotIn(userId: String, activeFriendIds: List<String>)
+
+    @Query("DELETE FROM friendships WHERE status = 'ACCEPTED' AND targetId = :userId AND requesterId NOT IN (:activeFriendIds)")
+    suspend fun deleteAcceptedIncomingNotIn(userId: String, activeFriendIds: List<String>)
+
+    @Query("DELETE FROM friendships WHERE status = 'ACCEPTED' AND (requesterId = :userId OR targetId = :userId)")
+    suspend fun deleteAllAcceptedForUser(userId: String)
+
+    @Query("DELETE FROM friendships WHERE status = 'PENDING' AND targetId = :userId AND requesterId NOT IN (:requesterIds)")
+    suspend fun deletePendingIncomingNotIn(userId: String, requesterIds: List<String>)
+
+    @Query("DELETE FROM friendships WHERE status = 'PENDING' AND targetId = :userId")
+    suspend fun deleteAllPendingIncoming(userId: String)
+
+    @Query("DELETE FROM friendships WHERE status = 'PENDING' AND requesterId = :userId AND targetId NOT IN (:targetIds)")
+    suspend fun deletePendingOutgoingNotIn(userId: String, targetIds: List<String>)
+
+    @Query("DELETE FROM friendships WHERE status = 'PENDING' AND requesterId = :userId")
+    suspend fun deleteAllPendingOutgoing(userId: String)
+
     @Query("DELETE FROM friendships")
     suspend fun deleteAllFriendships()
 }

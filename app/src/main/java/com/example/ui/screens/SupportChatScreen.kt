@@ -3,7 +3,7 @@ package com.example.ui.screens
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.isSystemInDarkTheme
+import com.example.ui.theme.LocalLenoDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -110,8 +110,10 @@ fun SupportChatScreen(
         "user"
     }
     val currentUserId = currentUser?.userId ?: if (isOwnerMode) "leno_owner" else "guest"
+    val isDark = LocalLenoDarkTheme.current
 
     Scaffold(
+        containerColor = if (isDark) Color(0xFF111A16) else Color(0xFFF4F7F5),
         topBar = {
             TopAppBar(
                 title = {
@@ -171,14 +173,14 @@ fun SupportChatScreen(
                     // Low Data Mode Badge
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = LenoPrimaryVeryLight,
+                        color = MaterialTheme.colorScheme.primaryContainer,
                         modifier = Modifier.padding(end = 12.dp)
                     ) {
                         Text(
                             text = "Low Data",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            color = LenoPrimaryDark,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                         )
                     }
@@ -188,7 +190,6 @@ fun SupportChatScreen(
                 )
             )
         },
-        containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             // Message input field
             Surface(
@@ -386,43 +387,47 @@ private fun SupportMessageBubble(
     val bubbleShape = remember(isSelf) {
         if (isSelf) {
             RoundedCornerShape(
-                topStart = 22.dp,
-                topEnd = 22.dp,
-                bottomStart = 22.dp,
-                bottomEnd = 4.dp
+                topStart = 14.dp,
+                topEnd = 14.dp,
+                bottomStart = 14.dp,
+                bottomEnd = 3.dp
             )
         } else {
             RoundedCornerShape(
-                topStart = 22.dp,
-                topEnd = 22.dp,
-                bottomStart = 4.dp,
-                bottomEnd = 22.dp
+                topStart = 14.dp,
+                topEnd = 14.dp,
+                bottomStart = 3.dp,
+                bottomEnd = 14.dp
             )
         }
     }
 
-    val isDark = isSystemInDarkTheme()
-    val sentBackground = if (isDark) Color(0xFF065F46) else LenoEmeraldSent
-    val receiveBackground = if (isDark) Color(0xFF1E2E28) else LenoSoftMintReceived
-    val receiveBorder = if (isDark) Color(0xFF2D4A3E) else LenoSoftMintReceivedBorder
-    val bubbleBorder = if (isSelf) null else BorderStroke(0.5.dp, receiveBorder)
+    val isDarkTheme = LocalLenoDarkTheme.current
+    val sentBackground = if (isDarkTheme) Color(0xFF087F5B) else Color(0xFF087F5B)
+    val receiveBackground = if (isDarkTheme) Color(0xFF1B2822) else Color(0xFFFFFFFF)
+    val receiveBorder = if (isDarkTheme) Color(0xFF2C3E35) else Color(0xFFD0DCD5)
+    val bubbleBorder = if (isSelf) BorderStroke(0.5.dp, Color.White.copy(alpha = 0.20f)) else BorderStroke(1.dp, receiveBorder)
 
     // Delivery check marks: single tick sent, double tick delivered, vibrant cyan double tick read
     val isRead = message.read
-    val tickMuted = Color.White.copy(alpha = 0.85f)
+    val tickMuted = Color.White.copy(alpha = 0.80f)
     val tickRead = LenoTickCyan
     val statusIcon = if (isRead) Icons.Default.DoneAll else Icons.Default.Done
     val statusTint = if (isRead) tickRead else tickMuted
 
     val textColor = when {
-        isSelf -> LenoEmeraldSentText
-        isDark -> Color(0xFFD1FAE5)
-        else -> LenoDarkGreenText
+        isSelf -> Color.White
+        isDarkTheme -> Color(0xFFECFDF5)
+        else -> Color(0xFF14241F)
     }
     val timeColor = if (isSelf) {
-        LenoEmeraldSentTime
+        Color.White.copy(alpha = 0.80f)
     } else {
-        if (isDark) Color(0xFFA7F3D0) else LenoDarkGreenTime
+        if (isDarkTheme) Color(0xFFA2B5AB) else Color(0xFF5D7269)
+    }
+
+    val isShortSingleLine = remember(message.text) {
+        message.text.length <= 26 && !message.text.contains('\n')
     }
 
     Box(
@@ -431,7 +436,7 @@ private fun SupportMessageBubble(
     ) {
         Column(
             horizontalAlignment = if (isSelf) Alignment.End else Alignment.Start,
-            modifier = Modifier.widthIn(max = 300.dp)
+            modifier = Modifier.widthIn(max = 290.dp)
         ) {
             // Label above bubble
             if (!isSelf && message.isFromOwner) {
@@ -443,7 +448,7 @@ private fun SupportMessageBubble(
                         text = "Leno Support",
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp,
-                        color = LenoPrimaryDark
+                        color = if (isDarkTheme) MaterialTheme.colorScheme.secondary else LenoPrimaryDark
                     )
                     Spacer(modifier = Modifier.width(3.dp))
                     Icon(
@@ -467,13 +472,48 @@ private fun SupportMessageBubble(
                 shape = bubbleShape,
                 color = if (isSelf) sentBackground else receiveBackground,
                 border = bubbleBorder,
-                shadowElevation = 0.5.dp,
+                shadowElevation = 1.5.dp,
                 modifier = Modifier.testTag("support_message_bubble")
             ) {
                 Box(
                     modifier = Modifier.background(if (isSelf) sentBackground else receiveBackground)
                 ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
+                    if (isShortSingleLine) {
+                        Row(
+                            verticalAlignment = Alignment.Bottom,
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.5.dp)
+                        ) {
+                            Text(
+                                text = message.text,
+                                color = textColor,
+                                fontSize = 14.5.sp,
+                                lineHeight = 18.5.sp
+                            )
+                            Spacer(modifier = Modifier.width(7.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(bottom = 0.5.dp)
+                            ) {
+                                Text(
+                                    text = formattedTime,
+                                    fontSize = 9.5.sp,
+                                    color = timeColor
+                                )
+                                if (isSelf) {
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Icon(
+                                        imageVector = statusIcon,
+                                        contentDescription = "Status",
+                                        tint = statusTint,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier.padding(start = 9.dp, end = 9.dp, top = 5.5.dp, bottom = 4.dp)
+                        ) {
                         Text(
                             text = message.text,
                             color = textColor,
@@ -502,6 +542,7 @@ private fun SupportMessageBubble(
                                     modifier = Modifier.size(14.dp)
                                 )
                             }
+                        }
                         }
                     }
                 }

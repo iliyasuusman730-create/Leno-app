@@ -43,6 +43,18 @@ interface EnrollmentDao {
     @Query("DELETE FROM enrollments WHERE studentUserId = :studentUserId AND classId = :classId")
     suspend fun deleteEnrollment(studentUserId: String, classId: String)
 
+    @Query("DELETE FROM enrollments WHERE studentUserId = :studentUserId AND classId NOT IN (:classIds)")
+    suspend fun deleteEnrollmentsForStudentNotIn(studentUserId: String, classIds: List<String>)
+
+    @Query("DELETE FROM enrollments WHERE studentUserId = :studentUserId")
+    suspend fun deleteAllEnrollmentsForStudent(studentUserId: String)
+
+    @Query("DELETE FROM enrollments WHERE classId = :classId AND studentUserId NOT IN (:studentIds)")
+    suspend fun deleteEnrollmentsForClassNotIn(classId: String, studentIds: List<String>)
+
+    @Query("DELETE FROM enrollments WHERE classId = :classId")
+    suspend fun deleteAllEnrollmentsForClass(classId: String)
+
     @Query("SELECT c.* FROM classes c INNER JOIN enrollments e ON c.classId = e.classId WHERE e.studentUserId = :studentUserId ORDER BY e.enrolledAt DESC")
     fun getEnrolledClasses(studentUserId: String): Flow<List<ClassEntity>>
 }

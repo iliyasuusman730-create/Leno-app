@@ -8,7 +8,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.isSystemInDarkTheme
+import com.example.ui.theme.LocalLenoDarkTheme
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -201,8 +201,11 @@ fun ChatScreen(
         }
     }
 
+    val isDark = LocalLenoDarkTheme.current
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
+        containerColor = if (isDark) Color(0xFF111A16) else Color(0xFFF4F7F5),
         contentWindowInsets = WindowInsets.statusBars,
         topBar = {
             TopAppBar(
@@ -540,37 +543,37 @@ private fun ChatMessageBubble(
 
     var showActionsRow by remember { mutableStateOf(false) }
 
-    // Leno Tailored Signature Shapes:
+    // Distinct modern sleek message bubbles that differ in color/alignment based on sent vs received:
     val bubbleShape = remember(isFromMe) {
         if (isFromMe) {
             RoundedCornerShape(
-                topStart = 20.dp,
-                topEnd = 20.dp,
-                bottomStart = 20.dp,
-                bottomEnd = 5.dp
+                topStart = 14.dp,
+                topEnd = 14.dp,
+                bottomStart = 14.dp,
+                bottomEnd = 3.dp
             )
         } else {
             RoundedCornerShape(
-                topStart = 20.dp,
-                topEnd = 20.dp,
-                bottomStart = 5.dp,
-                bottomEnd = 20.dp
+                topStart = 14.dp,
+                topEnd = 14.dp,
+                bottomStart = 3.dp,
+                bottomEnd = 14.dp
             )
         }
     }
 
     val context = LocalContext.current
-    val isDark = isSystemInDarkTheme()
+    val isDark = LocalLenoDarkTheme.current
 
     val sentBrush = if (isDark) {
         Brush.linearGradient(
-            colors = listOf(Color(0xFF0D7B55), Color(0xFF06563B)),
+            colors = listOf(Color(0xFF087F5B), Color(0xFF06563B)),
             start = Offset(0f, 0f),
             end = Offset(400f, 400f)
         )
     } else {
         Brush.linearGradient(
-            colors = listOf(Color(0xFF10B981), Color(0xFF059669), Color(0xFF047857)),
+            colors = listOf(Color(0xFF087F5B), Color(0xFF0B9E71)),
             start = Offset(0f, 0f),
             end = Offset(400f, 400f)
         )
@@ -578,29 +581,29 @@ private fun ChatMessageBubble(
 
     val receiveBrush = if (isDark) {
         Brush.linearGradient(
-            colors = listOf(Color(0xFF1E2D26), Color(0xFF16231E)),
+            colors = listOf(Color(0xFF1B2822), Color(0xFF16231E)),
             start = Offset(0f, 0f),
             end = Offset(400f, 400f)
         )
     } else {
         Brush.linearGradient(
-            colors = listOf(Color(0xFFF7FCF9), Color(0xFFEDF8F2)),
+            colors = listOf(Color(0xFFFFFFFF), Color(0xFFFFFFFF)),
             start = Offset(0f, 0f),
             end = Offset(400f, 400f)
         )
     }
 
-    val receiveBorder = if (isDark) Color(0xFF2C3E35) else Color(0xFFD2EFE1)
+    val receiveBorder = if (isDark) Color(0xFF2C3E35) else Color(0xFFD0DCD5)
 
     val textColor = when {
-        isFromMe -> LenoEmeraldSentText
+        isFromMe -> Color.White
         isDark -> Color(0xFFECFDF5)
-        else -> LenoDarkGreenText
+        else -> Color(0xFF14241F)
     }
     val timeColor = if (isFromMe) {
-        Color.White.copy(alpha = 0.92f)
+        Color.White.copy(alpha = 0.80f)
     } else {
-        if (isDark) Color(0xFFA7F3D0) else LenoDarkGreenTime
+        if (isDark) Color(0xFFA2B5AB) else Color(0xFF5D7269)
     }
 
     // Delivery check marks: single tick sent, double tick delivered, vibrant cyan double tick read
@@ -616,7 +619,13 @@ private fun ChatMessageBubble(
     }
 
     val screenWidth = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
-    val bubbleMaxWidth = screenWidth * 0.78f
+    val bubbleMaxWidth = (screenWidth * 0.74f).coerceAtMost(310.dp)
+
+    val isShortSingleLine = remember(message.text, message.imageUrl) {
+        message.imageUrl.isNullOrBlank() &&
+                message.text.length <= 26 &&
+                !message.text.contains('\n')
+    }
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -635,7 +644,7 @@ private fun ChatMessageBubble(
             shape = bubbleShape,
             color = Color.Transparent,
             border = if (isFromMe) BorderStroke(0.5.dp, Color.White.copy(alpha = 0.22f)) else BorderStroke(1.dp, receiveBorder),
-            shadowElevation = if (isFromMe) 2.dp else 1.dp,
+            shadowElevation = 1.5.dp,
             modifier = Modifier
                 .widthIn(max = bubbleMaxWidth)
                 .testTag("chat_message_item_${message.id}")
@@ -647,9 +656,53 @@ private fun ChatMessageBubble(
                         onClick = {},
                         onLongClick = { showActionsRow = !showActionsRow }
                     )
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
             ) {
-                Column {
+                if (isShortSingleLine) {
+                    Row(
+                        verticalAlignment = Alignment.Bottom,
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.5.dp)
+                    ) {
+                        Text(
+                            text = message.text,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontSize = 14.5.sp,
+                                lineHeight = 18.5.sp
+                            ),
+                            color = textColor
+                        )
+                        Spacer(modifier = Modifier.width(7.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(bottom = 0.5.dp)
+                        ) {
+                            Text(
+                                text = formattedTime,
+                                fontSize = 9.5.sp,
+                                color = timeColor,
+                                fontWeight = FontWeight.Normal
+                            )
+                            if (isFromMe) {
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Icon(
+                                    imageVector = statusIcon,
+                                    contentDescription = statusDesc,
+                                    tint = statusTint,
+                                    modifier = Modifier
+                                        .size(12.dp)
+                                        .testTag("read_receipt_${message.id}")
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier.padding(
+                            start = 9.dp,
+                            end = 9.dp,
+                            top = if (!message.imageUrl.isNullOrBlank()) 5.dp else 5.5.dp,
+                            bottom = 4.dp
+                        )
+                    ) {
                     if (!message.imageUrl.isNullOrBlank()) {
                         Box(
                             modifier = Modifier
@@ -727,6 +780,7 @@ private fun ChatMessageBubble(
                                     )
                                 }
                             }
+                        }
                         }
                     }
                 }

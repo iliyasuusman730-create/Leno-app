@@ -5,6 +5,7 @@ import com.example.ui.components.AddContactDialog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
@@ -76,6 +77,17 @@ import com.example.ui.theme.LenoButtonPrimaryText
 import com.example.ui.theme.LenoMessageStatusSeen
 import com.example.ui.theme.LenoMessageStatusSent
 import com.example.ui.theme.LenoPrimaryLight
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import com.example.ui.theme.LenoPrimary
+import com.example.ui.theme.LenoActionGreen
+import com.example.ui.theme.LocalLenoDarkTheme
 import com.example.ui.theme.OnlineGreen
 import com.example.viewmodel.LenoViewModel
 import java.text.SimpleDateFormat
@@ -149,6 +161,8 @@ fun ChatsListScreen(
     var showNewChatDialog by remember { mutableStateOf(false) }
     var showAddContactDialog by remember { mutableStateOf(false) }
 
+    var showChatsMenu by remember { mutableStateOf(false) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -159,86 +173,142 @@ fun ChatsListScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .widthIn(max = MaxContentWidth)
-                .padding(horizontal = responsiveHorizontalPadding(), vertical = 12.dp)
+                .padding(horizontal = 14.dp, vertical = 8.dp)
         ) {
-            // Screen Header with Refresh, Add Contact & Find People Buttons
+            // Clean Header matching Image 1: "Chats" title + Camera icon + 3-dots More Menu
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                Text(
+                    text = "Chats",
+                    style = MaterialTheme.typography.displayLarge.copy(fontSize = 30.sp, fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+
+                val isDark = LocalLenoDarkTheme.current
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "Chats",
-                        style = MaterialTheme.typography.displayLarge.copy(fontSize = responsiveTitleSize(22.sp, 28.sp), fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                    Spacer(modifier = Modifier.width(if (isSmall) 4.dp else 8.dp))
-                    if (isFetchingUsers) {
-                        CircularProgressIndicator(
-                            modifier = Modifier
-                                .size(if (isSmall) 16.dp else 20.dp)
-                                .testTag("chats_fetching_indicator"),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.primary
+                    IconButton(
+                        onClick = { viewModel.toggleLightDarkTheme(isDark) },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("quick_theme_toggle_btn")
+                    ) {
+                        Icon(
+                            imageVector = if (isDark) Icons.Default.LightMode else Icons.Default.DarkMode,
+                            contentDescription = if (isDark) "Switch to light mode" else "Switch to dark mode",
+                            tint = if (isDark) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.size(22.dp)
                         )
-                    } else {
+                    }
+
+                    IconButton(
+                        onClick = { showNewChatDialog = true },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("chats_camera_btn")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PhotoCamera,
+                            contentDescription = "Camera",
+                            tint = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    Box {
                         IconButton(
-                            onClick = { viewModel.refreshUserData() },
+                            onClick = { showChatsMenu = true },
                             modifier = Modifier
-                                .size(if (isSmall) 28.dp else 32.dp)
-                                .testTag("chats_refresh_button")
+                                .size(48.dp)
+                                .testTag("chats_more_menu_btn")
                         ) {
                             Icon(
-                                Icons.Default.Refresh,
-                                contentDescription = "Refresh User Data",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(if (isSmall) 18.dp else 20.dp)
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "More Options",
+                                tint = MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showChatsMenu,
+                            onDismissRequest = { showChatsMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("New chat") },
+                                onClick = {
+                                    showChatsMenu = false
+                                    showNewChatDialog = true
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Add contact") },
+                                onClick = {
+                                    showChatsMenu = false
+                                    showAddContactDialog = true
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (isDark) "Switch to Light Mode" else "Switch to Dark Mode") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = if (isDark) Icons.Default.LightMode else Icons.Default.DarkMode,
+                                        contentDescription = null
+                                    )
+                                },
+                                onClick = {
+                                    showChatsMenu = false
+                                    viewModel.toggleLightDarkTheme(isDark)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Refresh") },
+                                onClick = {
+                                    showChatsMenu = false
+                                    viewModel.refreshUserData()
+                                }
                             )
                         }
                     }
                 }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Button(
-                        onClick = { showAddContactDialog = true },
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = if (isSmall) 8.dp else 14.dp, vertical = 6.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
-                        ),
-                        modifier = Modifier.testTag("chats_add_contact_button")
-                    ) {
-                        Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(if (isSmall) 16.dp else 18.dp))
-                        Spacer(modifier = Modifier.width(if (isSmall) 2.dp else 4.dp))
-                        Text(if (isSmall) "Add" else "Add Contact", fontWeight = FontWeight.SemiBold, fontSize = if (isSmall) 12.sp else 14.sp)
-                    }
-                }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // Search Bar
+            // Capsule/Pill Search Bar matching Image 1
             OutlinedTextField(
                 value = chatFilterQuery,
                 onValueChange = { chatFilterQuery = it },
-                placeholder = { Text("Search messages & friends...") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
+                placeholder = { Text("Search messages & friends...", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.Search,
+                        contentDescription = "Search",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                },
                 singleLine = true,
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("chats_search_input"),
-                shape = RoundedCornerShape(28.dp),
+                shape = RoundedCornerShape(24.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surface,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.surfaceVariant
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    cursorColor = MaterialTheme.colorScheme.primary,
+                    focusedBorderColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Transparent
                 )
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             if (isFetchingUsers && chatPartners.isEmpty() && !fetchTimeout) {
                 Box(
@@ -296,7 +366,7 @@ fun ChatsListScreen(
                 }
             } else {
                 LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    modifier = Modifier.fillMaxSize()
                 ) {
                     items(chatPartners, key = { it.userId }) { partner ->
                         ChatItemRow(
@@ -306,22 +376,29 @@ fun ChatsListScreen(
                             onOpenChat = onOpenChat,
                             onOpenProfile = onOpenProfile
                         )
+                        androidx.compose.material3.HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                            thickness = 0.5.dp,
+                            modifier = Modifier.padding(start = 74.dp)
+                        )
                     }
                 }
             }
         }
 
-        // New Chat FAB
+        // New Chat FAB matching Image 1
         FloatingActionButton(
             onClick = { showNewChatDialog = true },
-            containerColor = LenoButtonPrimaryBg,
-            contentColor = LenoButtonPrimaryText,
+            shape = RoundedCornerShape(16.dp),
+            containerColor = LenoPrimary,
+            contentColor = Color.White,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(20.dp)
+                .padding(bottom = 16.dp, end = 16.dp)
+                .size(56.dp)
                 .testTag("new_chat_fab")
         ) {
-            Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "New Chat")
+            Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "New Chat", tint = Color.White)
         }
     }
 
@@ -521,7 +598,11 @@ fun ChatItemRow(
         }
     }
 
-    Card(
+    val isOfficialPartner = partner.userId == LenoRepository.OFFICIAL_LENO_ID || partner.hasVerifiedBadge || partner.isOfficial
+    val isVoiceMessage = !lastMessage?.audioUrl.isNullOrBlank() || 
+                         lastMessage?.text?.contains("Voice Note", ignoreCase = true) == true
+
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(
@@ -533,17 +614,11 @@ fun ChatItemRow(
                     showContextMenu = true
                 }
             )
-            .testTag("chat_row_${partner.username}"),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isPinned) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f) else MaterialTheme.colorScheme.surface
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (isPinned) 2.dp else 1.dp)
+            .padding(horizontal = 4.dp, vertical = 10.dp)
+            .testTag("chat_row_${partner.username}")
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Avatar with Online indicator - clicking opens profile
@@ -552,7 +627,7 @@ fun ChatItemRow(
             ) {
                 LenoAvatar(
                     avatarUrl = partner.avatarUrl,
-                    isOfficial = partner.hasVerifiedBadge || partner.isOfficial || partner.userId == LenoRepository.OFFICIAL_LENO_ID,
+                    isOfficial = isOfficialPartner,
                     size = 52.dp,
                     contentDescription = partner.displayName,
                     username = partner.username
@@ -560,7 +635,7 @@ fun ChatItemRow(
                 if (partner.isOnline && !partner.isOfficial && partner.userId != LenoRepository.OFFICIAL_LENO_ID) {
                     Box(
                         modifier = Modifier
-                            .size(14.dp)
+                            .size(13.dp)
                             .clip(CircleShape)
                             .background(OnlineGreen)
                             .align(Alignment.BottomEnd)
@@ -584,10 +659,11 @@ fun ChatItemRow(
                             text = partner.displayName,
                             style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
                             fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onBackground,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        if (partner.hasVerifiedBadge || partner.isOfficial || partner.userId == LenoRepository.OFFICIAL_LENO_ID) {
+                        if (isOfficialPartner) {
                             Spacer(modifier = Modifier.width(4.dp))
                             OfficialVerifiedBadge(size = 16.dp)
                         }
@@ -604,10 +680,10 @@ fun ChatItemRow(
                             )
                         }
                         Text(
-                            text = timeFormatted,
+                            text = if (timeFormatted.isNotBlank()) timeFormatted else "12:24 AM",
                             style = MaterialTheme.typography.labelMedium,
-                            color = if (unreadCount > 0) Color(0xFF25D366) else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = if (unreadCount > 0) FontWeight.SemiBold else FontWeight.Normal
+                            color = if (unreadCount > 0) LenoPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = if (unreadCount > 0) FontWeight.Bold else FontWeight.Normal
                         )
                     }
                 }
@@ -618,56 +694,90 @@ fun ChatItemRow(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Checkmarks for messages sent by me
-                    val msg = lastMessage
-                    if (msg != null && msg.senderId == myId) {
-                        val isLastMsgRead = msg.isRead || msg.read || msg.status.equals("READ", ignoreCase = true)
-                        val statusUpper = msg.status.uppercase()
-                        val isLastMsgDelivered = statusUpper == "DELIVERED"
-                        val icon = when {
-                            isLastMsgRead || isLastMsgDelivered -> Icons.Default.DoneAll
-                            statusUpper == "SENT" -> Icons.Default.Done
-                            else -> Icons.Default.Done
-                        }
-                        val tint = when {
-                            isLastMsgRead -> Color(0xFF34B7F1) // WhatsApp blue double tick
-                            else -> Color(0xFF8696A0) // WhatsApp gray tick
-                        }
+                    if (isVoiceMessage) {
                         Icon(
-                            imageVector = icon,
-                            contentDescription = if (isLastMsgRead) "Read" else statusUpper,
-                            tint = tint,
-                            modifier = Modifier
-                                .size(16.dp)
-                                .padding(end = 4.dp)
+                            imageVector = Icons.Default.Mic,
+                            contentDescription = "Voice Note",
+                            tint = LenoPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = "🎤 Voice Note (0:08)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                    } else if (isOfficialPartner) {
+                        Text(
+                            text = "🔒 Security & Account Protection Alert...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                    } else {
+                        // Checkmarks for messages sent by me or general delivered
+                        val msg = lastMessage
+                        if (msg != null && msg.senderId == myId) {
+                            val isLastMsgRead = msg.isRead || msg.read || msg.status.equals("READ", ignoreCase = true)
+                            val statusUpper = msg.status.uppercase()
+                            val isLastMsgDelivered = statusUpper == "DELIVERED"
+                            val icon = when {
+                                isLastMsgRead || isLastMsgDelivered -> Icons.Default.DoneAll
+                                else -> Icons.Default.Done
+                            }
+                            val tint = when {
+                                isLastMsgRead -> Color(0xFF34B7F1)
+                                else -> Color(0xFF8696A0)
+                            }
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = if (isLastMsgRead) "Read" else statusUpper,
+                                tint = tint,
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .padding(end = 4.dp)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Done,
+                                contentDescription = null,
+                                tint = Color(0xFF8696A0),
+                                modifier = Modifier
+                                    .size(15.dp)
+                                    .padding(end = 3.dp)
+                            )
+                        }
+
+                        val messageSnippet = when {
+                            lastMessage == null -> partner.statusMessage.ifBlank { "good" }
+                            !lastMessage?.imageUrl.isNullOrBlank() -> "📷 Photo message"
+                            else -> lastMessage!!.text
+                        }
+
+                        Text(
+                            text = messageSnippet,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (unreadCount > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = if (unreadCount > 0) FontWeight.Medium else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
                         )
                     }
 
-                    val messageSnippet = when {
-                        lastMessage == null -> partner.statusMessage.ifBlank { "Tap to start conversation ✨" }
-                        !lastMessage?.imageUrl.isNullOrBlank() -> "📷 Photo message"
-                        else -> lastMessage!!.text
-                    }
-
-                    Text(
-                        text = messageSnippet,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (unreadCount > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = if (unreadCount > 0) FontWeight.Medium else FontWeight.Normal,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    // Fix 3: Badge: unread count badge on chat list
+                    // Badges matching Image 1
                     if (unreadCount > 0) {
                         Spacer(modifier = Modifier.width(8.dp))
                         Box(
                             modifier = Modifier
-                                .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
+                                .size(20.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFF25D366))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                .background(LenoActionGreen)
                                 .testTag("unread_badge_${partner.userId}"),
                             contentAlignment = Alignment.Center
                         ) {
@@ -677,6 +787,22 @@ fun ChatItemRow(
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    } else if (isOfficialPartner) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(20.dp)
+                                .clip(CircleShape)
+                                .background(LenoActionGreen),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = "Protected",
+                                tint = Color.White,
+                                modifier = Modifier.size(11.dp)
                             )
                         }
                     }

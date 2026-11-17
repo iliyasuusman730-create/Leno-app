@@ -35,6 +35,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,7 +71,8 @@ fun CourseCertificateDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val awardedCert = remember(classItem.classId, studentUserId) {
+    val updateTick by LessonProgressManager.updateTick.collectAsState()
+    val awardedCert = remember(classItem.classId, studentUserId, updateTick) {
         LessonProgressManager.getAwardedCertificate(context, classItem.classId, studentUserId)
     }
     val certificateTitle = awardedCert?.awardTitle ?: "CERTIFICATE OF EXCELLENCE"

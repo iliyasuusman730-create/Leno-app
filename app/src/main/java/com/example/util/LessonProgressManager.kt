@@ -19,6 +19,19 @@ object LessonProgressManager {
     private val _updateTick = MutableStateFlow(0L)
     val updateTick: StateFlow<Long> = _updateTick.asStateFlow()
 
+    var remoteSyncHandler: ((
+        userId: String,
+        classId: String,
+        completedIds: Set<String>,
+        quizScores: Map<String, String>,
+        streakDays: Int,
+        lastStudyDate: String,
+        lastOpenedClassId: String?,
+        lastOpenedLessonId: String?
+    ) -> Unit)? = null
+
+    var remoteCertificateHandler: ((AwardedCertificate) -> Unit)? = null
+
     fun init(context: Context) {
         if (prefs == null) {
             prefs = context.applicationContext.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -60,6 +73,7 @@ object LessonProgressManager {
         }
         p.edit().putStringSet(key, currentSet).apply()
         _updateTick.value = System.currentTimeMillis()
+        notifyRemoteClassSync(context, userId, classId)
     }
 
     /**
@@ -119,6 +133,7 @@ object LessonProgressManager {
         val key = "$KEY_QUIZ_RESULTS${userId.trim()}_${classId.trim()}_${lessonId.trim()}"
         p.edit().putString(key, "$score/$total").apply()
         _updateTick.value = System.currentTimeMillis()
+        notifyRemoteClassSync(context, userId, classId)
     }
 
     /**
@@ -128,6 +143,19 @@ object LessonProgressManager {
         val p = getPrefs(context) ?: return null
         val key = "$KEY_QUIZ_RESULTS${userId.trim()}_${classId.trim()}_${lessonId.trim()}"
         return p.getString(key, null)
+    }
+
+    fun getAllQuizScoresForClass(context: Context, userId: String, classId: String): Map<String, String> {
+        val p = getPrefs(context) ?: return emptyMap()
+        val prefix = "$KEY_QUIZ_RESULTS${userId.trim()}_${classId.trim()}_"
+        val map = mutableMapOf<String, String>()
+        p.all.forEach { (k, v) ->
+            if (k.startsWith(prefix) && v is String) {
+                val lessonId = k.removePrefix(prefix)
+                if (lessonId.isNotBlank()) map[lessonId] = v
+            }
+        }
+        return map
     }
 
     /**
@@ -171,6 +199,7 @@ object LessonProgressManager {
             .putInt(streakKey, newStreak)
             .apply()
         _updateTick.value = System.currentTimeMillis()
+        notifyRemoteClassSync(context, userId, getLastOpenedClassId(context, userId).orEmpty())
         return newStreak
     }
 
@@ -192,6 +221,58 @@ object LessonProgressManager {
         val p = getPrefs(context) ?: return 1
         val streakKey = "$KEY_STREAK_DAYS${userId.trim()}"
         return maxOf(p.getInt(streakKey, 1), 1)
+    }
+
+    private const val KEY_LAST_OPENED_CLASS = "last_opened_class_"
+    private const val KEY_LAST_OPENED_LESSON = "last_opened_lesson_"
+
+    /**
+     * Records the most recently opened class (and optionally lesson) for a student so
+     * the "Continue Learning" hero card resumes right where they left off.
+     */
+    fun recordLastOpenedClass(
+        context: Context,
+        userId: String,
+        classId: String,
+        lessonId: String = ""
+    ) {
+        if (userId.isBlank() || classId.isBlank()) return
+        val p = getPrefs(context) ?: return
+        val editor = p.edit()
+            .putString("$KEY_LAST_OPENED_CLASS${userId.trim()}", classId.trim())
+        if (lessonId.isNotBlank()) {
+            editor.putString("$KEY_LAST_OPENED_LESSON${userId.trim()}_${classId.trim()}", lessonId.trim())
+        }
+        editor.apply()
+        _updateTick.value = System.currentTimeMillis()
+        notifyRemoteClassSync(context, userId, classId)
+    }
+
+    fun getLastOpenedClassId(context: Context, userId: String): String? {
+        if (userId.isBlank()) return null
+        val p = getPrefs(context) ?: return null
+        return p.getString("$KEY_LAST_OPENED_CLASS${userId.trim()}", null)?.takeIf { it.isNotBlank() }
+    }
+
+    fun getLastOpenedLessonId(context: Context, userId: String, classId: String): String? {
+        if (userId.isBlank() || classId.isBlank()) return null
+        val p = getPrefs(context) ?: return null
+        return p.getString("$KEY_LAST_OPENED_LESSON${userId.trim()}_${classId.trim()}", null)?.takeIf { it.isNotBlank() }
+    }
+
+    fun getNextUncompletedLesson(
+        context: Context,
+        userId: String,
+        classId: String,
+        lessons: List<com.example.data.entity.LessonEntity>
+    ): com.example.data.entity.LessonEntity? {
+        if (lessons.isEmpty()) return null
+        val sorted = lessons.sortedWith(compareBy<com.example.data.entity.LessonEntity> { it.orderIndex }.thenBy { it.createdAt })
+        val completedIds = if (userId.isNotBlank()) getCompletedLessonIds(context, userId, classId) else emptySet()
+        val lastLessonId = getLastOpenedLessonId(context, userId, classId)
+        return sorted.firstOrNull { !completedIds.contains(it.lessonId) }
+            ?: sorted.firstOrNull { it.lessonId == lastLessonId }
+            ?: sorted.firstOrNull()
     }
 
     fun formatCertificateId(classId: String, userId: String): String {
@@ -261,6 +342,7 @@ object LessonProgressManager {
             _updateTick.value = System.currentTimeMillis()
         }
 
+        remoteCertificateHandler?.invoke(cert)
         return cert
     }
 
@@ -297,6 +379,128 @@ object LessonProgressManager {
             )
         } catch (e: Exception) {
             null
+        }
+    }
+
+    private fun notifyRemoteClassSync(context: Context, userId: String, classId: String) {
+        if (userId.isBlank()) return
+        val handler = remoteSyncHandler ?: return
+        val p = getPrefs(context)
+        val completedIds = if (classId.isNotBlank()) getCompletedLessonIds(context, userId, classId) else emptySet()
+        val quizScores = if (classId.isNotBlank()) getAllQuizScoresForClass(context, userId, classId) else emptyMap()
+        val streakDays = getStudyStreak(context, userId)
+        val lastStudyDate = p?.getString("$KEY_LAST_STUDY_DATE${userId.trim()}", "") ?: ""
+        val lastOpenedClassId = getLastOpenedClassId(context, userId)
+        val lastOpenedLessonId = if (classId.isNotBlank()) getLastOpenedLessonId(context, userId, classId) else null
+        handler.invoke(
+            userId,
+            classId,
+            completedIds,
+            quizScores,
+            streakDays,
+            lastStudyDate,
+            lastOpenedClassId,
+            lastOpenedLessonId
+        )
+    }
+
+    fun applyRemoteClassProgress(
+        context: Context,
+        userId: String,
+        classId: String,
+        completedIds: Set<String>,
+        quizScores: Map<String, String>,
+        lastOpenedLessonId: String?
+    ) {
+        if (userId.isBlank() || classId.isBlank()) return
+        val p = getPrefs(context) ?: return
+        val key = makeClassKey(userId, classId)
+        val localCompleted = p.getStringSet(key, emptySet()) ?: emptySet()
+        val mergedCompleted = (localCompleted + completedIds).filter { it.isNotBlank() }.toSet()
+        val editor = p.edit()
+        var changed = false
+        if (mergedCompleted != localCompleted) {
+            editor.putStringSet(key, mergedCompleted)
+            changed = true
+        }
+        quizScores.forEach { (lessonId, scoreStr) ->
+            if (lessonId.isNotBlank() && scoreStr.isNotBlank()) {
+                val qKey = "$KEY_QUIZ_RESULTS${userId.trim()}_${classId.trim()}_${lessonId.trim()}"
+                if (p.getString(qKey, null) != scoreStr) {
+                    editor.putString(qKey, scoreStr)
+                    changed = true
+                }
+            }
+        }
+        if (!lastOpenedLessonId.isNullOrBlank()) {
+            val lKey = "$KEY_LAST_OPENED_LESSON${userId.trim()}_${classId.trim()}"
+            if (p.getString(lKey, null) != lastOpenedLessonId) {
+                editor.putString(lKey, lastOpenedLessonId)
+                changed = true
+            }
+        }
+        if (changed) {
+            editor.apply()
+            _updateTick.value = System.currentTimeMillis()
+        }
+    }
+
+    fun applyRemoteStudyProfile(
+        context: Context,
+        userId: String,
+        streakDays: Int,
+        lastStudyDate: String?,
+        lastOpenedClassId: String?
+    ) {
+        if (userId.isBlank()) return
+        val p = getPrefs(context) ?: return
+        val editor = p.edit()
+        var changed = false
+        val streakKey = "$KEY_STREAK_DAYS${userId.trim()}"
+        val currentStreak = p.getInt(streakKey, 0)
+        if (streakDays > currentStreak) {
+            editor.putInt(streakKey, streakDays)
+            changed = true
+        }
+        if (!lastStudyDate.isNullOrBlank()) {
+            val dateKey = "$KEY_LAST_STUDY_DATE${userId.trim()}"
+            val currentDate = p.getString(dateKey, null)
+            if (currentDate.isNullOrBlank() || lastStudyDate > currentDate) {
+                editor.putString(dateKey, lastStudyDate)
+                changed = true
+            }
+        }
+        if (!lastOpenedClassId.isNullOrBlank()) {
+            val classKey = "$KEY_LAST_OPENED_CLASS${userId.trim()}"
+            if (p.getString(classKey, null).isNullOrBlank()) {
+                editor.putString(classKey, lastOpenedClassId)
+                changed = true
+            }
+        }
+        if (changed) {
+            editor.apply()
+            _updateTick.value = System.currentTimeMillis()
+        }
+    }
+
+    fun applyRemoteCertificate(context: Context, cert: AwardedCertificate) {
+        if (cert.classId.isBlank() || cert.studentUserId.isBlank()) return
+        val p = getPrefs(context) ?: return
+        val json = org.json.JSONObject().apply {
+            put("classId", cert.classId)
+            put("studentUserId", cert.studentUserId)
+            put("studentName", cert.studentName)
+            put("teacherUserId", cert.teacherUserId)
+            put("teacherName", cert.teacherName)
+            put("awardTitle", cert.awardTitle)
+            put("teacherCommendation", cert.teacherCommendation)
+            put("issueDate", cert.issueDate)
+            put("certificateId", cert.certificateId)
+        }.toString()
+        val key = "$KEY_AWARDED_CERT_PREFIX${cert.classId.trim()}_${cert.studentUserId.trim()}"
+        if (p.getString(key, null) != json) {
+            p.edit().putString(key, json).apply()
+            _updateTick.value = System.currentTimeMillis()
         }
     }
 }

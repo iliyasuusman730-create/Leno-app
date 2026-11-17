@@ -43,6 +43,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.ui.graphics.Color
+import com.example.ui.theme.LenoNavDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -139,108 +141,85 @@ fun DiscoverScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .widthIn(max = com.example.util.MaxContentWidth)
-                .padding(horizontal = com.example.util.responsiveHorizontalPadding(), vertical = 12.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            // Header
+            // Top Bar matching Image 2: + Add Contact button on the top right
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f, fill = false)
-                ) {
-                    Text(
-                        text = if (isSearching) {
-                            if (isSmall) "Results" else "Search Results"
-                        } else {
-                            if (isSmall) "Contacts" else "Contacts & Connections"
-                        },
-                        style = MaterialTheme.typography.displayLarge.copy(
-                            fontSize = if (isSmall) 20.sp else 26.sp,
-                            fontWeight = FontWeight.Bold
-                        ),
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                    Spacer(modifier = Modifier.width(if (isSmall) 4.dp else 8.dp))
-                    if (isFetchingUsers) {
-                        CircularProgressIndicator(
-                            modifier = Modifier
-                                .size(if (isSmall) 16.dp else 20.dp)
-                                .testTag("discover_fetching_indicator"),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    } else {
-                        IconButton(
-                            onClick = { viewModel.refreshUserData() },
-                            modifier = Modifier
-                                .size(if (isSmall) 28.dp else 32.dp)
-                                .testTag("discover_refresh_button")
-                        ) {
-                            Icon(
-                                Icons.Default.Refresh,
-                                contentDescription = "Refresh Users",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(if (isSmall) 18.dp else 20.dp)
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(6.dp))
-
                 Button(
                     onClick = { showAddContactDialog = true },
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = if (isSmall) 8.dp else 14.dp, vertical = 6.dp),
+                    shape = RoundedCornerShape(20.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary
                     ),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     modifier = Modifier.testTag("discover_add_contact_btn")
                 ) {
-                    Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(if (isSmall) 16.dp else 18.dp))
-                    Spacer(modifier = Modifier.width(if (isSmall) 2.dp else 4.dp))
-                    Text(if (isSmall) "Add" else "Add Contact", fontWeight = FontWeight.SemiBold, fontSize = if (isSmall) 12.sp else 14.sp)
+                    Icon(
+                        imageVector = Icons.Default.PersonAdd,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "+ Add Contact",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
                 }
             }
 
-        Text(
-            text = if (isSearching) "Showing users matching \"$searchQuery\"" else "Your chats, connections, and discovered contacts on Leno",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
-        )
+            Spacer(modifier = Modifier.height(8.dp))
 
-        // Search Input
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { viewModel.searchQuery.value = it },
-            placeholder = { Text("Search by name, @username, or Leno ID...") },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
-            trailingIcon = {
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { viewModel.searchQuery.value = "" }) {
-                        Icon(Icons.Default.Close, contentDescription = "Clear")
+            // Capsule/Pill Search Input matching Image 2
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { viewModel.searchQuery.value = it },
+                placeholder = {
+                    Text(
+                        "Search by name, @username, or Leno ID...",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.Search,
+                        contentDescription = "Search",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.searchQuery.value = "" }) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
-                }
-            },
-            singleLine = true,
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("discover_search_input"),
-            shape = RoundedCornerShape(16.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("discover_search_input"),
+                shape = RoundedCornerShape(24.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    cursorColor = MaterialTheme.colorScheme.primary,
+                    focusedBorderColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Transparent
+                )
             )
-        )
 
-        Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
         if (isFetchingUsers && displayList.isEmpty() && pendingUsers.isEmpty()) {
             Box(
@@ -377,7 +356,7 @@ fun DiscoverScreen(
                         }
                     }
                 } else {
-                    // CONTACTS / SEARCH LIST
+                    // CONTACTS / SEARCH LIST matching Image 2
                     items(displayList, key = { it.userId }) { user ->
                         DiscoverUserCard(
                             viewModel = viewModel,
@@ -385,6 +364,11 @@ fun DiscoverScreen(
                             targetUser = user,
                             onOpenChat = onOpenChat,
                             onOpenProfile = onOpenProfile
+                        )
+                        androidx.compose.material3.HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                            thickness = 0.5.dp,
+                            modifier = Modifier.padding(start = 74.dp)
                         )
                     }
                 }
@@ -421,11 +405,12 @@ fun IncomingRequestCard(
             .fillMaxWidth()
             .clickable { onOpenProfile(requester.userId) }
             .testTag("incoming_request_card_${requester.username}"),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+            containerColor = MaterialTheme.colorScheme.surface
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -572,122 +557,123 @@ fun DiscoverUserCard(
     val isFriend = friendship?.status == "ACCEPTED"
     val isPending = friendship?.status == "PENDING"
     val isOfficial = targetUser.isOfficial || targetUser.userId == LenoRepository.OFFICIAL_LENO_ID
+    val linoIdFormatted = if (targetUser.linoId.isNotBlank()) targetUser.linoId else "LEN-${targetUser.userId.takeLast(8).uppercase()}"
 
-    Card(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onOpenProfile(targetUser.userId) }
-            .testTag("discover_user_card_${targetUser.username}"),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            .padding(horizontal = 4.dp, vertical = 12.dp)
+            .testTag("discover_user_card_${targetUser.username}")
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            // Avatar
+            Box(
+                modifier = Modifier.clickable { onOpenProfile(targetUser.userId) }
             ) {
-                // Avatar with online dot -> Click opens profile
-                Box(
-                    modifier = Modifier.clickable { onOpenProfile(targetUser.userId) }
-                ) {
-                    LenoAvatar(
-                        avatarUrl = targetUser.avatarUrl,
-                        isOfficial = isOfficial,
-                        size = 56.dp,
-                        contentDescription = targetUser.displayName,
-                        username = targetUser.username
-                    )
-                    if (targetUser.isOnline && !isOfficial) {
-                        Box(
-                            modifier = Modifier
-                                .size(14.dp)
-                                .clip(CircleShape)
-                                .background(OnlineGreen)
-                                .align(Alignment.BottomEnd)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(14.dp))
-
-                // Name & Leno ID / Username
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { onOpenProfile(targetUser.userId) }
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = targetUser.displayName,
-                            style = MaterialTheme.typography.titleMedium.copy(fontSize = 17.sp),
-                            fontWeight = FontWeight.Bold
-                        )
-                        if (isOfficial) {
-                            Spacer(modifier = Modifier.width(4.dp))
-                            OfficialVerifiedBadge(size = 16.dp)
-                        }
-                    }
-                    Text(
-                        text = if (targetUser.linoId.isNotBlank()) "@${targetUser.username} • ${targetUser.linoId}" else "@${targetUser.username}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-
-                // Quick Message Icon
-                IconButton(
-                    onClick = { onOpenChat(targetUser.userId) },
-                    modifier = Modifier.testTag("discover_chat_icon_${targetUser.username}")
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Chat,
-                        contentDescription = "Message",
-                        tint = MaterialTheme.colorScheme.primary
+                LenoAvatar(
+                    avatarUrl = targetUser.avatarUrl,
+                    isOfficial = isOfficial,
+                    size = 50.dp,
+                    contentDescription = targetUser.displayName,
+                    username = targetUser.username
+                )
+                if (targetUser.isOnline && !isOfficial) {
+                    Box(
+                        modifier = Modifier
+                            .size(13.dp)
+                            .clip(CircleShape)
+                            .background(OnlineGreen)
+                            .align(Alignment.BottomEnd)
                     )
                 }
             }
 
-            if (targetUser.bio.isNotBlank()) {
-                Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.width(14.dp))
+
+            // Name & @username • Leno ID
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onOpenProfile(targetUser.userId) }
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = targetUser.displayName,
+                        style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                    if (isOfficial) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        OfficialVerifiedBadge(size = 16.dp)
+                    }
+                }
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = targetUser.bio,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2
+                    text = "@${targetUser.username} • $linoIdFormatted",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.width(8.dp))
 
-            // Action Buttons
+            // Action Pill Buttons matching Image 2
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                // Primary Message Button
                 Button(
                     onClick = { onOpenChat(targetUser.userId) },
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("discover_message_button_${targetUser.username}")
+                    shape = RoundedCornerShape(20.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 7.dp),
+                    modifier = Modifier.testTag("discover_message_button_${targetUser.username}")
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Message")
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Chat,
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Message",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
 
-                // View Profile Outlined Button
                 OutlinedButton(
                     onClick = { onOpenProfile(targetUser.userId) },
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 7.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.testTag("discover_view_profile_btn_${targetUser.username}")
                 ) {
-                    Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp)
+                    )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Profile")
+                    Text(
+                        text = "Profile",
+                        fontSize = 13.sp
+                    )
                 }
             }
         }

@@ -38,6 +38,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
@@ -84,6 +86,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.ui.components.PasswordStrengthIndicator
+import com.example.ui.theme.LocalLenoDarkTheme
 import com.example.viewmodel.LenoViewModel
 
 enum class OnboardingStep {
@@ -242,6 +246,23 @@ fun AuthScreen(
                         fontWeight = FontWeight.Black,
                         color = textPrimary,
                         letterSpacing = 3.sp
+                    )
+                }
+
+                // Quick Light/Dark mode toggle button in low-light environments
+                val isDarkAuth = LocalLenoDarkTheme.current
+                IconButton(
+                    onClick = { viewModel.toggleLightDarkTheme(isDarkAuth) },
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .size(48.dp)
+                        .testTag("auth_theme_toggle_btn")
+                ) {
+                    Icon(
+                        imageVector = if (isDarkAuth) Icons.Default.LightMode else Icons.Default.DarkMode,
+                        contentDescription = if (isDarkAuth) "Switch to light mode" else "Switch to dark mode",
+                        tint = if (isDarkAuth) MaterialTheme.colorScheme.secondary else textPrimary,
+                        modifier = Modifier.size(22.dp)
                     )
                 }
             }
@@ -554,6 +575,11 @@ fun AuthScreen(
                                         .height(64.dp)
                                         .testTag("step3_password_input")
                                 )
+
+                                if (passwordInput.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    PasswordStrengthIndicator(password = passwordInput)
+                                }
 
                                 if (errorMessage != null) {
                                     Spacer(modifier = Modifier.height(12.dp))
@@ -989,8 +1015,8 @@ fun AuthScreen(
                                     },
                                     placeholder = {
                                         Text(
-                                            "Full name or Recovery Code (optional)",
-                                            fontSize = 15.sp,
+                                            "Recovery Code (REC-...) or Recovery Email *",
+                                            fontSize = 14.sp,
                                             color = textSecondary
                                         )
                                     },
@@ -1001,7 +1027,7 @@ fun AuthScreen(
                                     ),
                                     singleLine = true,
                                     keyboardOptions = KeyboardOptions(
-                                        capitalization = KeyboardCapitalization.Words,
+                                        capitalization = KeyboardCapitalization.None,
                                         keyboardType = KeyboardType.Text,
                                         imeAction = ImeAction.Next
                                     ),
@@ -1029,7 +1055,7 @@ fun AuthScreen(
                                     },
                                     placeholder = {
                                         Text(
-                                            "New Password (min. 4 chars)",
+                                            "New Password (min. 6 chars)",
                                             fontSize = 16.sp,
                                             color = textSecondary
                                         )
@@ -1070,6 +1096,11 @@ fun AuthScreen(
                                         .height(60.dp)
                                         .testTag("recover_new_password_input")
                                 )
+
+                                if (recoverNewPasswordInput.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    PasswordStrengthIndicator(password = recoverNewPasswordInput)
+                                }
 
                                 if (errorMessage != null) {
                                     Spacer(modifier = Modifier.height(12.dp))
@@ -1455,11 +1486,15 @@ fun AuthScreen(
                         Button(
                             onClick = {
                                 if (recoverIdentifierInput.isBlank()) {
-                                    errorMessage = "Please enter your Username, Leno ID, or Recovery Email."
+                                    errorMessage = "Please enter your Username, Leno ID, or Email."
                                     return@Button
                                 }
-                                if (recoverNewPasswordInput.length < 4) {
-                                    errorMessage = "New password must be at least 4 characters."
+                                if (recoverHintInput.isBlank()) {
+                                    errorMessage = "Please enter your Backup Recovery Code (REC-...) or connected Recovery / Google Email."
+                                    return@Button
+                                }
+                                if (recoverNewPasswordInput.trim().length < 6) {
+                                    errorMessage = "New password must be at least 6 characters."
                                     return@Button
                                 }
                                 isLoading = true

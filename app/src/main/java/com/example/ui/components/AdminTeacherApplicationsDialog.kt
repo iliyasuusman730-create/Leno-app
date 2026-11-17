@@ -102,6 +102,7 @@ import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -154,8 +155,15 @@ fun AdminTeacherApplicationsDialog(
     var userToConfirmDelete by remember { mutableStateOf<UserEntity?>(null) }
     var userToConfirmRestrict by remember { mutableStateOf<UserEntity?>(null) }
 
-    LaunchedEffect(Unit) {
+    DisposableEffect(Unit) {
         viewModel.startTeacherApplicationsMonitor()
+        viewModel.startAdminDirectoryMonitor()
+        onDispose {
+            viewModel.stopAdminDirectoryMonitor()
+        }
+    }
+
+    LaunchedEffect(Unit) {
         viewModel.refreshTeacherApplications()
         viewModel.loadAdminDirectoryUsers()
     }
@@ -1166,8 +1174,24 @@ private fun ApplicationCard(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                        val handleOrId = remember(application.applicantUsername, application.username, application.lenoId, application.userId) {
+                            val cleanUser = application.applicantUsername.ifBlank { application.username }
+                                .removePrefix("@")
+                                .trim()
+                            val cleanId = application.lenoId.ifBlank {
+                                if (application.userId.isNotBlank()) {
+                                    "LEN-" + application.userId.replace("usr_", "").padEnd(8, '0').take(8).uppercase()
+                                } else ""
+                            }
+                            when {
+                                cleanUser.isNotBlank() && cleanId.isNotBlank() -> "@$cleanUser • $cleanId"
+                                cleanUser.isNotBlank() -> "@$cleanUser"
+                                cleanId.isNotBlank() -> cleanId
+                                else -> application.userId
+                            }
+                        }
                         Text(
-                            text = if (application.applicantEmail.isNotBlank()) application.applicantEmail else application.userId,
+                            text = handleOrId,
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -1408,8 +1432,20 @@ private fun UserAdminCard(
                             )
                         }
                     }
+                    val userHandleOrId = remember(user.username, user.linoId, user.userId) {
+                        val uName = user.username.removePrefix("@").trim()
+                        val uLeno = user.linoId.ifBlank {
+                            if (user.userId.isNotBlank()) "LEN-" + user.userId.replace("usr_", "").padEnd(8, '0').take(8).uppercase() else ""
+                        }
+                        when {
+                            uName.isNotBlank() && uLeno.isNotBlank() -> "@$uName • $uLeno"
+                            uName.isNotBlank() -> "@$uName"
+                            uLeno.isNotBlank() -> uLeno
+                            else -> user.userId
+                        }
+                    }
                     Text(
-                        text = if (user.username.isNotBlank()) "@${user.username}" else user.email.ifBlank { user.userId },
+                        text = userHandleOrId,
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,

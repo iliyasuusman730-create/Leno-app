@@ -26,10 +26,18 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Password
+import androidx.compose.material.icons.filled.Pin
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -37,18 +45,23 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -59,14 +72,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.components.ChangePasswordDialog
+import com.example.ui.components.DisableSecurityPinDialog
+import com.example.ui.components.SetupSecurityPinDialog
 import com.example.viewmodel.LenoViewModel
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,26 +98,50 @@ fun ProtectAccountScreen(
     onBack: () -> Unit
 ) {
     val currentUser by viewModel.currentUser.collectAsState()
+    val isPinEnabled by viewModel.isSecurityPinEnabled.collectAsState()
+    val securityEvents by viewModel.securityEvents.collectAsState()
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
     val scrollState = rememberScrollState()
 
-    val brandOrange = com.example.ui.theme.LenoPrimary
-    val brandBg = com.example.ui.theme.LenoMainBackground
-    val cardBg = com.example.ui.theme.LenoSurface
-    val inputBg = com.example.ui.theme.LenoInputBackground
-    val inputBorder = com.example.ui.theme.LenoBorderDefault
-    val textPrimary = com.example.ui.theme.LenoTextPrimary
-    val textSecondary = com.example.ui.theme.LenoTextSecondary
+    val isDarkTheme = com.example.ui.theme.LocalLenoDarkTheme.current
+    val brandOrange = if (isDarkTheme) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
+    val brandBg = MaterialTheme.colorScheme.background
+    val cardBg = MaterialTheme.colorScheme.surface
+    val inputBg = MaterialTheme.colorScheme.surfaceVariant
+    val inputBorder = MaterialTheme.colorScheme.outline
+    val textPrimary = MaterialTheme.colorScheme.onBackground
+    val textSecondary = MaterialTheme.colorScheme.onSurfaceVariant
     val successGreen = com.example.ui.theme.LenoSuccess
+    val warningAmber = com.example.ui.theme.LenoWarning
 
     val isGoogleConnected = currentUser?.googleEmail?.isNotBlank() == true
     val isEmailConnected = currentUser?.recoveryEmail?.isNotBlank() == true
     val isProtected = isGoogleConnected || isEmailConnected
+    val recoveryCode = currentUser?.recoveryCode.orEmpty()
+    val hasBackupCode = recoveryCode.isNotBlank()
+    val hasExistingPassword = (currentUser?.passwordHash?.isNotBlank() == true) ||
+        (currentUser?.password?.isNotBlank() == true)
+
+    val completedPillars = listOf(isProtected, hasBackupCode, isPinEnabled).count { it }
+    val securityProgress = completedPillars / 3f
+
+    LaunchedEffect(currentUser?.userId) {
+        if (currentUser != null) {
+            viewModel.ensureRecoveryCode()
+            viewModel.refreshSecurityState()
+        }
+    }
 
     var showGoogleConnectDialog by remember { mutableStateOf(false) }
     var showEmailConnectDialog by remember { mutableStateOf(false) }
     var showCannotRemoveDialog by remember { mutableStateOf<String?>(null) }
     var showConfirmDisconnectDialog by remember { mutableStateOf<String?>(null) }
+    var showChangePasswordDialog by remember { mutableStateOf(false) }
+    var showSetupPinDialog by remember { mutableStateOf(false) }
+    var showDisablePinDialog by remember { mutableStateOf(false) }
+    var showRegenerateCodeDialog by remember { mutableStateOf(false) }
+    var revealRecoveryCode by remember { mutableStateOf(false) }
 
     var googleInput by remember { mutableStateOf("") }
     var emailInput by remember { mutableStateOf("") }
@@ -143,7 +190,7 @@ fun ProtectAccountScreen(
                 .verticalScroll(scrollState)
                 .padding(horizontal = 20.dp, vertical = 12.dp)
         ) {
-            // Status Header Banner
+            // Status Header Banner + Security Score
             if (isProtected) {
                 Card(
                     modifier = Modifier
@@ -157,54 +204,88 @@ fun ProtectAccountScreen(
                         )
                     )
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(18.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(18.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(CircleShape)
-                                .background(successGreen.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = "Account Protected",
-                                tint = successGreen,
-                                modifier = Modifier.size(28.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(16.dp))
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "Account Protected",
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = textPrimary,
-                                    modifier = Modifier.testTag("account_protected_badge")
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "✓",
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Black,
-                                    color = successGreen
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(successGreen.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "Account Protected",
+                                    tint = successGreen,
+                                    modifier = Modifier.size(28.dp)
                                 )
                             }
-                            Spacer(modifier = Modifier.height(4.dp))
+
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = if (completedPillars == 3) "Strong Protection" else "Account Protected",
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = textPrimary,
+                                        modifier = Modifier.testTag("account_protected_badge")
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "✓",
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = successGreen
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Your Leno account has active recovery methods. You can regain access securely at any time.",
+                                    fontSize = 13.sp,
+                                    color = textSecondary,
+                                    lineHeight = 18.sp
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
                             Text(
-                                text = "Your Leno account has active recovery methods. You can regain access at any time.",
-                                fontSize = 13.sp,
-                                color = textSecondary,
-                                lineHeight = 18.sp
+                                text = "Security Score",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = textSecondary
+                            )
+                            Text(
+                                text = "$completedPillars / 3 checks active",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = successGreen
                             )
                         }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        LinearProgressIndicator(
+                            progress = { securityProgress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(7.dp)
+                                .clip(RoundedCornerShape(4.dp)),
+                            color = successGreen,
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                            strokeCap = StrokeCap.Round
+                        )
                     }
                 }
             } else {
@@ -214,46 +295,80 @@ fun ProtectAccountScreen(
                         .testTag("account_unprotected_banner"),
                     shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.cardColors(containerColor = cardBg),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, com.example.ui.theme.LenoBorderDefault)
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(18.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(18.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(CircleShape)
-                                .background(brandOrange.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Shield,
-                                contentDescription = "Security Alert",
-                                tint = brandOrange,
-                                modifier = Modifier.size(28.dp)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(warningAmber.copy(alpha = 0.16f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Shield,
+                                    contentDescription = "Security Alert",
+                                    tint = warningAmber,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (completedPillars >= 1) "Partial Protection" else "Protect Your Account",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = textPrimary
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Save your Backup Recovery Code and link Google or an email so you never lose access to your Leno account.",
+                                    fontSize = 13.sp,
+                                    color = textSecondary,
+                                    lineHeight = 18.sp
+                                )
+                            }
                         }
 
-                        Spacer(modifier = Modifier.width(16.dp))
-
-                        Column(modifier = Modifier.weight(1f)) {
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
                             Text(
-                                text = "Protect Your Account",
-                                fontSize = 18.sp,
+                                text = "Security Score",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = textSecondary
+                            )
+                            Text(
+                                text = "$completedPillars / 3 checks active",
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = textPrimary
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Add a recovery method so you can regain access to your Leno account if you forget your password.",
-                                fontSize = 13.sp,
-                                color = textSecondary,
-                                lineHeight = 18.sp
+                                color = warningAmber
                             )
                         }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        LinearProgressIndicator(
+                            progress = { securityProgress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(7.dp)
+                                .clip(RoundedCornerShape(4.dp)),
+                            color = warningAmber,
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                            strokeCap = StrokeCap.Round
+                        )
                     }
                 }
             }
@@ -541,7 +656,400 @@ fun ProtectAccountScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(22.dp))
+
+            // ==========================================
+            // BACKUP RECOVERY CODE
+            // ==========================================
+            Text(
+                text = "Private Backup Code",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = brandOrange,
+                modifier = Modifier.padding(start = 4.dp)
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("backup_recovery_code_card"),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = cardBg),
+                border = androidx.compose.foundation.BorderStroke(1.dp, inputBorder)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(brandOrange.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Key,
+                                contentDescription = "Backup Recovery Code",
+                                tint = brandOrange,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Backup Recovery Code",
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = textPrimary
+                            )
+                            Text(
+                                text = "Keep this private code safe to reset your password if you lose access.",
+                                fontSize = 12.sp,
+                                color = textSecondary,
+                                lineHeight = 17.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, inputBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = when {
+                                    recoveryCode.isBlank() -> "Generating..."
+                                    revealRecoveryCode -> recoveryCode
+                                    else -> "REC-••••-••••"
+                                },
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                letterSpacing = 1.5.sp,
+                                color = textPrimary,
+                                modifier = Modifier.testTag("backup_recovery_code_value")
+                            )
+                            IconButton(
+                                onClick = { revealRecoveryCode = !revealRecoveryCode },
+                                modifier = Modifier.testTag("toggle_recovery_code_button")
+                            ) {
+                                Icon(
+                                    imageVector = if (revealRecoveryCode) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = if (revealRecoveryCode) "Hide recovery code" else "Reveal recovery code",
+                                    tint = brandOrange
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                if (recoveryCode.isNotBlank()) {
+                                    clipboardManager.setText(AnnotatedString(recoveryCode))
+                                    Toast.makeText(context, "Recovery code copied to clipboard ✓", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            enabled = recoveryCode.isNotBlank(),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("copy_recovery_code_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Copy Code", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                            onClick = { showRegenerateCodeDialog = true },
+                            enabled = !isProcessing,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("regenerate_recovery_code_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Regenerate", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(22.dp))
+
+            // ==========================================
+            // PASSWORD & APP SECURITY PIN
+            // ==========================================
+            Text(
+                text = "Password & App Lock",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = brandOrange,
+                modifier = Modifier.padding(start = 4.dp)
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("password_and_pin_card"),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = cardBg),
+                border = androidx.compose.foundation.BorderStroke(1.dp, inputBorder)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(CircleShape)
+                                .background(brandOrange.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Password,
+                                contentDescription = null,
+                                tint = brandOrange,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (hasExistingPassword) "Account Password" else "Set Account Password",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = textPrimary
+                            )
+                            Text(
+                                text = "Protected with salted PBKDF2-HMAC-SHA256",
+                                fontSize = 12.sp,
+                                color = textSecondary
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = { showChangePasswordDialog = true },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .height(48.dp)
+                                .testTag("protect_change_password_button")
+                        ) {
+                            Text(
+                                text = if (hasExistingPassword) "Change" else "Set",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 14.dp),
+                        color = inputBorder
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (isPinEnabled) successGreen.copy(alpha = 0.14f)
+                                    else MaterialTheme.colorScheme.surfaceVariant
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Pin,
+                                contentDescription = null,
+                                tint = if (isPinEnabled) successGreen else textSecondary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "App Security PIN",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = textPrimary
+                            )
+                            Text(
+                                text = if (isPinEnabled) "4–6 digit PIN lock is active on launch" else "Lock Leno with a private 4–6 digit PIN",
+                                fontSize = 12.sp,
+                                color = if (isPinEnabled) successGreen else textSecondary
+                            )
+                        }
+                        Switch(
+                            checked = isPinEnabled,
+                            onCheckedChange = { shouldEnable ->
+                                if (shouldEnable) {
+                                    showSetupPinDialog = true
+                                } else {
+                                    showDisablePinDialog = true
+                                }
+                            },
+                            modifier = Modifier.testTag("protect_security_pin_switch")
+                        )
+                    }
+
+                    AnimatedVisibility(visible = isPinEnabled) {
+                        Column {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            OutlinedButton(
+                                onClick = { viewModel.lockAppNow() },
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .testTag("lock_app_now_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Lock Leno Now", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(22.dp))
+
+            // ==========================================
+            // RECENT SECURITY ACTIVITY LOG
+            // ==========================================
+            Text(
+                text = "Recent Security Activity",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = brandOrange,
+                modifier = Modifier.padding(start = 4.dp)
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("security_activity_card"),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = cardBg),
+                border = androidx.compose.foundation.BorderStroke(1.dp, inputBorder)
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.History,
+                            contentDescription = null,
+                            tint = brandOrange,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Security Audit Log",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = textPrimary
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    if (securityEvents.isEmpty()) {
+                        Text(
+                            text = "No recent security events recorded on this device yet.",
+                            fontSize = 13.sp,
+                            color = textSecondary
+                        )
+                    } else {
+                        val formatter = remember { SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()) }
+                        securityEvents.take(6).forEachIndexed { idx, ev ->
+                            if (idx > 0) {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(vertical = 8.dp),
+                                    color = inputBorder.copy(alpha = 0.6f)
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = ev.title,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = textPrimary
+                                    )
+                                    if (ev.detail.isNotBlank()) {
+                                        Text(
+                                            text = ev.detail,
+                                            fontSize = 12.sp,
+                                            color = textSecondary
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = formatter.format(Date(ev.timestamp)),
+                                    fontSize = 11.sp,
+                                    color = textSecondary
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
 
             // Security & Privacy Info Card
             Card(
@@ -569,9 +1077,9 @@ fun ProtectAccountScreen(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Text(
-                        text = "• If you forget your password, you can sign in directly with your connected Google account or reset your password using your recovery email.\n" +
-                               "• Account recovery restores your EXISTING Leno account with your permanent Leno ID, username, contacts, and chat histories.\n" +
-                               "• Passwords are never stored in plain text and are protected with salted cryptographic key derivation.",
+                        text = "• Password resets strictly require your private Backup Recovery Code (REC-...) or a verified Google / Recovery Email.\n" +
+                               "• Brute-force protection locks login, recovery, and PIN retries for 60 seconds after 5 failed attempts.\n" +
+                               "• Passwords and App PINs are never stored in plain text and are protected with salted PBKDF2-HMAC-SHA256 derivation.",
                         fontSize = 13.sp,
                         color = textSecondary,
                         lineHeight = 20.sp
@@ -941,6 +1449,98 @@ fun ProtectAccountScreen(
             dismissButton = {
                 TextButton(
                     onClick = { showConfirmDisconnectDialog = null },
+                    enabled = !isProcessing
+                ) {
+                    Text("Cancel", color = textSecondary)
+                }
+            }
+        )
+    }
+
+    if (showChangePasswordDialog) {
+        ChangePasswordDialog(
+            hasExistingPassword = hasExistingPassword,
+            onDismiss = { showChangePasswordDialog = false },
+            onSubmit = { currentPass, newPass, callback ->
+                viewModel.changePasswordVerified(currentPass, newPass) { res ->
+                    if (res.isSuccess) {
+                        Toast.makeText(context, "Password updated ✓", Toast.LENGTH_SHORT).show()
+                    }
+                    callback(res)
+                }
+            }
+        )
+    }
+
+    if (showSetupPinDialog) {
+        SetupSecurityPinDialog(
+            onDismiss = { showSetupPinDialog = false },
+            onSubmit = { pin, callback ->
+                viewModel.setSecurityPin(pin) { res ->
+                    if (res.isSuccess) {
+                        Toast.makeText(context, "App Security PIN enabled ✓", Toast.LENGTH_SHORT).show()
+                    }
+                    callback(res)
+                }
+            }
+        )
+    }
+
+    if (showDisablePinDialog) {
+        DisableSecurityPinDialog(
+            onDismiss = { showDisablePinDialog = false },
+            onSubmit = { currentPin, callback ->
+                viewModel.disableSecurityPin(currentPin) { res ->
+                    if (res.isSuccess) {
+                        Toast.makeText(context, "App Security PIN disabled", Toast.LENGTH_SHORT).show()
+                    }
+                    callback(res)
+                }
+            }
+        )
+    }
+
+    if (showRegenerateCodeDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!isProcessing) showRegenerateCodeDialog = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            title = {
+                Text("Regenerate Recovery Code?", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = textPrimary)
+            },
+            text = {
+                Text(
+                    text = "Generating a new Backup Recovery Code immediately invalidates your previous code. Make sure to save the new code securely.",
+                    fontSize = 14.sp,
+                    color = textSecondary,
+                    lineHeight = 20.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        isProcessing = true
+                        viewModel.regenerateRecoveryCode { res ->
+                            isProcessing = false
+                            showRegenerateCodeDialog = false
+                            if (res.isSuccess) {
+                                revealRecoveryCode = true
+                                Toast.makeText(context, "New recovery code generated ✓", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, res.exceptionOrNull()?.message ?: "Failed to regenerate", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    enabled = !isProcessing,
+                    colors = ButtonDefaults.buttonColors(containerColor = brandOrange),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.testTag("confirm_regenerate_code_button")
+                ) {
+                    Text("Regenerate", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showRegenerateCodeDialog = false },
                     enabled = !isProcessing
                 ) {
                     Text("Cancel", color = textSecondary)

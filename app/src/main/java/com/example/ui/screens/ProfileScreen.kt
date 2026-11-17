@@ -359,9 +359,10 @@ fun ProfileScreen(
         // Profile Card
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp)
         ) {
             Column(
                 modifier = Modifier
@@ -583,9 +584,10 @@ fun ProfileScreen(
             Spacer(modifier = Modifier.height(20.dp))
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = androidx.compose.foundation.BorderStroke(1.dp, com.example.ui.theme.LenoBorderDefault)
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp)
             ) {
                 Row(
                     modifier = Modifier
@@ -1515,12 +1517,21 @@ fun ProfileScreen(
                     Spacer(modifier = Modifier.height(10.dp))
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         enrolledClasses.forEach { cls ->
+                            val isOwner = cls.instructorUserId == (currentUser?.userId ?: "")
+                            val isTeacherAccount = currentUser?.isTeacher == true || currentUser?.role.equals("TEACHER", true) || currentUser?.teacherStatus.equals("APPROVED", true)
+                            val isAnotherTeacher = isTeacherAccount && !isOwner && !(currentUser?.isAdmin == true)
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
                                 color = com.example.ui.theme.LenoPrimaryVeryLight,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { selectedClassForDetail = cls }
+                                    .clickable {
+                                        if (isAnotherTeacher) {
+                                            Toast.makeText(context, "Access Denied: Teachers cannot access another teacher's class.", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            selectedClassForDetail = cls
+                                        }
+                                    }
                             ) {
                                 Row(
                                     modifier = Modifier.padding(12.dp),
@@ -1542,7 +1553,13 @@ fun ProfileScreen(
                                     }
 
                                     OutlinedButton(
-                                        onClick = { selectedClassForDetail = cls },
+                                        onClick = {
+                                            if (isAnotherTeacher) {
+                                                Toast.makeText(context, "Access Denied: Teachers cannot access another teacher's class.", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                selectedClassForDetail = cls
+                                            }
+                                        },
                                         shape = RoundedCornerShape(10.dp),
                                         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                     ) {
@@ -2228,11 +2245,21 @@ fun ProfileScreen(
     }
 
     selectedClassForDetail?.let { detailClass ->
+        val isOwner = currentUser?.userId == detailClass.instructorUserId
+        val isTeacherAccount = currentUser?.isTeacher == true || currentUser?.role.equals("TEACHER", true) || currentUser?.teacherStatus.equals("APPROVED", true)
+        val isAnotherTeacher = isTeacherAccount && !isOwner && !(currentUser?.isAdmin == true)
+        if (isAnotherTeacher) {
+            selectedClassForDetail = null
+            Toast.makeText(context, "Access Denied: Teachers cannot access another teacher's class.", Toast.LENGTH_SHORT).show()
+            return@let
+        }
         val classLessons by viewModel.getLessonsForClass(detailClass.classId).collectAsState(initial = emptyList<LessonEntity>())
         ClassDetailDialog(
             classItem = detailClass,
             isEnrolled = true,
-            isInstructor = currentUser?.userId == detailClass.instructorUserId,
+            isInstructor = isOwner,
+            isAdmin = currentUser?.isAdmin == true,
+            isAnotherTeacher = false,
             lessons = classLessons,
             currentUserId = currentUser?.userId ?: "",
             onDismiss = { selectedClassForDetail = null },

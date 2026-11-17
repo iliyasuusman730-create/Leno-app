@@ -13,9 +13,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Badge
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -44,16 +48,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.LenoNavBottomBg
-import com.example.ui.theme.LenoNavDivider
-import com.example.ui.theme.LenoNavSelectedIcon
-import com.example.ui.theme.LenoNavSelectedLabel
-import com.example.ui.theme.LenoNavUnselectedIcon
-import com.example.ui.theme.LenoNavUnselectedLabel
 import com.example.ui.theme.LenoNotificationBadge
 import com.example.ui.theme.LenoNotificationBadgeText
 import com.example.ui.theme.LenoPrimary
-import com.example.ui.theme.LenoPrimaryLight
+import com.example.ui.theme.LocalLenoDarkTheme
 import com.example.ui.components.AdminTeacherApplicationsDialog
 import com.example.ui.navigation.Screen
 import com.example.viewmodel.LenoViewModel
@@ -145,6 +143,11 @@ fun MainScreenContainer(
         }
     }
 
+    val isDarkTheme = LocalLenoDarkTheme.current
+    val navSelectedColor = if (isDarkTheme) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
+    val navIndicatorColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f)
+    val navUnselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
+
     if (isLarge) {
         // LARGE SCREENS (Tablets / Foldables / Landscape): Side NavigationRail + Centered Content
         Row(
@@ -153,8 +156,8 @@ fun MainScreenContainer(
                 .background(MaterialTheme.colorScheme.background)
         ) {
             NavigationRail(
-                containerColor = LenoNavBottomBg,
-                contentColor = LenoNavSelectedIcon,
+                containerColor = MaterialTheme.colorScheme.surface,
+                contentColor = navSelectedColor,
                 header = {
                     androidx.compose.foundation.layout.Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -182,11 +185,11 @@ fun MainScreenContainer(
                         selected = selected,
                         onClick = { currentTabRoute = item.route },
                         colors = NavigationRailItemDefaults.colors(
-                            selectedIconColor = LenoNavSelectedIcon,
-                            selectedTextColor = LenoNavSelectedLabel,
-                            indicatorColor = LenoPrimaryLight.copy(alpha = 0.5f),
-                            unselectedIconColor = LenoNavUnselectedIcon,
-                            unselectedTextColor = LenoNavUnselectedLabel
+                            selectedIconColor = navSelectedColor,
+                            selectedTextColor = navSelectedColor,
+                            indicatorColor = navIndicatorColor,
+                            unselectedIconColor = navUnselectedColor,
+                            unselectedTextColor = navUnselectedColor
                         ),
                         icon = {
                             Box {
@@ -222,8 +225,21 @@ fun MainScreenContainer(
                     )
                 }
 
+                Spacer(modifier = Modifier.weight(1f))
+                IconButton(
+                    onClick = { viewModel.toggleLightDarkTheme(isDarkTheme) },
+                    modifier = Modifier
+                        .padding(bottom = 8.dp)
+                        .size(48.dp)
+                        .testTag("rail_theme_toggle_btn")
+                ) {
+                    Icon(
+                        imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
+                        contentDescription = if (isDarkTheme) "Switch to light mode" else "Switch to dark mode",
+                        tint = navSelectedColor
+                    )
+                }
                 if (currentUser?.isAdmin == true) {
-                    Spacer(modifier = Modifier.weight(1f))
                     IconButton(
                         onClick = { showAdminPortal = true },
                         modifier = Modifier
@@ -233,7 +249,7 @@ fun MainScreenContainer(
                         Icon(
                             imageVector = Icons.Default.AdminPanelSettings,
                             contentDescription = "Admin / Owner Portal",
-                            tint = LenoPrimary
+                            tint = navSelectedColor
                         )
                     }
                 }
@@ -257,62 +273,16 @@ fun MainScreenContainer(
     } else {
         // COMPACT / STANDARD SCREENS: TopAppBar + Content + Bottom NavigationBar
         Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            androidx.compose.foundation.Image(
-                                painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.ic_leno_sparkle_star),
-                                contentDescription = "Leno Logo",
-                                modifier = Modifier.size(if (isSmall) 20.dp else 24.dp)
-                            )
-                            Spacer(modifier = Modifier.width(if (isSmall) 6.dp else 8.dp))
-                            Text(
-                                text = "Leno",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = if (isSmall) 18.sp else 20.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    },
-                    actions = {
-                        if (currentUser?.isAdmin == true) {
-                            IconButton(
-                                onClick = { showAdminPortal = true },
-                                modifier = Modifier.testTag("top_bar_admin_portal_btn")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.AdminPanelSettings,
-                                    contentDescription = "Admin / Owner Portal",
-                                    tint = LenoPrimary
-                                )
-                            }
-                        }
-                        IconButton(
-                            onClick = { currentTabRoute = Screen.ContactsTab.route },
-                            modifier = Modifier.testTag("top_bar_search_btn")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = "Search Users",
-                                tint = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface
-                    )
-                )
-            },
+            contentWindowInsets = WindowInsets.statusBars,
             bottomBar = {
                 androidx.compose.foundation.layout.Column {
                     androidx.compose.material3.HorizontalDivider(
                         thickness = 1.dp,
-                        color = LenoNavDivider
+                        color = MaterialTheme.colorScheme.outlineVariant
                     )
                     NavigationBar(
-                        containerColor = LenoNavBottomBg,
-                        contentColor = LenoNavSelectedIcon
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        contentColor = navSelectedColor
                     ) {
                         Screen.bottomNavItems.forEach { item ->
                             val selected = currentTabRoute == item.route
@@ -320,11 +290,11 @@ fun MainScreenContainer(
                                 selected = selected,
                                 onClick = { currentTabRoute = item.route },
                                 colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
-                                    selectedIconColor = LenoNavSelectedIcon,
-                                    selectedTextColor = LenoNavSelectedLabel,
-                                    indicatorColor = LenoPrimaryLight.copy(alpha = 0.5f),
-                                    unselectedIconColor = LenoNavUnselectedIcon,
-                                    unselectedTextColor = LenoNavUnselectedLabel
+                                    selectedIconColor = navSelectedColor,
+                                    selectedTextColor = navSelectedColor,
+                                    indicatorColor = navIndicatorColor,
+                                    unselectedIconColor = navUnselectedColor,
+                                    unselectedTextColor = navUnselectedColor
                                 ),
                                 icon = {
                                     Box {

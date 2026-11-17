@@ -56,6 +56,26 @@ service cloud.firestore {
       match /sent_receipts/{messageId} {
         allow read, write: if true;
       }
+
+      // Per-user real-time friend requests subcollection
+      match /friend_requests/{requestId} {
+        allow read, write: if true;
+      }
+
+      // Per-user real-time notifications subcollection
+      match /notifications/{notificationId} {
+        allow read, write: if true;
+      }
+
+      // Per-user lesson progress & quiz scores subcollection
+      match /lesson_progress/{classId} {
+        allow read, write: if true;
+      }
+
+      // Per-user awarded certificates subcollection
+      match /certificates/{classId} {
+        allow read, write: if true;
+      }
     }
 
     // Teacher Applications Collection: Canonical "teacherApplications"
@@ -91,6 +111,21 @@ service cloud.firestore {
       match /questions/{questionId} {
         allow read, write: if true;
       }
+
+      // Awarded student certificates subcollection
+      match /certificates/{studentId} {
+        allow read, write: if true;
+      }
+    }
+
+    // Top-level Enrollments collection for live student & class queries
+    match /enrollments/{enrollmentId} {
+      allow read, write: if true;
+    }
+
+    // Top-level Friend Requests fallback collection
+    match /friend_requests/{requestId} {
+      allow read, write: if true;
     }
 
     // Usernames Collection: Atomic unique username claims

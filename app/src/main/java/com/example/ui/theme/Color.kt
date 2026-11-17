@@ -6,81 +6,83 @@ import androidx.compose.ui.graphics.Color
 // LENO — COMPLETE COLOR SYSTEM (Single Source of Truth)
 // ==========================================
 
-// 1. LENO BRAND COLORS
-val LenoPrimary = Color(0xFF16A36A)
-val LenoPrimaryDark = Color(0xFF0D7A4F)
-val LenoPrimaryLight = Color(0xFFDDF7EA)
-val LenoPrimaryVeryLight = Color(0xFFF1FBF6)
-val LenoBlack = Color(0xFF111111)
+// 1. LENO BRAND COLORS (SPECIFICATION)
+val LenoPrimary = Color(0xFF087F5B) // Primary green #087F5B
+val LenoActionGreen = Color(0xFF12A875) // Action green #12A875
+val LenoPrimaryDark = Color(0xFF066347)
+val LenoPrimaryLight = Color(0xFFD3EFE5)
+val LenoPrimaryVeryLight = Color(0xFFEBF7F2)
+val LenoBlack = Color(0xFF172B25)
 val LenoWhite = Color(0xFFFFFFFF)
 
 // UPPERCASE CANONICAL TOKENS (from spec)
 val LENO_PRIMARY = LenoPrimary
+val LENO_ACTION = LenoActionGreen
 val LENO_PRIMARY_DARK = LenoPrimaryDark
 val LENO_PRIMARY_LIGHT = LenoPrimaryLight
-val LENO_BACKGROUND = Color(0xFFF8FAF9)
-val LENO_SURFACE = Color(0xFFFFFFFF)
-val LENO_TEXT = Color(0xFF111111)
-val LENO_TEXT_SECONDARY = Color(0xFF5F6B66)
-val LENO_TEXT_MUTED = Color(0xFF8A9691)
-val LENO_BORDER = Color(0xFFE1E7E4)
+val LENO_BACKGROUND = Color(0xFFF5F8F6) // Page background #F5F8F6
+val LENO_SURFACE = Color(0xFFFFFFFF) // Cards #FFFFFF
+val LENO_TEXT = Color(0xFF172B25) // Main text #172B25
+val LENO_TEXT_SECONDARY = Color(0xFF84918B) // Secondary text #84918B
+val LENO_TEXT_MUTED = Color(0xFF9EABA5)
+val LENO_BORDER = Color(0xFFE2EAE6)
 val LENO_ERROR = Color(0xFFD93025)
 val LENO_WARNING = Color(0xFFE9A23B)
-val LENO_INFO = Color(0xFF3578E5)
-val LENO_SUCCESS = Color(0xFF16A36A)
+val LENO_INFO = Color(0xFF12A875)
+val LENO_SUCCESS = Color(0xFF087F5B)
 
 // 2. BACKGROUND COLORS
-val LenoMainBackground = Color(0xFFF8FAF9)
-val LenoSurface = Color(0xFFFFFFFF)
-val LenoSurfaceSecondary = Color(0xFFF1F5F3)
-val LenoChatBackground = Color(0xFFF8FAF9)
-val LenoInputBackground = Color(0xFFF1F5F3)
-val LenoCardBackground = Color(0xFFFFFFFF)
+val LenoMainBackground = Color(0xFFF5F8F6) // Page background #F5F8F6
+val LenoSurface = Color(0xFFFFFFFF) // Cards #FFFFFF
+val LenoSurfaceSecondary = Color(0xFFEEF3F0)
+val LenoChatBackground = Color(0xFFF0F4F2) // Light grey-green
+val LenoInputBackground = Color(0xFFFFFFFF)
+val LenoCardBackground = Color(0xFFFFFFFF) // Cards #FFFFFF
 val LenoBottomNavBackground = Color(0xFFFFFFFF)
 val LenoModalBackground = Color(0xFFFFFFFF)
 
 // 3. TEXT COLORS
-val LenoTextPrimary = Color(0xFF111111)
-val LenoTextSecondary = Color(0xFF5F6B66)
-val LenoTextTertiary = Color(0xFF8A9691)
-val LenoTextDisabled = Color(0xFFB7BFBB)
+val LenoTextPrimary = Color(0xFF172B25) // Main text #172B25
+val LenoTextSecondary = Color(0xFF84918B) // Secondary text #84918B
+val LenoTextTertiary = Color(0xFF9EABA5)
+val LenoTextDisabled = Color(0xFFB5C1BC)
 val LenoTextWhite = Color(0xFFFFFFFF)
-val LenoTextLink = Color(0xFF0D7A4F)
+val LenoTextLink = Color(0xFF087F5B)
 val LenoTextError = Color(0xFFD93025)
 
 // 4. BORDER COLORS
-val LenoBorderDefault = Color(0xFFE1E7E4)
-val LenoBorderLight = Color(0xFFEDF1EF)
-val LenoBorderSubtle = Color(0xFFEDF1EF)
+val LenoBorderDefault = Color(0xFFE2EAE6)
+val LenoBorderLight = Color(0xFFEDF2EF)
+val LenoBorderSubtle = Color(0xFFEDF2EF)
 val LenoBorderStrong = Color(0xFFCAD4CF)
-val LenoDivider = Color(0xFFE1E7E4)
-val LenoBorderFocus = Color(0xFF16A36A)
+val LenoDivider = Color(0xFFE2EAE6)
+val LenoBorderFocus = Color(0xFF087F5B)
 val LenoBorderError = Color(0xFFD93025)
 
 // 5. BUTTON COLORS
-val LenoButtonPrimaryBg = Color(0xFF16A36A)
+val LenoButtonPrimaryBg = Color(0xFF087F5B)
 val LenoButtonPrimaryText = Color(0xFFFFFFFF)
-val LenoButtonPrimaryPressed = Color(0xFF0D7A4F)
-val LenoButtonSecondaryBg = Color(0xFFDDF7EA)
-val LenoButtonSecondaryText = Color(0xFF0D7A4F)
-val LenoButtonSecondaryPressed = Color(0xFFC7EFDB)
+val LenoButtonPrimaryPressed = Color(0xFF066347)
+val LenoButtonSecondaryBg = Color(0xFFD3EFE5)
+val LenoButtonSecondaryText = Color(0xFF087F5B)
+val LenoButtonSecondaryPressed = Color(0xFFC2E8DB)
 val LenoButtonDisabledBg = Color(0xFFE4E9E6)
 val LenoButtonDisabledText = Color(0xFF9AA49F)
-val LenoButtonSecondaryBorder = Color(0xFFE1E7E4)
+val LenoButtonSecondaryBorder = Color(0xFFE2EAE6)
 val LenoButtonDestructiveBg = Color(0xFFD93025)
 val LenoButtonDestructiveText = Color(0xFFFFFFFF)
 val LenoButtonDestructiveLight = Color(0xFFFDE8E7)
-val LenoButtonGhost = Color(0xFF16A36A)
+val LenoButtonGhost = Color(0xFF087F5B)
 
 // 6. CHAT COLORS
-val LenoEmeraldSent = Color(0xFF059669) // Emerald-green outgoing bubble
-val LenoEmeraldSentText = Color(0xFFFFFFFF) // White text on emerald
-val LenoEmeraldSentTime = Color(0xD9FFFFFF) // 85% white timestamp
-val LenoSoftMintReceived = Color(0xFFE8F5E9) // Soft-mint incoming bubble
-val LenoSoftMintReceivedBorder = Color(0xFFC8E6C9) // Soft-mint border
-val LenoDarkGreenText = Color(0xFF064E3B) // Dark-green text on soft mint
-val LenoDarkGreenTime = Color(0xFF2D6A4F) // Readable dark-green timestamp
-val LenoTickCyan = Color(0xFF38BDF8) // High-contrast cyan read tick on emerald
+val LenoEmeraldSent = Color(0xFF087F5B) // Sent messages: deep green bubbles #087F5B
+val LenoEmeraldSentText = Color(0xFFFFFFFF) // White text on deep green
+val LenoEmeraldSentTime = Color(0xD9FFFFFF) // Crisp readable white timestamp
+val LenoSoftMintReceived = Color(0xFFFFFFFF) // Received messages: white bubbles #FFFFFF
+val LenoSoftMintReceivedBorder = Color(0xFFE2EAE6) // Subtle border
+val LenoDarkGreenText = Color(0xFF172B25) // Dark text #172B25 on white
+val LenoDarkGreenTime = Color(0xFF84918B) // Secondary text #84918B timestamp
+val LenoTickCyan = Color(0xFF80E5BA) // Subtle mint/cyan read tick on deep green
 
 val LenoChatSentBubble = LenoEmeraldSent
 val LenoChatSentText = LenoEmeraldSentText
@@ -129,18 +131,18 @@ val LenoProfileActionBtn = Color(0xFFF1F5F3)
 
 // 8. NAVIGATION COLORS
 val LenoNavBottomBg = Color(0xFFFFFFFF)
-val LenoNavSelectedIcon = Color(0xFF16A36A)
-val LenoNavSelectedLabel = Color(0xFF16A36A)
-val LenoNavUnselectedIcon = Color(0xFF8A9691)
-val LenoNavUnselectedLabel = Color(0xFF8A9691)
-val LenoNavDivider = Color(0xFFE1E7E4)
+val LenoNavSelectedIcon = Color(0xFF087F5B)
+val LenoNavSelectedLabel = Color(0xFF087F5B)
+val LenoNavUnselectedIcon = Color(0xFF84918B)
+val LenoNavUnselectedLabel = Color(0xFF84918B)
+val LenoNavDivider = Color(0xFFE2EAE6)
 
 // 9. SEARCH & DISCOVERY COLORS
-val LenoSearchBg = Color(0xFFF1F5F3)
-val LenoSearchBackground = Color(0xFFF1F5F3)
-val LenoSearchText = Color(0xFF111111)
-val LenoSearchPlaceholder = Color(0xFF8A9691)
-val LenoSearchIcon = Color(0xFF5F6B66)
+val LenoSearchBg = Color(0xFFFFFFFF)
+val LenoSearchBackground = Color(0xFFFFFFFF)
+val LenoSearchText = Color(0xFF172B25)
+val LenoSearchPlaceholder = Color(0xFF84918B)
+val LenoSearchIcon = Color(0xFF087F5B)
 val LenoSearchResultBackground = Color(0xFFFFFFFF)
 val LenoSearchResultName = Color(0xFF111111)
 val LenoSearchResultUsername = Color(0xFF5F6B66)

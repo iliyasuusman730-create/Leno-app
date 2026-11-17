@@ -58,6 +58,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -90,6 +91,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
@@ -118,7 +120,13 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import com.example.util.LessonProgressManager
+import com.example.util.CurriculumSectionHelper
+import com.example.ui.theme.LocalLenoDarkTheme
 import com.example.viewmodel.LenoViewModel
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.runtime.collectAsState
 
 @Composable
 fun ClassRoomGroupDialog(
@@ -138,19 +146,40 @@ fun ClassRoomGroupDialog(
     onOpenCertificate: ((ClassEntity) -> Unit)? = null,
     viewModel: LenoViewModel? = null,
     onRemoveStudent: ((studentUserId: String, studentName: String) -> Unit)? = null,
-    onAddStudent: ((studentUserId: String, studentLinoId: String, studentName: String) -> Unit)? = null
+    onAddStudent: ((studentUserId: String, studentLinoId: String, studentName: String) -> Unit)? = null,
+    onEditClass: (() -> Unit)? = null,
+    initialTab: Int = 0
 ) {
     val context = LocalContext.current
-    var selectedTab by remember { mutableIntStateOf(0) }
+    val isDark = LocalLenoDarkTheme.current
+    var selectedTab by remember(classItem.classId) { mutableIntStateOf(initialTab) }
     var studentForCertificateAward by remember { mutableStateOf<Pair<String, String>?>(null) }
     var studentToRemove by remember { mutableStateOf<Pair<String, String>?>(null) }
     var showAddStudentDialog by remember { mutableStateOf(false) }
-    val tabs = listOf("❓ Q&A (${questions.size})", "📚 Lessons (${lessons.size})", "👥 Members", "ℹ️ About")
+    val tabs = listOf("❓ Q&A (${questions.size})", "📚 Curriculum (${lessons.size})", "👥 Members", "ℹ️ About")
 
     val currentUserName = currentUser?.displayName?.ifBlank { currentUser.username } ?: "You"
     val currentUserLinoId = currentUser?.linoId?.ifBlank {
         "LEN-${(currentUser.userId).replace("usr_", "").padEnd(8, '0').take(8).uppercase()}"
     } ?: "LEN-00000000"
+
+    val isOwnerInstructor = classItem.instructorUserId == (currentUser?.userId ?: "")
+    val isAnotherTeacher = (currentUser?.isTeacher == true || currentUser?.role.equals("TEACHER", true) || currentUser?.teacherStatus.equals("APPROVED", true)) && !isOwnerInstructor && !isAdmin
+
+    if (isAnotherTeacher) {
+        LaunchedEffect(Unit) {
+            Toast.makeText(context, "Unauthorized: Teachers cannot access another teacher's class.", Toast.LENGTH_LONG).show()
+            onDismiss()
+        }
+        return
+    }
+
+    LaunchedEffect(classItem.classId, currentUser?.userId) {
+        val uid = currentUser?.userId.orEmpty()
+        if (uid.isNotBlank()) {
+            LessonProgressManager.recordLastOpenedClass(context, uid, classItem.classId)
+        }
+    }
 
     val effectiveInstructor = isInstructor || isAdmin
 
@@ -166,34 +195,35 @@ fun ClassRoomGroupDialog(
 
         Surface(
             modifier = Modifier
-                .fillMaxWidth(0.96f)
-                .fillMaxHeight(0.94f)
-                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .fillMaxSize()
                 .imePadding()
-                .clip(RoundedCornerShape(20.dp)),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 8.dp
+                .testTag("classroom_fullscreen_root"),
+            color = MaterialTheme.colorScheme.background
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Header Bar with visible navigation back button on top-left
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .navigationBarsPadding()
+            ) {
+                // Full-screen edge-to-edge Header Bar
                 Surface(
-                    color = LenoPrimary,
+                    color = if (isDark) Color(0xFF0A3B2C) else LenoPrimary,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 10.dp)
+                            .statusBarsPadding()
+                            .padding(horizontal = 8.dp, vertical = 10.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Clear Back Button on the top left
                             IconButton(
                                 onClick = onDismiss,
                                 modifier = Modifier
-                                    .size(40.dp)
+                                    .size(48.dp)
                                     .testTag("classroom_back_button")
                             ) {
                                 Icon(
@@ -203,11 +233,9 @@ fun ClassRoomGroupDialog(
                                 )
                             }
 
-                            Spacer(modifier = Modifier.width(4.dp))
-
                             Box(
                                 modifier = Modifier
-                                    .size(34.dp)
+                                    .size(36.dp)
                                     .clip(CircleShape)
                                     .background(Color.White.copy(alpha = 0.2f)),
                                 contentAlignment = Alignment.Center
@@ -216,17 +244,17 @@ fun ClassRoomGroupDialog(
                                     imageVector = Icons.Default.School,
                                     contentDescription = null,
                                     tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(19.dp)
                                 )
                             }
 
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
 
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = classItem.title,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 15.sp,
+                                    fontSize = 16.sp,
                                     color = Color.White,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -247,10 +275,25 @@ fun ClassRoomGroupDialog(
                                 )
                             }
 
+                            if ((isOwnerInstructor || isAdmin) && onEditClass != null) {
+                                IconButton(
+                                    onClick = onEditClass,
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .testTag("classroom_header_edit_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Edit Class",
+                                        tint = Color.White
+                                    )
+                                }
+                            }
+
                             IconButton(
                                 onClick = onDismiss,
                                 modifier = Modifier
-                                    .size(36.dp)
+                                    .size(48.dp)
                                     .testTag("classroom_close_button")
                             ) {
                                 Icon(
@@ -364,7 +407,11 @@ fun ClassRoomGroupDialog(
                             }
                         )
 
-                        3 -> ClassAboutTab(classItem = classItem)
+                        3 -> ClassAboutTab(
+                            classItem = classItem,
+                            canEdit = isOwnerInstructor || isAdmin,
+                            onEditClass = onEditClass
+                        )
                     }
                 }
             }
@@ -664,10 +711,15 @@ private fun ClassQuestionsTab(
         }
     }
 
+    val isDarkQna = LocalLenoDarkTheme.current
     Column(modifier = Modifier.fillMaxSize()) {
         // Notice Banner
         Surface(
-            color = if (isInstructor) LenoPrimaryVeryLight else Color(0xFFE8F5E9),
+            color = if (isDarkQna) {
+                if (isInstructor) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) else Color(0xFF103324)
+            } else {
+                if (isInstructor) LenoPrimaryVeryLight else Color(0xFFE8F5E9)
+            },
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
@@ -677,7 +729,7 @@ private fun ClassQuestionsTab(
                 Icon(
                     imageVector = Icons.Default.Info,
                     contentDescription = null,
-                    tint = if (isInstructor) LenoPrimaryDark else Color(0xFF2E7D32),
+                    tint = if (isDarkQna) Color(0xFF6EE7B7) else if (isInstructor) LenoPrimaryDark else Color(0xFF2E7D32),
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
@@ -688,7 +740,7 @@ private fun ClassQuestionsTab(
                         "Student Rule: In this class, students can only ask questions. Your teacher will reply with verified answers and lesson notes."
                     },
                     fontSize = 11.sp,
-                    color = if (isInstructor) LenoPrimaryDark else Color(0xFF1B5E20),
+                    color = if (isDarkQna) Color(0xFFD1FAE5) else if (isInstructor) LenoPrimaryDark else Color(0xFF1B5E20),
                     lineHeight = 15.sp
                 )
             }
@@ -867,8 +919,8 @@ private fun ClassQuestionsTab(
                                 Spacer(modifier = Modifier.height(10.dp))
                                 Surface(
                                     shape = RoundedCornerShape(10.dp),
-                                    color = Color(0xFFF1F8E9),
-                                    border = BorderStroke(1.dp, Color(0xFFA5D6A7)),
+                                    color = if (isDarkQna) Color(0xFF103324) else Color(0xFFF1F8E9),
+                                    border = BorderStroke(1.dp, if (isDarkQna) Color(0xFF10B981).copy(alpha = 0.5f) else Color(0xFFA5D6A7)),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Column(modifier = Modifier.padding(10.dp)) {
@@ -881,7 +933,7 @@ private fun ClassQuestionsTab(
                                                 Icon(
                                                     imageVector = Icons.Default.Verified,
                                                     contentDescription = null,
-                                                    tint = Color(0xFF2E7D32),
+                                                    tint = if (isDarkQna) Color(0xFF6EE7B7) else Color(0xFF2E7D32),
                                                     modifier = Modifier.size(14.dp)
                                                 )
                                                 Spacer(modifier = Modifier.width(4.dp))
@@ -889,14 +941,14 @@ private fun ClassQuestionsTab(
                                                     text = "Teacher's Verified Answer",
                                                     fontWeight = FontWeight.Bold,
                                                     fontSize = 11.sp,
-                                                    color = Color(0xFF2E7D32)
+                                                    color = if (isDarkQna) Color(0xFF6EE7B7) else Color(0xFF2E7D32)
                                                 )
                                             }
                                             if (q.answeredAt > 0) {
                                                 Text(
                                                     text = timeFormat.format(Date(q.answeredAt)),
                                                     fontSize = 9.sp,
-                                                    color = Color(0xFF558B2F)
+                                                    color = if (isDarkQna) Color(0xFFA7F3D0) else Color(0xFF558B2F)
                                                 )
                                             }
                                         }
@@ -906,7 +958,7 @@ private fun ClassQuestionsTab(
                                             Text(
                                                 text = q.answerText,
                                                 fontSize = 12.sp,
-                                                color = Color(0xFF1B5E20),
+                                                color = if (isDarkQna) Color(0xFFECFDF5) else Color(0xFF1B5E20),
                                                 lineHeight = 17.sp
                                             )
                                         }
@@ -917,7 +969,7 @@ private fun ClassQuestionsTab(
                                             ClassVoiceNotePlayer(
                                                 audioUrl = q.answerAudioUrl,
                                                 durationSec = q.answerAudioDurationSeconds,
-                                                accentColor = Color(0xFF2E7D32),
+                                                accentColor = if (isDarkQna) Color(0xFF34D399) else Color(0xFF2E7D32),
                                                 label = "Teacher Voice Explanation"
                                             )
                                         }
@@ -1568,7 +1620,7 @@ private fun ClassQuestionsTab(
 }
 
 // ----------------------------------------------------
-// TAB 1: LESSONS / SYLLABUS
+// TAB 1: CURRICULUM SECTIONS & LESSONS
 // ----------------------------------------------------
 @Composable
 private fun ClassLessonsTab(
@@ -1581,88 +1633,97 @@ private fun ClassLessonsTab(
     onOpenCertificate: ((ClassEntity) -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val isDark = LocalLenoDarkTheme.current
+    val updateTick by LessonProgressManager.updateTick.collectAsState()
+    val curriculumSections = remember(lessons) {
+        CurriculumSectionHelper.groupLessonsIntoSections(lessons)
+    }
+
+    val doneBg = if (isDark) Color(0xFF103324) else Color(0xFFF0FDF4)
+    val doneBorder = if (isDark) Color(0xFF10B981).copy(alpha = 0.5f) else Color(0xFF86EFAC)
+    val doneText = if (isDark) Color(0xFF6EE7B7) else Color(0xFF15803D)
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(12.dp)
+            .padding(14.dp)
     ) {
         if (isInstructor) {
             Button(
                 onClick = onAddLesson,
                 colors = ButtonDefaults.buttonColors(containerColor = LenoPrimary),
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp)
                     .testTag("add_lesson_btn")
             ) {
-                Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Add New Lesson to Class", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Text("Add New Lesson to Curriculum", fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(12.dp))
         }
 
         // Student learning progress bar
         if (currentUserId.isNotBlank() && lessons.isNotEmpty()) {
-            val completedCount = remember(lessons, currentUserId) {
+            val completedCount = remember(lessons, currentUserId, updateTick) {
                 LessonProgressManager.getCompletedCount(context, currentUserId, classItem.classId)
             }
-            val progressFraction = if (lessons.isNotEmpty()) (completedCount.toFloat() / lessons.size.toFloat()).coerceIn(0f, 1f) else 0f
+            val progressFraction = (completedCount.toFloat() / lessons.size.toFloat()).coerceIn(0f, 1f)
             val progressPercent = (progressFraction * 100).toInt()
 
             Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = Color(0xFFF0FDF4),
-                border = BorderStroke(1.dp, Color(0xFF86EFAC)),
+                shape = RoundedCornerShape(14.dp),
+                color = doneBg,
+                border = BorderStroke(1.dp, doneBorder),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 10.dp)
+                    .padding(bottom = 12.dp)
             ) {
-                Column(modifier = Modifier.padding(10.dp)) {
+                Column(modifier = Modifier.padding(12.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (completedCount >= lessons.size) "🎓 All Lessons Completed!" else "Your Progress",
-                            fontSize = 11.sp,
+                            text = if (completedCount >= lessons.size) "🎓 All Lessons Completed!" else "Course Progress",
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (completedCount >= lessons.size) Color(0xFF15803D) else Color(0xFF166534)
+                            color = doneText
                         )
                         Text(
                             text = "$completedCount of ${lessons.size} Lessons ($progressPercent%)",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF166534)
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = doneText
                         )
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     LinearProgressIndicator(
                         progress = { progressFraction },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(6.dp)
-                            .clip(RoundedCornerShape(3.dp)),
+                            .height(7.dp)
+                            .clip(RoundedCornerShape(4.dp)),
                         color = Color(0xFF22C55E),
-                        trackColor = Color(0xFFDCFCE7)
+                        trackColor = if (isDark) Color(0xFF1B3B2B) else Color(0xFFDCFCE7)
                     )
 
-                    val isCertAwarded = remember(classItem.classId, currentUserId) {
+                    val isCertAwarded = remember(classItem.classId, currentUserId, updateTick) {
                         LessonProgressManager.isCertificateAwarded(context, classItem.classId, currentUserId)
                     }
 
                     if (isCertAwarded && onOpenCertificate != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
                         Button(
                             onClick = { onOpenCertificate(classItem) },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(34.dp)
+                                .defaultMinSize(minHeight = 44.dp)
                                 .testTag("classroom_view_cert_btn")
                         ) {
                             Icon(
@@ -1674,7 +1735,7 @@ private fun ClassLessonsTab(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "View Teacher-Awarded Certificate 🎓",
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
@@ -1684,7 +1745,7 @@ private fun ClassLessonsTab(
                         Text(
                             text = "🎓 Certificates are officially awarded by your teacher based on your hard work, quiz scores, and course results.",
                             fontSize = 10.sp,
-                            color = Color(0xFF166534),
+                            color = doneText.copy(alpha = 0.9f),
                             lineHeight = 14.sp
                         )
                     }
@@ -1692,7 +1753,7 @@ private fun ClassLessonsTab(
             }
         }
 
-        if (lessons.isEmpty()) {
+        if (curriculumSections.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1715,113 +1776,33 @@ private fun ClassLessonsTab(
                 }
             }
         } else {
+            // Find first section that still has uncompleted lessons to expand by default
+            val firstIncompleteSectionIdx = remember(curriculumSections, currentUserId, updateTick) {
+                if (currentUserId.isBlank()) 0
+                else curriculumSections.indexOfFirst { sec ->
+                    sec.lessons.any { !LessonProgressManager.isLessonCompleted(context, currentUserId, classItem.classId, it.lessonId) }
+                }.takeIf { it >= 0 } ?: 0
+            }
+
             LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxSize()
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("classroom_curriculum_list")
             ) {
-                items(lessons) { lesson ->
-                    val isDone = remember(lesson.lessonId, currentUserId) {
-                        if (currentUserId.isNotBlank()) {
-                            LessonProgressManager.isLessonCompleted(context, currentUserId, classItem.classId, lesson.lessonId)
-                        } else false
-                    }
-
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        border = BorderStroke(1.dp, if (isDone) Color(0xFF86EFAC) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onOpenLesson(lesson) }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(if (isDone) Color(0xFFDCFCE7) else LenoPrimaryVeryLight),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (isDone) {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = null,
-                                            tint = Color(0xFF15803D),
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    } else {
-                                        Text(
-                                            text = "${lesson.orderIndex}",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 14.sp,
-                                            color = LenoPrimaryDark
-                                        )
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.width(10.dp))
-
-                                Column {
-                                    Text(
-                                        text = lesson.title,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = if (lesson.summary.isNotBlank()) lesson.summary else "Tap to read structured notes & exercises",
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1
-                                    )
-                                }
-                            }
-
-                            if (isDone) {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = Color(0xFFDCFCE7),
-                                    border = BorderStroke(1.dp, Color(0xFF22C55E))
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF16A34A), modifier = Modifier.size(12.dp))
-                                        Spacer(modifier = Modifier.width(3.dp))
-                                        Text(
-                                            text = "Done ✓",
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF166534)
-                                        )
-                                    }
-                                }
-                            } else {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = LenoPrimary
-                                ) {
-                                    Text(
-                                        text = "Read →",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White,
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
+                items(curriculumSections.size) { index ->
+                    val section = curriculumSections[index]
+                    CollapsibleCurriculumSectionCard(
+                        section = section,
+                        classId = classItem.classId,
+                        currentUserId = currentUserId,
+                        isLocked = false,
+                        initiallyExpanded = index == firstIncompleteSectionIdx || curriculumSections.size <= 2,
+                        onOpenLesson = onOpenLesson
+                    )
                 }
+
+                item { Spacer(modifier = Modifier.height(16.dp)) }
             }
         }
     }
@@ -1845,21 +1826,12 @@ private fun ClassMembersTab(
     onPromptRemoveStudent: (studentId: String, studentName: String) -> Unit = { _, _ -> }
 ) {
     val context = LocalContext.current
+    val progressUpdateTick by LessonProgressManager.updateTick.collectAsState()
     val otherEnrolled = enrolledStudents.filter { it.userId != currentUser?.userId && it.userId != classItem.instructorUserId }
-    val displayedClassmates: List<Triple<String, String, String>> = if (otherEnrolled.isNotEmpty()) {
-        otherEnrolled.map { student ->
-            val name = student.displayName.ifBlank { student.username }
-            val linoId = student.linoId.ifBlank { "LEN-${student.userId.replace("usr_", "").padEnd(8, '0').take(8).uppercase()}" }
-            Triple(student.userId, name, linoId)
-        }
-    } else {
-        listOf(
-            Triple("std_fatima", "Fatima Dahiru", "LEN-84920153"),
-            Triple("std_abubakar", "Abubakar Sani", "LEN-93041285"),
-            Triple("std_maryam", "Maryam Bello", "LEN-47103829"),
-            Triple("std_usman", "Usman Aliyu", "LEN-62947103"),
-            Triple("std_zainab", "Zainab Kabir", "LEN-51829470")
-        )
+    val displayedClassmates: List<Triple<String, String, String>> = otherEnrolled.map { student ->
+        val name = student.displayName.ifBlank { student.username }
+        val linoId = student.linoId.ifBlank { "LEN-${student.userId.replace("usr_", "").padEnd(8, '0').take(8).uppercase()}" }
+        Triple(student.userId, name, linoId)
     }
 
     LazyColumn(
@@ -1880,10 +1852,13 @@ private fun ClassMembersTab(
 
         // Instructor Card
         item {
+            val isDarkMembers = LocalLenoDarkTheme.current
             Card(
                 shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = LenoPrimaryVeryLight),
-                border = BorderStroke(1.dp, LenoPrimaryLight),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isDarkMembers) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f) else LenoPrimaryVeryLight
+                ),
+                border = BorderStroke(1.dp, if (isDarkMembers) LenoPrimary.copy(alpha = 0.4f) else LenoPrimaryLight),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
@@ -1912,13 +1887,16 @@ private fun ClassMembersTab(
 
                         Spacer(modifier = Modifier.width(10.dp))
 
-                        Column {
+                        Column(modifier = Modifier.weight(1f, fill = false)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     text = classItem.instructorName,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Surface(
@@ -1930,6 +1908,8 @@ private fun ClassMembersTab(
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White,
+                                        maxLines = 1,
+                                        softWrap = false,
                                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                                     )
                                 }
@@ -2000,15 +1980,16 @@ private fun ClassMembersTab(
 
         // YOU (Current User) Member Card
         item {
-            val myCertAwarded = remember(classItem.classId, currentUser?.userId) {
+            val isDarkYou = LocalLenoDarkTheme.current
+            val myCertAwarded = remember(classItem.classId, currentUser?.userId, progressUpdateTick) {
                 if (currentUser?.userId.isNullOrBlank()) false
                 else LessonProgressManager.isCertificateAwarded(context, classItem.classId, currentUser?.userId!!)
             }
 
             Card(
                 shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
-                border = BorderStroke(1.5.dp, Color(0xFF81C784)),
+                colors = CardDefaults.cardColors(containerColor = if (isDarkYou) Color(0xFF103324) else Color(0xFFE8F5E9)),
+                border = BorderStroke(1.5.dp, if (isDarkYou) Color(0xFF10B981).copy(alpha = 0.5f) else Color(0xFF81C784)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
@@ -2037,13 +2018,16 @@ private fun ClassMembersTab(
 
                         Spacer(modifier = Modifier.width(10.dp))
 
-                        Column {
+                        Column(modifier = Modifier.weight(1f, fill = false)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     text = currentUserName,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp,
-                                    color = Color(0xFF1B5E20)
+                                    color = if (isDarkYou) Color(0xFFECFDF5) else Color(0xFF1B5E20),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Surface(
@@ -2055,6 +2039,8 @@ private fun ClassMembersTab(
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White,
+                                        maxLines = 1,
+                                        softWrap = false,
                                         modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                                     )
                                 }
@@ -2064,7 +2050,7 @@ private fun ClassMembersTab(
                                 text = "Leno ID: $currentUserLinoId",
                                 fontSize = 11.sp,
                                 fontFamily = FontFamily.Monospace,
-                                color = Color(0xFF2E7D32)
+                                color = if (isDarkYou) Color(0xFF6EE7B7) else Color(0xFF2E7D32)
                             )
                         }
                     }
@@ -2087,6 +2073,24 @@ private fun ClassMembersTab(
                             modifier = Modifier.size(20.dp)
                         )
                     }
+                }
+            }
+        }
+
+        if (displayedClassmates.isEmpty()) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = if (isInstructor) "No students enrolled yet. Tap + Add Student or share the class code."
+                        else "No other students enrolled yet.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(14.dp)
+                    )
                 }
             }
         }
@@ -2125,13 +2129,16 @@ private fun ClassMembersTab(
 
                         Spacer(modifier = Modifier.width(10.dp))
 
-                        Column {
+                        Column(modifier = Modifier.weight(1f, fill = false)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     text = classmate.second,
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 13.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Surface(
@@ -2142,6 +2149,8 @@ private fun ClassMembersTab(
                                         text = "Student",
                                         fontSize = 9.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        softWrap = false,
                                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                                     )
                                 }
@@ -2161,7 +2170,7 @@ private fun ClassMembersTab(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            val isCertAwarded = remember(classItem.classId, classmate.first) {
+                            val isCertAwarded = remember(classItem.classId, classmate.first, progressUpdateTick) {
                                 LessonProgressManager.isCertificateAwarded(context, classItem.classId, classmate.first)
                             }
                             if (isCertAwarded) {
@@ -2219,8 +2228,13 @@ private fun ClassMembersTab(
 // TAB 3: ABOUT / CLASS INFO & SCHOOL SHARING
 // ----------------------------------------------------
 @Composable
-private fun ClassAboutTab(classItem: ClassEntity) {
+private fun ClassAboutTab(
+    classItem: ClassEntity,
+    canEdit: Boolean = false,
+    onEditClass: (() -> Unit)? = null
+) {
     val context = LocalContext.current
+    val isDarkAbout = LocalLenoDarkTheme.current
     val classCode = remember(classItem.classId) {
         LessonProgressManager.formatClassCode(classItem.classId)
     }
@@ -2233,8 +2247,10 @@ private fun ClassAboutTab(classItem: ClassEntity) {
         // School & Private Class Share Card
         Card(
             shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = LenoPrimaryVeryLight),
-            border = BorderStroke(1.dp, LenoPrimaryLight),
+            colors = CardDefaults.cardColors(
+                containerColor = if (isDarkAbout) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f) else LenoPrimaryVeryLight
+            ),
+            border = BorderStroke(1.dp, if (isDarkAbout) LenoPrimary.copy(alpha = 0.4f) else LenoPrimaryLight),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
@@ -2247,17 +2263,29 @@ private fun ClassAboutTab(classItem: ClassEntity) {
                         text = "School & Class Access Code",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = LenoPrimaryDark
+                        color = if (isDarkAbout) MaterialTheme.colorScheme.onPrimaryContainer else LenoPrimaryDark
                     )
                     Surface(
                         shape = RoundedCornerShape(6.dp),
-                        color = if (classItem.status.equals("PRIVATE", ignoreCase = true)) Color(0xFFF3F4F6) else LenoPrimaryLight
+                        color = if (classItem.status.equals("PRIVATE", ignoreCase = true)) {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        } else if (isDarkAbout) {
+                            LenoPrimary
+                        } else {
+                            LenoPrimaryLight
+                        }
                     ) {
                         Text(
                             text = if (classItem.status.equals("PRIVATE", ignoreCase = true)) "🔒 Private Class" else "🌐 Public Class",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (classItem.status.equals("PRIVATE", ignoreCase = true)) Color(0xFF4B5563) else LenoPrimaryDark,
+                            color = if (classItem.status.equals("PRIVATE", ignoreCase = true)) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else if (isDarkAbout) {
+                                Color.White
+                            } else {
+                                LenoPrimaryDark
+                            },
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
@@ -2280,8 +2308,8 @@ private fun ClassAboutTab(classItem: ClassEntity) {
                 ) {
                     Surface(
                         shape = RoundedCornerShape(8.dp),
-                        color = Color.White,
-                        border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier
                             .weight(1f)
                             .clickable {
@@ -2297,8 +2325,14 @@ private fun ClassAboutTab(classItem: ClassEntity) {
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Column {
-                                Text("Class Code", fontSize = 9.sp, color = Color.Gray)
-                                Text(classCode, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text("Class Code", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    classCode,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
                             }
                             Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = LenoPrimary, modifier = Modifier.size(14.dp))
                         }
@@ -2306,8 +2340,8 @@ private fun ClassAboutTab(classItem: ClassEntity) {
 
                     Surface(
                         shape = RoundedCornerShape(8.dp),
-                        color = Color.White,
-                        border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier
                             .weight(1f)
                             .clickable {
@@ -2323,8 +2357,14 @@ private fun ClassAboutTab(classItem: ClassEntity) {
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Column {
-                                Text("Teacher ID", fontSize = 9.sp, color = Color.Gray)
-                                Text(classItem.instructorLinoId, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text("Teacher ID", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    classItem.instructorLinoId,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
                             }
                             Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = LenoPrimary, modifier = Modifier.size(14.dp))
                         }
@@ -2393,6 +2433,22 @@ private fun ClassAboutTab(classItem: ClassEntity) {
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface
                 )
+            }
+        }
+
+        if (canEdit && onEditClass != null) {
+            Spacer(modifier = Modifier.height(14.dp))
+            Button(
+                onClick = onEditClass,
+                colors = ButtonDefaults.buttonColors(containerColor = LenoPrimary),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("classroom_edit_class_btn")
+            ) {
+                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Edit Class Details", fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
         }
     }

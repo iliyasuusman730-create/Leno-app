@@ -23,16 +23,21 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.BrightnessAuto
-import androidx.compose.material.icons.filled.DataSaverOn
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.DataSaverOn
+import androidx.compose.material.icons.filled.HeadsetMic
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Password
+import androidx.compose.material.icons.filled.Pin
 import androidx.compose.material.icons.filled.SwitchAccount
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -47,6 +52,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,13 +70,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.ui.components.AdminTeacherApplicationsDialog
+import com.example.ui.components.ChangePasswordDialog
+import com.example.ui.components.ContactSupportDialog
+import com.example.ui.components.DisableSecurityPinDialog
+import com.example.ui.components.SetupSecurityPinDialog
 import com.example.util.ThemeMode
 import com.example.viewmodel.LenoViewModel
-
-import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.filled.HeadsetMic
-import androidx.compose.material.icons.filled.HelpOutline
-import com.example.ui.components.ContactSupportDialog
 
 @Composable
 fun SettingsScreen(
@@ -84,14 +89,18 @@ fun SettingsScreen(
     val userSettings by viewModel.userSettings.collectAsState()
     val themeMode by viewModel.themeMode.collectAsState()
     val isDarkSystem = isSystemInDarkTheme()
-    val isDarkActive = when (themeMode) {
-        ThemeMode.SYSTEM -> isDarkSystem
-        ThemeMode.DARK -> true
-        ThemeMode.LIGHT -> false
-    }
+    val isDarkActive = com.example.ui.theme.LocalLenoDarkTheme.current
+    val accentColor = if (isDarkActive) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
 
     val blockedList by viewModel.blockedUsers.collectAsState()
     val allUsers by viewModel.allUsers.collectAsState()
+    val isPinEnabled by viewModel.isSecurityPinEnabled.collectAsState()
+
+    LaunchedEffect(currentUser?.userId) {
+        if (currentUser != null) {
+            viewModel.refreshSecurityState()
+        }
+    }
 
     var lowDataMode by remember(userSettings) { mutableStateOf(userSettings?.lowDataMode ?: false) }
     var notificationsEnabled by remember(userSettings) { mutableStateOf(userSettings?.notificationsEnabled ?: true) }
@@ -100,6 +109,9 @@ fun SettingsScreen(
     var showBlockedUsersModal by remember { mutableStateOf(false) }
     var showAdminTeacherApplicationsDialog by remember { mutableStateOf(false) }
     var showContactSupportDialog by remember { mutableStateOf(false) }
+    var showChangePasswordDialog by remember { mutableStateOf(false) }
+    var showSetupPinDialog by remember { mutableStateOf(false) }
+    var showDisablePinDialog by remember { mutableStateOf(false) }
 
     val scrollState = rememberScrollState()
     val context = LocalContext.current
@@ -123,7 +135,7 @@ fun SettingsScreen(
         Text(
             text = "App Preferences",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.primary
+            color = accentColor
         )
 
         Spacer(modifier = Modifier.height(10.dp))
@@ -174,7 +186,7 @@ fun SettingsScreen(
                             ThemeMode.LIGHT -> Icons.Default.LightMode
                         },
                         contentDescription = "Theme Appearance",
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = accentColor,
                         modifier = Modifier.size(24.dp)
                     )
                     Spacer(modifier = Modifier.width(14.dp))
@@ -266,12 +278,10 @@ fun SettingsScreen(
         Text(
             text = "Privacy & Security",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.primary
+            color = accentColor
         )
 
         Spacer(modifier = Modifier.height(10.dp))
-
-        var showChangePasswordDialog by remember { mutableStateOf(false) }
 
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -282,7 +292,7 @@ fun SettingsScreen(
                 SettingActionRow(
                     icon = Icons.Default.Lock,
                     title = "Protect Your Account",
-                    subtitle = "Add a recovery method so you can regain access to your Leno account if you forget your password.",
+                    subtitle = "Manage backup recovery code, Google & email recovery, and activity log.",
                     badge = if (currentUser?.isAccountProtected == true) "Protected ✓" else "Recommended",
                     badgeColor = if (currentUser?.isAccountProtected == true) com.example.ui.theme.LenoSuccess else com.example.ui.theme.LenoPrimary,
                     onClick = { onNavigateToProtectAccount() },
@@ -292,10 +302,38 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 SettingActionRow(
+                    icon = Icons.Default.Password,
+                    title = "Change Password",
+                    subtitle = "Verify your current password and strengthen your sign-in credentials",
+                    onClick = { showChangePasswordDialog = true },
+                    tag = "setting_change_password_row"
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                SettingActionRow(
+                    icon = Icons.Default.Pin,
+                    title = "App Security PIN",
+                    subtitle = if (isPinEnabled) "Require 4–6 digit PIN on app launch" else "Add an extra PIN lock layer to protect your chats",
+                    badge = if (isPinEnabled) "Active ✓" else "Off",
+                    badgeColor = if (isPinEnabled) com.example.ui.theme.LenoSuccess else MaterialTheme.colorScheme.onSurfaceVariant,
+                    onClick = {
+                        if (isPinEnabled) {
+                            showDisablePinDialog = true
+                        } else {
+                            showSetupPinDialog = true
+                        }
+                    },
+                    tag = "setting_security_pin_row"
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                SettingActionRow(
                     icon = Icons.Default.Lock,
                     title = "Leno ID Account Security",
                     subtitle = "Account secured via Leno unique ID (${currentUser?.linoId?.ifBlank { "Active" } ?: "Active"})",
-                    onClick = { },
+                    onClick = { onNavigateToProtectAccount() },
                     tag = "setting_id_sec_row"
                 )
 
@@ -347,7 +385,7 @@ fun SettingsScreen(
         Text(
             text = "Help & Support",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.primary
+            color = accentColor
         )
 
         Spacer(modifier = Modifier.height(10.dp))
@@ -363,7 +401,7 @@ fun SettingsScreen(
                     title = "Contact Support",
                     subtitle = "Submit inquiries, report bugs, view FAQs, or reach out to our team",
                     badge = "24/7 Desk",
-                    badgeColor = com.example.ui.theme.LenoPrimary,
+                    badgeColor = accentColor,
                     onClick = { showContactSupportDialog = true },
                     tag = "setting_contact_support_row"
                 )
@@ -375,7 +413,7 @@ fun SettingsScreen(
                     title = "Leno Official Support Chat",
                     subtitle = "Live direct messaging with verified @Leno platform assistant",
                     badge = "Official",
-                    badgeColor = com.example.ui.theme.LenoPrimaryDark,
+                    badgeColor = accentColor,
                     onClick = { onOpenChat(LenoRepository.OFFICIAL_LENO_ID) },
                     tag = "setting_official_chat_row"
                 )
@@ -388,7 +426,7 @@ fun SettingsScreen(
         Text(
             text = "Account Actions",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.primary
+            color = accentColor
         )
 
         Spacer(modifier = Modifier.height(10.dp))
@@ -612,6 +650,51 @@ fun SettingsScreen(
             }
         )
     }
+
+    if (showChangePasswordDialog) {
+        val hasExistingPassword = (currentUser?.passwordHash?.isNotBlank() == true) ||
+            (currentUser?.password?.isNotBlank() == true)
+        ChangePasswordDialog(
+            hasExistingPassword = hasExistingPassword,
+            onDismiss = { showChangePasswordDialog = false },
+            onSubmit = { currentPass, newPass, callback ->
+                viewModel.changePasswordVerified(currentPass, newPass) { res ->
+                    if (res.isSuccess) {
+                        Toast.makeText(context, "Password updated ✓", Toast.LENGTH_SHORT).show()
+                    }
+                    callback(res)
+                }
+            }
+        )
+    }
+
+    if (showSetupPinDialog) {
+        SetupSecurityPinDialog(
+            onDismiss = { showSetupPinDialog = false },
+            onSubmit = { pin, callback ->
+                viewModel.setSecurityPin(pin) { res ->
+                    if (res.isSuccess) {
+                        Toast.makeText(context, "App Security PIN enabled ✓", Toast.LENGTH_SHORT).show()
+                    }
+                    callback(res)
+                }
+            }
+        )
+    }
+
+    if (showDisablePinDialog) {
+        DisableSecurityPinDialog(
+            onDismiss = { showDisablePinDialog = false },
+            onSubmit = { currentPin, callback ->
+                viewModel.disableSecurityPin(currentPin) { res ->
+                    if (res.isSuccess) {
+                        Toast.makeText(context, "App Security PIN disabled", Toast.LENGTH_SHORT).show()
+                    }
+                    callback(res)
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -632,7 +715,8 @@ fun SettingSwitchRow(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.weight(1f)
         ) {
-            Icon(icon, contentDescription = title, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+            val iconTint = if (com.example.ui.theme.LocalLenoDarkTheme.current) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
+            Icon(icon, contentDescription = title, tint = iconTint, modifier = Modifier.size(24.dp))
             Spacer(modifier = Modifier.width(14.dp))
             Column {
                 Text(title, style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp), fontWeight = FontWeight.Bold)
@@ -666,7 +750,8 @@ fun SettingActionRow(
             .testTag(tag),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, contentDescription = title, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+        val iconTint = if (com.example.ui.theme.LocalLenoDarkTheme.current) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
+        Icon(icon, contentDescription = title, tint = iconTint, modifier = Modifier.size(24.dp))
         Spacer(modifier = Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

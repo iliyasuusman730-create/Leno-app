@@ -15,6 +15,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.navigation.compose.rememberNavController
+import com.example.ui.components.AppSecurityLockOverlay
 import com.example.ui.components.CallOverlay
 import com.example.ui.navigation.LenoNavGraph
 import com.example.ui.theme.LenoTheme
@@ -46,6 +47,8 @@ class MainActivity : ComponentActivity() {
                 ThemeMode.LIGHT -> false
             }
             val callState by viewModel.callState.collectAsState()
+            val currentUser by viewModel.currentUser.collectAsState()
+            val isAppLocked by viewModel.isAppLocked.collectAsState()
 
             LenoTheme(darkTheme = isDark) {
                 val navController = rememberNavController()
@@ -63,6 +66,15 @@ class MainActivity : ComponentActivity() {
                     navController = navController,
                     viewModel = viewModel
                 )
+
+                val lockedUser = currentUser
+                if (lockedUser != null && isAppLocked) {
+                    AppSecurityLockOverlay(
+                        user = lockedUser,
+                        onVerifyPin = { pin -> viewModel.unlockAppWithPin(pin) },
+                        onForgotPinLogout = { viewModel.logout() }
+                    )
+                }
 
                 CallOverlay(
                     callState = callState,

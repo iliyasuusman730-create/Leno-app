@@ -9,27 +9,31 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
+val LocalLenoDarkTheme = staticCompositionLocalOf { false }
+
 private val DarkColorScheme = darkColorScheme(
     primary = LenoPrimary,
     onPrimary = LenoWhite,
-    primaryContainer = LenoPrimaryDark,
-    onPrimaryContainer = LenoPrimaryLight,
+    primaryContainer = Color(0xFF134030),
+    onPrimaryContainer = Color(0xFFC6F6E2),
     inversePrimary = LenoPrimaryLight,
-    secondary = LenoPrimaryLight,
-    onSecondary = SurfaceDark,
+    secondary = Color(0xFF34D399),
+    onSecondary = Color(0xFF06291D),
     secondaryContainer = Color(0xFF143023),
-    onSecondaryContainer = LenoPrimaryLight,
-    tertiary = LenoInfo,
-    onTertiary = LenoWhite,
+    onSecondaryContainer = Color(0xFFD1FAE5),
+    tertiary = Color(0xFF60A5FA),
+    onTertiary = Color(0xFF0A192F),
     tertiaryContainer = Color(0xFF1E3A8A),
-    onTertiaryContainer = LenoInfoBg,
+    onTertiaryContainer = Color(0xFFDBEAFE),
     background = BackgroundDark,
     onBackground = TextPrimaryDark,
     surface = SurfaceDark,
@@ -105,9 +109,11 @@ fun LenoTheme(
         }
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
-        content = content
-    )
+    CompositionLocalProvider(LocalLenoDarkTheme provides darkTheme) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = Typography,
+            content = content
+        )
+    }
 }
