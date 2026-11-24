@@ -138,8 +138,7 @@ fun ChatScreen(
     }
     val db = remember {
         try {
-            com.example.LenoApplication.ensureFirebaseInitialized(context)
-            FirebaseFirestore.getInstance()
+            com.example.LenoApplication.getFirestoreInstance(context)
         } catch (_: Throwable) {
             null
         }
@@ -173,8 +172,8 @@ fun ChatScreen(
     val coroutineScope = rememberCoroutineScope()
 
     // Real-time Firestore snapshot listener on the 'messages' collection via MessageRepository
-    LaunchedEffect(collectionName) {
-        messageRepository.getMessagesFlow(collectionName).collect { updatedMessages ->
+    LaunchedEffect(collectionName, currentUserId) {
+        messageRepository.getMessagesFlow(collectionName, currentUserId = currentUserId).collect { updatedMessages ->
             messages = updatedMessages
             isLoading = false
         }
@@ -522,7 +521,7 @@ fun ChatScreen(
                     },
                     enabled = !isUploadingImage
                 ) {
-                    Text("Cancel")
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         )
@@ -597,8 +596,8 @@ private fun ChatMessageBubble(
 
     val textColor = when {
         isFromMe -> Color.White
-        isDark -> Color(0xFFECFDF5)
-        else -> Color(0xFF14241F)
+        isDark -> Color(0xFFF8FAFC)
+        else -> Color(0xFF111111)
     }
     val timeColor = if (isFromMe) {
         Color.White.copy(alpha = 0.80f)

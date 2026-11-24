@@ -303,7 +303,7 @@ fun SupportChatScreen(
                     Text(
                         text = "We are in FREE Beta — Chat support is live. Low-data mode enabled.",
                         fontSize = 11.sp,
-                        color = LenoPrimaryDark,
+                        color = com.example.ui.theme.LenoBlack,
                         lineHeight = 15.sp
                     )
                 }
@@ -417,8 +417,8 @@ private fun SupportMessageBubble(
 
     val textColor = when {
         isSelf -> Color.White
-        isDarkTheme -> Color(0xFFECFDF5)
-        else -> Color(0xFF14241F)
+        isDarkTheme -> Color(0xFFF8FAFC)
+        else -> Color(0xFF111111)
     }
     val timeColor = if (isSelf) {
         Color.White.copy(alpha = 0.80f)
@@ -448,7 +448,7 @@ private fun SupportMessageBubble(
                         text = "Leno Support",
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp,
-                        color = if (isDarkTheme) MaterialTheme.colorScheme.secondary else LenoPrimaryDark
+                        color = MaterialTheme.colorScheme.onBackground
                     )
                     Spacer(modifier = Modifier.width(3.dp))
                     Icon(

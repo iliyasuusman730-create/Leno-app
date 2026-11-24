@@ -103,6 +103,7 @@ fun ProtectAccountScreen(
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     val scrollState = rememberScrollState()
+    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
 
     val isDarkTheme = com.example.ui.theme.LocalLenoDarkTheme.current
     val brandOrange = if (isDarkTheme) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
@@ -133,7 +134,6 @@ fun ProtectAccountScreen(
         }
     }
 
-    var showGoogleConnectDialog by remember { mutableStateOf(false) }
     var showEmailConnectDialog by remember { mutableStateOf(false) }
     var showCannotRemoveDialog by remember { mutableStateOf<String?>(null) }
     var showConfirmDisconnectDialog by remember { mutableStateOf<String?>(null) }
@@ -143,7 +143,6 @@ fun ProtectAccountScreen(
     var showRegenerateCodeDialog by remember { mutableStateOf(false) }
     var revealRecoveryCode by remember { mutableStateOf(false) }
 
-    var googleInput by remember { mutableStateOf("") }
     var emailInput by remember { mutableStateOf("") }
     var isProcessing by remember { mutableStateOf(false) }
     var dialogError by remember { mutableStateOf<String?>(null) }
@@ -380,7 +379,7 @@ fun ProtectAccountScreen(
                 text = "Choose a recovery method",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
-                color = brandOrange,
+                color = textPrimary,
                 modifier = Modifier.padding(start = 4.dp)
             )
 
@@ -466,10 +465,36 @@ fun ProtectAccountScreen(
                     if (!isGoogleConnected) {
                         Button(
                             onClick = {
+                                if (isProcessing) return@Button
+                                isProcessing = true
                                 dialogError = null
-                                googleInput = ""
-                                showGoogleConnectDialog = true
+                                com.example.util.GoogleAuthHelper.launchGoogleSignIn(
+                                    context = context,
+                                    scope = coroutineScope,
+                                    onAuthSuccess = { firebaseUser ->
+                                        viewModel.linkVerifiedGoogleAccount(firebaseUser) { res ->
+                                            isProcessing = false
+                                            if (res.isSuccess) {
+                                                Toast.makeText(context, "Verified Google account connected ✓", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                Toast.makeText(
+                                                    context,
+                                                    res.exceptionOrNull()?.message ?: "Failed to connect Google account",
+                                                    Toast.LENGTH_LONG
+                                                ).show()
+                                            }
+                                        }
+                                    },
+                                    onAuthError = { errMsg ->
+                                        isProcessing = false
+                                        Toast.makeText(context, errMsg, Toast.LENGTH_LONG).show()
+                                    },
+                                    onAuthCancelled = {
+                                        isProcessing = false
+                                    }
+                                )
                             },
+                            enabled = !isProcessing,
                             shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = brandOrange,
@@ -480,11 +505,19 @@ fun ProtectAccountScreen(
                                 .height(50.dp)
                                 .testTag("connect_google_button")
                         ) {
-                            Text(
-                                text = "Connect Google",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            if (isProcessing) {
+                                CircularProgressIndicator(
+                                    color = Color.White,
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Text(
+                                    text = "Connect Google",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     } else {
                         Row(
@@ -665,7 +698,7 @@ fun ProtectAccountScreen(
                 text = "Private Backup Code",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
-                color = brandOrange,
+                color = textPrimary,
                 modifier = Modifier.padding(start = 4.dp)
             )
 
@@ -819,7 +852,7 @@ fun ProtectAccountScreen(
                 text = "Password & App Lock",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
-                color = brandOrange,
+                color = textPrimary,
                 modifier = Modifier.padding(start = 4.dp)
             )
 
@@ -971,7 +1004,7 @@ fun ProtectAccountScreen(
                 text = "Recent Security Activity",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
-                color = brandOrange,
+                color = textPrimary,
                 modifier = Modifier.padding(start = 4.dp)
             )
 
@@ -1089,137 +1122,6 @@ fun ProtectAccountScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
         }
-    }
-
-    // ==========================================
-    // CONNECT GOOGLE DIALOG
-    // ==========================================
-    if (showGoogleConnectDialog) {
-        AlertDialog(
-            onDismissRequest = {
-                if (!isProcessing) showGoogleConnectDialog = false
-            },
-            containerColor = MaterialTheme.colorScheme.surface,
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceVariant),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("G", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = com.example.ui.theme.LenoInfo)
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text("Connect Google Account", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = textPrimary)
-                }
-            },
-            text = {
-                Column {
-                    Text(
-                        text = "Enter your Google account email to link it as a recovery and sign-in method for Leno:",
-                        fontSize = 14.sp,
-                        color = textSecondary
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    OutlinedTextField(
-                        value = googleInput,
-                        onValueChange = {
-                            googleInput = it
-                            dialogError = null
-                        },
-                        placeholder = { Text("e.g. user@gmail.com", color = textSecondary) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Email,
-                            imeAction = ImeAction.Done
-                        ),
-                        keyboardActions = KeyboardActions(
-                            onDone = {
-                                if (googleInput.isNotBlank()) {
-                                    isProcessing = true
-                                    viewModel.connectGoogleAccount(googleInput.trim()) { res ->
-                                        isProcessing = false
-                                        if (res.isSuccess) {
-                                            showGoogleConnectDialog = false
-                                            Toast.makeText(context, "Google account connected ✓", Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            dialogError = res.exceptionOrNull()?.message ?: "Failed to connect Google account"
-                                        }
-                                    }
-                                }
-                            }
-                        ),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = inputBg,
-                            unfocusedContainerColor = inputBg,
-                            focusedBorderColor = brandOrange,
-                            unfocusedBorderColor = inputBorder,
-                            cursorColor = brandOrange,
-                            focusedTextColor = textPrimary,
-                            unfocusedTextColor = textPrimary
-                        ),
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("google_email_input")
-                    )
-
-                    if (dialogError != null) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = dialogError ?: "",
-                            fontSize = 13.sp,
-                            color = com.example.ui.theme.LenoTextError,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val clean = googleInput.trim()
-                        if (clean.isBlank()) {
-                            dialogError = "Please enter your Google email address."
-                            return@Button
-                        }
-                        isProcessing = true
-                        dialogError = null
-                        viewModel.connectGoogleAccount(clean) { res ->
-                            isProcessing = false
-                            if (res.isSuccess) {
-                                showGoogleConnectDialog = false
-                                Toast.makeText(context, "Google account connected ✓", Toast.LENGTH_SHORT).show()
-                            } else {
-                                dialogError = res.exceptionOrNull()?.message ?: "Failed to connect Google account"
-                            }
-                        }
-                    },
-                    enabled = !isProcessing,
-                    colors = ButtonDefaults.buttonColors(containerColor = brandOrange),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.testTag("confirm_connect_google_button")
-                ) {
-                    if (isProcessing) {
-                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else {
-                        Text("Connect", color = Color.White, fontWeight = FontWeight.Bold)
-                    }
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { showGoogleConnectDialog = false },
-                    enabled = !isProcessing
-                ) {
-                    Text("Cancel", color = textSecondary)
-                }
-            }
-        )
     }
 
     // ==========================================

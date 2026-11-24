@@ -11,7 +11,9 @@ import com.example.ui.theme.LenoOfficialBadge
 import androidx.compose.material.icons.filled.Campaign
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -68,6 +70,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -79,6 +82,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -98,6 +102,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -108,8 +114,12 @@ import com.example.ui.components.ClassDetailDialog
 import com.example.ui.components.ContactSupportDialog
 import com.example.ui.components.CreateClassDialog
 import com.example.ui.components.LenoAvatar
+import com.example.ui.components.LenoSectionCard
 import com.example.ui.components.TeacherApplicationDialog
+import com.example.ui.theme.LenoPrimary
+import com.example.ui.theme.LenoPrimaryDark
 import com.example.ui.theme.OnlineGreen
+import com.example.util.LessonProgressManager
 import com.example.viewmodel.LenoViewModel
 import java.io.File
 import java.io.FileOutputStream
@@ -167,7 +177,7 @@ fun ProfileScreen(
     var isUploadingAvatar by remember { mutableStateOf(false) }
 
     val galleryLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null && user != null) {
             isUploadingAvatar = true
@@ -265,6 +275,11 @@ fun ProfileScreen(
 
     val isSmallScreenProfile = com.example.util.isSmallScreen()
 
+    val studyStreak = remember(user?.userId, enrolledClasses.size) {
+        if (user?.userId.isNullOrBlank()) 0
+        else LessonProgressManager.getStudyStreak(context, user!!.userId)
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -275,128 +290,145 @@ fun ProfileScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .widthIn(max = com.example.util.MaxContentWidth)
-                .verticalScroll(scrollState)
-                .padding(horizontal = com.example.util.responsiveHorizontalPadding(), vertical = 16.dp),
+                .verticalScroll(scrollState),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Header Title
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "My Profile",
-                        style = MaterialTheme.typography.displayLarge.copy(fontSize = com.example.util.responsiveTitleSize(22.sp, 28.sp), fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                    Spacer(modifier = Modifier.width(if (isSmallScreenProfile) 4.dp else 8.dp))
-                    if (isFetchingUsers) {
-                        CircularProgressIndicator(
-                            modifier = Modifier
-                                .size(if (isSmallScreenProfile) 16.dp else 20.dp)
-                                .testTag("profile_fetching_indicator"),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    } else {
-                        IconButton(
-                            onClick = { viewModel.refreshUserData() },
-                            modifier = Modifier
-                                .size(if (isSmallScreenProfile) 28.dp else 32.dp)
-                                .testTag("profile_refresh_button")
-                        ) {
-                            Icon(
-                                Icons.Default.Refresh,
-                                contentDescription = "Refresh Profile",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(if (isSmallScreenProfile) 18.dp else 20.dp)
-                            )
-                        }
-                    }
-                }
-
-                OutlinedButton(
-                    onClick = { showEditDialog = true },
-                    shape = RoundedCornerShape(14.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = if (isSmallScreenProfile) 8.dp else 16.dp, vertical = 8.dp),
-                    modifier = Modifier.testTag("profile_edit_button")
-                ) {
-                    Icon(Icons.Default.Edit, contentDescription = "Edit Profile", modifier = Modifier.size(if (isSmallScreenProfile) 16.dp else 18.dp))
-                    Spacer(modifier = Modifier.width(if (isSmallScreenProfile) 3.dp else 6.dp))
-                    Text(if (isSmallScreenProfile) "Edit" else "Edit Profile")
-                }
-            }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        if (user == null && isFetchingUsers) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(250.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .testTag("profile_loading_progress"),
-                        color = MaterialTheme.colorScheme.primary,
-                        strokeWidth = 3.dp
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "Fetching profile data...",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-
-        // Profile Card
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
+            // Full-bleed Emerald Cover Banner + Overlapping Circular Avatar
+            Box(modifier = Modifier.fillMaxWidth()) {
                 Box(
-                    contentAlignment = Alignment.BottomEnd,
-                    modifier = Modifier.clickable {
-                        if (user?.isOfficial != true) {
-                            showAvatarOptionsDialog = true
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(128.dp)
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    LenoPrimaryDark,
+                                    LenoPrimary,
+                                    Color(0xFF059669)
+                                )
+                            )
+                        )
+                ) {
+                    // Subtle decorative ambient circles on cover banner
+                    Box(
+                        modifier = Modifier
+                            .size(140.dp)
+                            .align(Alignment.TopStart)
+                            .padding(top = 8.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.06f))
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(96.dp)
+                            .align(Alignment.BottomEnd)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.08f))
+                    )
+
+                    // Floating translucent top-right Refresh & Edit buttons
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(horizontal = 12.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color.Black.copy(alpha = 0.28f),
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            if (isFetchingUsers) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier
+                                            .size(18.dp)
+                                            .testTag("profile_fetching_indicator"),
+                                        strokeWidth = 2.dp,
+                                        color = Color.White
+                                    )
+                                }
+                            } else {
+                                IconButton(
+                                    onClick = { viewModel.refreshUserData() },
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .testTag("profile_refresh_button")
+                                ) {
+                                    Icon(
+                                        Icons.Default.Refresh,
+                                        contentDescription = "Refresh Profile",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Surface(
+                            shape = CircleShape,
+                            color = Color.Black.copy(alpha = 0.28f),
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            IconButton(
+                                onClick = { showEditDialog = true },
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .testTag("profile_edit_button")
+                            ) {
+                                Icon(
+                                    Icons.Default.Edit,
+                                    contentDescription = "Edit Profile",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
+                }
+
+                // Overlapping Avatar with crisp background cutout ring
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 78.dp)
+                        .clickable {
+                            if (user?.isOfficial != true) {
+                                showAvatarOptionsDialog = true
+                            }
+                        }
                 ) {
-                    LenoAvatar(
-                        avatarUrl = user?.avatarUrl,
-                        isOfficial = user?.isOfficial == true,
-                        size = 110.dp,
-                        contentDescription = "Profile Avatar",
-                        username = user?.username
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(104.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.background)
+                            .padding(4.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        LenoAvatar(
+                            avatarUrl = user?.avatarUrl,
+                            isOfficial = user?.isOfficial == true,
+                            size = 96.dp,
+                            contentDescription = "Profile Avatar",
+                            username = user?.username
+                        )
+                    }
                     Box(
                         modifier = Modifier
                             .size(22.dp)
                             .clip(CircleShape)
                             .background(if (user?.isOnline == true) OnlineGreen else MaterialTheme.colorScheme.outline)
+                            .border(2.5.dp, MaterialTheme.colorScheme.background, CircleShape)
                             .align(Alignment.BottomStart)
                     )
                     if (user?.isOfficial != true) {
                         FilledIconButton(
                             onClick = { showAvatarOptionsDialog = true },
                             modifier = Modifier
-                                .size(36.dp)
+                                .size(34.dp)
                                 .align(Alignment.BottomEnd)
                                 .testTag("profile_camera_button"),
                             colors = IconButtonDefaults.filledIconButtonColors(
@@ -407,184 +439,258 @@ fun ProfileScreen(
                             Icon(
                                 Icons.Default.CameraAlt,
                                 contentDescription = "Change Profile Photo",
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
                 }
+            }
 
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Text(
-                        text = user?.displayName ?: "User",
-                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                    )
-                    if (user?.hasVerifiedBadge == true) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        OfficialVerifiedBadge(size = 20.dp)
-                    }
-                }
-
-                Text(
-                    text = "@${user?.username ?: "username"}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold
-                )
-
-                // Role Differentiation: Only approved teachers show who they are (Leno is for everyone, not just students)
-                val existingAppForHeader = teacherApplications.firstOrNull { it.userId == currentUser?.userId }
-                val isExplicitStudentHeader = user?.role.equals("STUDENT", ignoreCase = true) || (user?.role.equals("USER", ignoreCase = true) && !user?.teacherStatus.equals("APPROVED", ignoreCase = true) && existingAppForHeader?.isApproved != true)
-                val isTeacher = !isExplicitStudentHeader && (user?.isTeacher == true || userTeacherRole?.isTeacher == true || userTeacherRole?.isApprovedTeacher == true || userTeacherRole?.status == "Teacher" || userTeacherRole?.status == "Trusted Teacher" || userTeacherRole?.status == "APPROVED" || existingAppForHeader?.isApproved == true)
-                val isTrusted = !isExplicitStudentHeader && userTeacherRole?.isTrustedTeacher == true
-                val isCreator = userTeacherRole?.isContentCreator == true
-                val approvedSubject = user?.effectiveSubject?.ifBlank { userTeacherRole?.effectiveApprovedSubject ?: "" } ?: (userTeacherRole?.effectiveApprovedSubject ?: "")
-
-                if (isTeacher || isTrusted || isCreator) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
+            // Inner padded profile column for clean edge alignment across all lower cards
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = com.example.util.responsiveHorizontalPadding(), vertical = 10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                if (user == null && isFetchingUsers) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        if (isTeacher) {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = com.example.ui.theme.LenoPrimary,
-                                contentColor = Color.White
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.School,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(13.dp),
-                                        tint = Color.White
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = if (approvedSubject.isNotBlank()) "Teacher • $approvedSubject ✓" else "Teacher ✓",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-                        if (isTrusted) {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = Color(0xFF1976D2),
-                                contentColor = Color.White
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Verified,
-                                        contentDescription = "Trusted",
-                                        modifier = Modifier.size(13.dp),
-                                        tint = Color.White
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "Trusted ✓",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-                        if (isCreator) {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = Color(0xFF7B1FA2),
-                                contentColor = Color.White
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Star,
-                                        contentDescription = "Content Creator",
-                                        modifier = Modifier.size(13.dp),
-                                        tint = Color.White
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "Content Creator",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Person,
-                                contentDescription = null,
-                                modifier = Modifier.size(13.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .testTag("profile_loading_progress"),
+                                color = MaterialTheme.colorScheme.primary,
+                                strokeWidth = 3.dp
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                text = "Student / Learner",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
+                                text = "Fetching profile data...",
+                                style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
-                }
+                } else {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = user?.displayName ?: "User",
+                            style = MaterialTheme.typography.titleLarge.copy(fontSize = 23.sp, fontWeight = FontWeight.Bold),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (user?.hasVerifiedBadge == true) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            OfficialVerifiedBadge(size = 20.dp)
+                        }
+                    }
 
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Status message pill
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                ) {
                     Text(
-                        text = user?.statusMessage ?: "Hey there! I am using Leno.",
+                        text = "@${user?.username ?: "username"}",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        fontWeight = FontWeight.SemiBold
                     )
+
+                    // Show verified role badges only for teachers/trusted/creators (no clutter pill for regular learners)
+                    val existingAppForHeader = teacherApplications.firstOrNull { it.userId == currentUser?.userId }
+                    val isExplicitStudentHeader = user?.role.equals("STUDENT", ignoreCase = true) || (user?.role.equals("USER", ignoreCase = true) && !user?.teacherStatus.equals("APPROVED", ignoreCase = true) && existingAppForHeader?.isApproved != true)
+                    val isTeacher = !isExplicitStudentHeader && (user?.isTeacher == true || userTeacherRole?.isTeacher == true || userTeacherRole?.isApprovedTeacher == true || userTeacherRole?.status == "Teacher" || userTeacherRole?.status == "Trusted Teacher" || userTeacherRole?.status == "APPROVED" || existingAppForHeader?.isApproved == true)
+                    val isTrusted = !isExplicitStudentHeader && userTeacherRole?.isTrustedTeacher == true
+                    val isCreator = userTeacherRole?.isContentCreator == true
+                    val approvedSubject = user?.effectiveSubject?.ifBlank { userTeacherRole?.effectiveApprovedSubject ?: "" } ?: (userTeacherRole?.effectiveApprovedSubject ?: "")
+
+                    if (isTeacher || isTrusted || isCreator) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (isTeacher) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = LenoPrimary,
+                                    contentColor = Color.White
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.School,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(13.dp),
+                                            tint = Color.White
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = if (approvedSubject.isNotBlank()) "Teacher • $approvedSubject ✓" else "Teacher ✓",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                            if (isTrusted) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFF1976D2),
+                                    contentColor = Color.White
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Verified,
+                                            contentDescription = "Trusted",
+                                            modifier = Modifier.size(13.dp),
+                                            tint = Color.White
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Trusted ✓",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                            if (isCreator) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFF7B1FA2),
+                                    contentColor = Color.White
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Star,
+                                            contentDescription = "Content Creator",
+                                            modifier = Modifier.size(13.dp),
+                                            tint = Color.White
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Content Creator",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    val displayBio = user?.bio?.takeIf { it.isNotBlank() && it != "No bio added yet." }
+                        ?: user?.statusMessage?.takeIf { it.isNotBlank() }
+                    if (displayBio != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = displayBio,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Clean 3-column Stats Strip
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "${enrolledClasses.size}",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp, fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Enrolled",
+                                    fontSize = 11.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            VerticalDivider(
+                                modifier = Modifier.height(28.dp),
+                                thickness = 0.5.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant
+                            )
+
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "${createdClasses.size}",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp, fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Created",
+                                    fontSize = 11.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            VerticalDivider(
+                                modifier = Modifier.height(28.dp),
+                                thickness = 0.5.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant
+                            )
+
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = if (studyStreak > 0) "${studyStreak}d" else if (user?.isOnline == true) "Online" else "Away",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp, fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (studyStreak > 0) "Streak" else "Status",
+                                    fontSize = 11.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
                 }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text(
-                    text = user?.bio ?: "No bio added yet.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
-        }
 
         // Leno ID Identity Banner Card
         if (linoIdValue.isNotBlank()) {
             Spacer(modifier = Modifier.height(20.dp))
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(18.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp)
@@ -599,7 +705,7 @@ fun ProfileScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Surface(
                             color = com.example.ui.theme.LenoIdBadgeBg,
-                            shape = RoundedCornerShape(6.dp),
+                            shape = RoundedCornerShape(50),
                             modifier = Modifier.padding(bottom = 6.dp)
                         ) {
                             Text(
@@ -608,14 +714,14 @@ fun ProfileScreen(
                                 fontWeight = FontWeight.Bold,
                                 color = com.example.ui.theme.LenoIdBadgeText,
                                 letterSpacing = 1.sp,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
                             )
                         }
                         Text(
                             text = linoIdValue,
                             fontSize = 22.sp,
-                            fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = com.example.ui.theme.LenoMonoFont,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
@@ -630,9 +736,9 @@ fun ProfileScreen(
                             clipboardManager.setText(AnnotatedString(linoIdValue))
                             Toast.makeText(context, "Leno ID copied: $linoIdValue", Toast.LENGTH_SHORT).show()
                         },
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(50),
                         colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = com.example.ui.theme.LenoPrimary
+                            contentColor = MaterialTheme.colorScheme.onSurface
                         ),
                         border = androidx.compose.foundation.BorderStroke(1.dp, com.example.ui.theme.LenoBorderDefault),
                         modifier = Modifier.testTag("profile_copy_lino_id_button")
@@ -700,7 +806,7 @@ fun ProfileScreen(
                                             text = "App Owner",
                                             fontSize = 10.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = com.example.ui.theme.LenoPrimaryDark,
+                                            color = com.example.ui.theme.LenoBlack,
                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                         )
                                     }
@@ -735,7 +841,7 @@ fun ProfileScreen(
                                     text = "All Clear",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = com.example.ui.theme.LenoPrimaryDark,
+                                    color = com.example.ui.theme.LenoBlack,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                 )
                             }
@@ -769,28 +875,35 @@ fun ProfileScreen(
             Spacer(modifier = Modifier.height(20.dp))
         }
 
-        // Quick Online Switch
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-        ) {
+        Text(
+            text = "ACCOUNT & VISIBILITY",
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.8.sp
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 4.dp, bottom = 8.dp)
+        )
+
+        LenoSectionCard {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Online Visibility",
-                        style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
+                        style = MaterialTheme.typography.titleMedium.copy(fontSize = 15.5.sp),
                         fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = if (user?.isOnline == true) "Friends can see you're active" else "You appear offline",
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -805,20 +918,17 @@ fun ProfileScreen(
                     )
                 )
             }
-        }
 
-        Spacer(modifier = Modifier.height(20.dp))
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                thickness = 0.5.dp,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
 
-        // Content Creator Role Card
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-        ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -844,7 +954,7 @@ fun ProfileScreen(
                     Column {
                         Text(
                             text = "Content Creator Role",
-                            style = MaterialTheme.typography.titleMedium.copy(fontSize = 15.sp),
+                            style = MaterialTheme.typography.titleMedium.copy(fontSize = 15.5.sp),
                             fontWeight = FontWeight.Bold
                         )
                         Text(
@@ -868,6 +978,18 @@ fun ProfileScreen(
         }
 
         Spacer(modifier = Modifier.height(20.dp))
+
+        Text(
+            text = "TEACHING & LEARNING",
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.8.sp
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 4.dp, bottom = 8.dp)
+        )
 
         // Teacher Role & Dashboard Card - STRICTLY ISOLATED
         // Normal users and students are NEVER allowed to access Teacher Dashboard
@@ -964,7 +1086,7 @@ fun ProfileScreen(
                                 text = "$teacherSingleSubject (1 Subject Assigned)",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                         }
                     } else if (!userTeacherRole?.subjects.isNullOrBlank()) {
@@ -973,7 +1095,7 @@ fun ProfileScreen(
                             text = "Assigned Subject: ${userTeacherRole?.subjects}",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                     }
 
@@ -1007,7 +1129,7 @@ fun ProfileScreen(
                                     text = createdClasses.size.toString(),
                                     fontSize = 20.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = com.example.ui.theme.LenoPrimaryDark
+                                    color = com.example.ui.theme.LenoBlack
                                 )
                                 Text(
                                     text = "Classes",
@@ -1032,7 +1154,7 @@ fun ProfileScreen(
                                     text = totalStudents.toString(),
                                     fontSize = 20.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = com.example.ui.theme.LenoPrimaryDark
+                                    color = com.example.ui.theme.LenoBlack
                                 )
                                 Text(
                                     text = "Students",
@@ -1056,7 +1178,7 @@ fun ProfileScreen(
                                     text = "Active",
                                     fontSize = 18.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = com.example.ui.theme.LenoPrimaryDark
+                                    color = com.example.ui.theme.LenoBlack
                                 )
                                 Text(
                                     text = "Status",
@@ -1106,7 +1228,7 @@ fun ProfileScreen(
                                         text = "100% Student Fee Payout",
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = com.example.ui.theme.LenoPrimaryDark,
+                                        color = com.example.ui.theme.LenoBlack,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
                                 }
@@ -1128,7 +1250,7 @@ fun ProfileScreen(
                                         text = "₦" + String.format("%,.2f", userTeacherRole?.availableBalance ?: 0.0),
                                         fontSize = 19.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = com.example.ui.theme.LenoPrimaryDark
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
                                 }
                                 Column(horizontalAlignment = Alignment.End) {
@@ -1177,7 +1299,7 @@ fun ProfileScreen(
                                         onClick = { showBankSettlementDialog = true },
                                         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                                     ) {
-                                        Text("Edit Bank", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        Text("Edit Bank", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                                     }
                                 }
                             } else {
@@ -1262,7 +1384,8 @@ fun ProfileScreen(
                             Text(
                                 text = if (manageClassesExpanded) "Hide Classes" else "Manage Classes",
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                         }
                     }
@@ -1388,7 +1511,7 @@ fun ProfileScreen(
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("View Application Details", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("View Application Details", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                     }
                 }
             }
@@ -1563,7 +1686,7 @@ fun ProfileScreen(
                                         shape = RoundedCornerShape(10.dp),
                                         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                     ) {
-                                        Text("Go to Class", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        Text("Go to Class", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF111111))
                                     }
                                 }
                             }
@@ -1608,12 +1731,20 @@ fun ProfileScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
+        Text(
+            text = "PROFILE DETAILS",
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.8.sp
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 4.dp, bottom = 8.dp)
+        )
+
         // Info details card - NO phone number
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-        ) {
+        LenoSectionCard {
             Column(modifier = Modifier.padding(16.dp)) {
                 ProfileInfoRow(
                     icon = Icons.Default.Badge,
@@ -1635,20 +1766,26 @@ fun ProfileScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // Protect Your Account Card
-        Card(
+        Text(
+            text = "SECURITY & SUPPORT",
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.8.sp
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { onNavigateToProtectAccount() }
-                .testTag("profile_protect_account_card"),
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = androidx.compose.foundation.BorderStroke(1.dp, com.example.ui.theme.LenoBorderDefault)
-        ) {
+                .padding(start = 4.dp, bottom = 8.dp)
+        )
+
+        // Grouped Security & Support Section Card
+        LenoSectionCard {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
+                    .clickable { onNavigateToProtectAccount() }
+                    .padding(16.dp)
+                    .testTag("profile_protect_account_card"),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 val isProtected = user?.isAccountProtected == true
@@ -1666,7 +1803,7 @@ fun ProfileScreen(
                         imageVector = if (isProtected) Icons.Default.CheckCircle else Icons.Default.Lock,
                         contentDescription = "Protect Your Account",
                         tint = statusColor,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                 }
 
@@ -1676,7 +1813,7 @@ fun ProfileScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = "Protect Your Account",
-                            style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
+                            style = MaterialTheme.typography.titleMedium.copy(fontSize = 15.5.sp),
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -1684,45 +1821,40 @@ fun ProfileScreen(
                         if (isProtected) {
                             Text(
                                 text = "Protected ✓",
-                                fontSize = 12.sp,
+                                fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = com.example.ui.theme.LenoSuccess
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                         } else {
                             Text(
                                 text = "Recommended",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = com.example.ui.theme.LenoPrimary
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                         }
                     }
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = "Add a recovery method so you can regain access to your Leno account if you forget your password.",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 16.sp),
+                        style = MaterialTheme.typography.bodySmall.copy(lineHeight = 16.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
-        }
 
-        Spacer(modifier = Modifier.height(20.dp))
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                thickness = 0.5.dp,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
 
-        // Help & Support Desk Card
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { showContactSupportDialog = true }
-                .testTag("profile_contact_support_card"),
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = androidx.compose.foundation.BorderStroke(1.dp, com.example.ui.theme.LenoPrimaryLight)
-        ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
+                    .clickable { showContactSupportDialog = true }
+                    .padding(16.dp)
+                    .testTag("profile_contact_support_card"),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
@@ -1736,7 +1868,7 @@ fun ProfileScreen(
                         imageVector = Icons.Default.HeadsetMic,
                         contentDescription = "Contact Support",
                         tint = com.example.ui.theme.LenoPrimary,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                 }
 
@@ -1746,7 +1878,7 @@ fun ProfileScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = "Help & Contact Support",
-                            style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
+                            style = MaterialTheme.typography.titleMedium.copy(fontSize = 15.5.sp),
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -1755,28 +1887,26 @@ fun ProfileScreen(
                             text = "24/7 Desk",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = com.example.ui.theme.LenoPrimary
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                     }
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = "Submit tickets, get help with teacher applications, classes, FAQs, or chat with official Leno support.",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 16.sp),
+                        style = MaterialTheme.typography.bodySmall.copy(lineHeight = 16.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         // Account & Logout Card
         var showLogoutConfirmDialog by remember { mutableStateOf(false) }
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        LenoSectionCard(
+            borderColor = MaterialTheme.colorScheme.error.copy(alpha = 0.25f)
         ) {
             Row(
                 modifier = Modifier
@@ -1790,19 +1920,19 @@ fun ProfileScreen(
                     Icons.AutoMirrored.Filled.Logout,
                     contentDescription = "Log Out",
                     tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(22.dp)
                 )
                 Spacer(modifier = Modifier.width(14.dp))
                 Column {
                     Text(
                         text = "Log Out",
-                        style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
+                        style = MaterialTheme.typography.titleMedium.copy(fontSize = 15.5.sp),
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.error
                     )
                     Text(
                         text = "Sign out of your Leno account on this device",
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -1821,7 +1951,6 @@ fun ProfileScreen(
                             viewModel.logout {
                                 onLogout()
                             }
-                            onLogout()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                         modifier = Modifier.testTag("confirm_logout_button")
@@ -1831,11 +1960,13 @@ fun ProfileScreen(
                 },
                 dismissButton = {
                     TextButton(onClick = { showLogoutConfirmDialog = false }) {
-                        Text("Cancel")
+                        Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
                     }
                 }
             )
         }
+        Spacer(modifier = Modifier.height(16.dp))
+    } // end padded lower column
     }
 }
 
@@ -1861,7 +1992,11 @@ fun ProfileScreen(
                             .fillMaxWidth()
                             .clickable {
                                 showAvatarOptionsDialog = false
-                                galleryLauncher.launch("image/*")
+                                galleryLauncher.launch(
+                                    androidx.activity.result.PickVisualMediaRequest(
+                                        ActivityResultContracts.PickVisualMedia.ImageOnly
+                                    )
+                                )
                             }
                             .testTag("upload_gallery_option"),
                         shape = RoundedCornerShape(12.dp),
@@ -1932,7 +2067,7 @@ fun ProfileScreen(
             confirmButton = {},
             dismissButton = {
                 TextButton(onClick = { showAvatarOptionsDialog = false }) {
-                    Text("Cancel")
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         )
@@ -1948,7 +2083,7 @@ fun ProfileScreen(
         var isSavingProfile by remember { mutableStateOf(false) }
 
         val dialogGalleryLauncher = rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.GetContent()
+            contract = ActivityResultContracts.PickVisualMedia()
         ) { uri: Uri? ->
             if (uri != null) {
                 try {
@@ -2011,21 +2146,27 @@ fun ProfileScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         OutlinedButton(
-                            onClick = { dialogGalleryLauncher.launch("image/*") },
+                            onClick = {
+                                dialogGalleryLauncher.launch(
+                                    androidx.activity.result.PickVisualMediaRequest(
+                                        ActivityResultContracts.PickVisualMedia.ImageOnly
+                                    )
+                                )
+                            },
                             modifier = Modifier.weight(1f).testTag("dialog_gallery_button")
                         ) {
-                            Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface)
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Gallery", fontSize = 12.sp)
+                            Text("Gallery", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
                         }
 
                         OutlinedButton(
                             onClick = { dialogCameraPermissionLauncher.launch(Manifest.permission.CAMERA) },
                             modifier = Modifier.weight(1f).testTag("dialog_camera_button")
                         ) {
-                            Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface)
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Camera", fontSize = 12.sp)
+                            Text("Camera", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
                         }
                     }
 
@@ -2165,7 +2306,7 @@ fun ProfileScreen(
                     onClick = { showEditDialog = false },
                     enabled = !isSavingProfile
                 ) {
-                    Text("Cancel")
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         )
@@ -2185,7 +2326,7 @@ fun ProfileScreen(
             teacherRole = userTeacherRole,
             existingApplication = existingApp,
             onDismiss = { showTeacherAppDialog = false },
-            onSubmit = { subject, level, qual, exp, intro, cert, sampleTeaching, agreed ->
+            onSubmit = { subject, level, qual, exp, intro, cert, sampleTeaching, agreed, onResult ->
                 viewModel.submitTeacherApplication(
                     subject = subject,
                     teachingLevel = level,
@@ -2197,6 +2338,7 @@ fun ProfileScreen(
                     agreedToGuidelines = agreed
                 ) { success, msg ->
                     Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                    onResult(success, msg)
                     if (success) {
                         showTeacherAppDialog = false
                     }
@@ -2308,7 +2450,7 @@ fun ProfileScreen(
                                     text = bank,
                                     fontSize = 11.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isSelected) Color.White else com.example.ui.theme.LenoPrimaryDark,
+                                    color = if (isSelected) Color.White else com.example.ui.theme.LenoBlack,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                 )
                             }
@@ -2357,7 +2499,7 @@ fun ProfileScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showBankSettlementDialog = false }) {
-                    Text("Cancel")
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         )
@@ -2416,7 +2558,7 @@ fun ProfileScreen(
                             text = "₦" + String.format("%,.2f", available),
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
-                            color = com.example.ui.theme.LenoPrimaryDark
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                     }
 
@@ -2484,7 +2626,7 @@ fun ProfileScreen(
                     onClick = { showPayoutDialog = false },
                     enabled = !isSubmitting
                 ) {
-                    Text("Cancel")
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         )

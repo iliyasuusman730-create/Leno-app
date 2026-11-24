@@ -3,7 +3,9 @@ package com.example.ui.theme
 import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -13,12 +15,20 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 
 val LocalLenoDarkTheme = staticCompositionLocalOf { false }
+
+val LenoShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(24.dp),
+    extraLarge = RoundedCornerShape(28.dp)
+)
 
 private val DarkColorScheme = darkColorScheme(
     primary = LenoPrimary,
@@ -36,7 +46,7 @@ private val DarkColorScheme = darkColorScheme(
     onTertiaryContainer = Color(0xFFDBEAFE),
     background = BackgroundDark,
     onBackground = TextPrimaryDark,
-    surface = SurfaceDark,
+    surface = Color(0xFF161F1B),
     onSurface = TextPrimaryDark,
     surfaceVariant = SurfaceVariantDark,
     onSurfaceVariant = TextSecondaryDark,
@@ -47,8 +57,8 @@ private val DarkColorScheme = darkColorScheme(
     onError = LenoWhite,
     errorContainer = ErrorContainerDark,
     onErrorContainer = OnErrorContainerDark,
-    outline = OutlineDark,
-    outlineVariant = OutlineVariantDark,
+    outline = Color(0xFF2D3C35),
+    outlineVariant = Color(0xFF222E28),
     scrim = LenoModalBackdrop
 )
 
@@ -56,7 +66,7 @@ private val LightColorScheme = lightColorScheme(
     primary = LenoPrimary,
     onPrimary = LenoWhite,
     primaryContainer = LenoPrimaryLight,
-    onPrimaryContainer = LenoPrimaryDark,
+    onPrimaryContainer = LenoBlack,
     inversePrimary = LenoPrimaryLight,
     secondary = LenoPrimaryDark,
     onSecondary = LenoWhite,
@@ -113,6 +123,7 @@ fun LenoTheme(
         MaterialTheme(
             colorScheme = colorScheme,
             typography = Typography,
+            shapes = LenoShapes,
             content = content
         )
     }

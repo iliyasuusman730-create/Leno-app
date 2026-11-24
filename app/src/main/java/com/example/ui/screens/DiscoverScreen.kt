@@ -1,13 +1,17 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -37,6 +41,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -45,6 +50,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.ui.graphics.Color
 import com.example.ui.theme.LenoNavDivider
+import com.example.ui.theme.LenoPrimary
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -64,6 +70,10 @@ import com.example.data.LenoRepository
 import com.example.data.entity.UserEntity
 import com.example.ui.components.AddContactDialog
 import com.example.ui.components.LenoAvatar
+import com.example.ui.components.LenoEmptyState
+import com.example.ui.components.LenoHeaderActionButton
+import com.example.ui.components.LenoSearchPill
+import com.example.ui.components.LenoTabHeader
 import com.example.ui.components.OfficialVerifiedBadge
 import com.example.ui.theme.OnlineGreen
 import com.example.viewmodel.LenoViewModel
@@ -99,24 +109,22 @@ fun DiscoverScreen(
                 .filter { (it.senderId == myId || it.receiverId == myId) && it.senderId != it.receiverId }
                 .map { if (it.senderId == myId) it.receiverId else it.senderId }
                 .filter { it.isNotBlank() && it != myId && it != LenoRepository.OFFICIAL_LENO_ID }
-                .map { pId ->
-                    backupPartners.firstOrNull { 
-                        it.userId == pId || 
-                        (it.username.isNotBlank() && it.username.equals(pId, true)) || 
-                        (it.linoId.isNotBlank() && it.linoId.equals(pId, true)) 
+                .mapNotNull { pId ->
+                    allUsersList.firstOrNull {
+                        it.userId == pId ||
+                        (it.username.isNotBlank() && it.username.equals(pId, true)) ||
+                        (it.linoId.isNotBlank() && it.linoId.equals(pId, true))
                     }
-                    ?: backupAccounts.firstOrNull { 
-                        it.userId == pId || 
-                        (it.username.isNotBlank() && it.username.equals(pId, true)) || 
-                        (it.linoId.isNotBlank() && it.linoId.equals(pId, true)) 
+                    ?: backupPartners.firstOrNull {
+                        it.userId == pId ||
+                        (it.username.isNotBlank() && it.username.equals(pId, true)) ||
+                        (it.linoId.isNotBlank() && it.linoId.equals(pId, true))
                     }
-                    ?: UserEntity(
-                        userId = pId,
-                        username = if (pId.startsWith("usr_")) pId.removePrefix("usr_").take(10) else if (pId.startsWith("LEN-")) pId.removePrefix("LEN-").take(10) else pId.take(12),
-                        displayName = if (pId.startsWith("usr_")) "User ${pId.takeLast(4)}" else if (pId.startsWith("LEN-")) "User $pId" else "User ${pId.take(6)}",
-                        bio = "Connecting on Leno ✨",
-                        isCurrentUser = false
-                    )
+                    ?: backupAccounts.firstOrNull {
+                        it.userId == pId ||
+                        (it.username.isNotBlank() && it.username.equals(pId, true)) ||
+                        (it.linoId.isNotBlank() && it.linoId.equals(pId, true))
+                    }
                 }
             (contactsList + chatPartnersList + backupPartners + backupAccounts + partnersFromMessages + allUsersList)
                 .distinctBy { it.userId }
@@ -125,10 +133,21 @@ fun DiscoverScreen(
     }
 
     var showAddContactDialog by remember { mutableStateOf(false) }
+    var isSearchOpen by remember { mutableStateOf(false) }
     val isSmall = com.example.util.isSmallScreen()
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(myId) {
         viewModel.refreshUserData()
+        val msgPartnerIds = viewModel.repository.messageBackupStore?.getAllMessages().orEmpty()
+            .filter { (it.senderId == myId || it.receiverId == myId) && it.senderId != it.receiverId }
+            .map { if (it.senderId == myId) it.receiverId else it.senderId }
+            .filter { it.isNotBlank() && it != myId && it != LenoRepository.OFFICIAL_LENO_ID }
+            .distinct()
+        for (pId in msgPartnerIds) {
+            if (allUsersList.none { it.userId == pId }) {
+                viewModel.repository.fetchAndSyncUserProfile(pId)
+            }
+        }
     }
 
     Box(
@@ -141,85 +160,34 @@ fun DiscoverScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .widthIn(max = com.example.util.MaxContentWidth)
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .padding(horizontal = 16.dp, vertical = 4.dp)
         ) {
-            // Top Bar matching Image 2: + Add Contact button on the top right
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
+            LenoTabHeader(
+                title = "Contacts",
+                subtitle = if (displayList.isNotEmpty()) "${displayList.size} connection${if (displayList.size == 1) "" else "s"}" else "Find peers & teachers"
             ) {
-                Button(
-                    onClick = { showAddContactDialog = true },
-                    shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    ),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                    modifier = Modifier.testTag("discover_add_contact_btn")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PersonAdd,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "+ Add Contact",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                }
+                LenoHeaderActionButton(
+                    icon = if (isSearchOpen) Icons.Default.Close else Icons.Default.Search,
+                    contentDescription = if (isSearchOpen) "Close search" else "Search contacts",
+                    isActive = isSearchOpen,
+                    onClick = {
+                        isSearchOpen = !isSearchOpen
+                        if (!isSearchOpen) viewModel.searchQuery.value = ""
+                    },
+                    modifier = Modifier.testTag("discover_search_toggle_btn")
+                )
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Capsule/Pill Search Input matching Image 2
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { viewModel.searchQuery.value = it },
-                placeholder = {
-                    Text(
-                        "Search by name, @username, or Leno ID...",
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+            LenoSearchPill(
+                visible = isSearchOpen || searchQuery.isNotEmpty(),
+                query = searchQuery,
+                onQueryChange = { viewModel.searchQuery.value = it },
+                placeholder = "Search by name, @username, or Leno ID...",
+                onCloseOrClear = {
+                    if (searchQuery.isNotEmpty()) viewModel.searchQuery.value = "" else isSearchOpen = false
                 },
-                leadingIcon = {
-                    Icon(
-                        Icons.Default.Search,
-                        contentDescription = "Search",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { viewModel.searchQuery.value = "" }) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                },
-                singleLine = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("discover_search_input"),
-                shape = RoundedCornerShape(24.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                    cursorColor = MaterialTheme.colorScheme.primary,
-                    focusedBorderColor = Color.Transparent,
-                    unfocusedBorderColor = Color.Transparent
-                )
+                inputTestTag = "discover_search_input"
             )
-
-            Spacer(modifier = Modifier.height(14.dp))
 
         if (isFetchingUsers && displayList.isEmpty() && pendingUsers.isEmpty()) {
             Box(
@@ -250,7 +218,8 @@ fun DiscoverScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                contentPadding = PaddingValues(top = 4.dp, bottom = 88.dp)
             ) {
                 // PENDING CONNECTION REQUESTS SECTION (Visible when not actively searching)
                 if (!isSearching && pendingUsers.isNotEmpty()) {
@@ -267,7 +236,7 @@ fun DiscoverScreen(
                                     text = "Connection Requests",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
+                                    color = MaterialTheme.colorScheme.onBackground
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Badge(
@@ -303,57 +272,21 @@ fun DiscoverScreen(
                 // EMPTY CONTACTS / SEARCH RESULTS STATE
                 if (displayList.isEmpty()) {
                     item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = if (!isSearching && pendingUsers.isNotEmpty()) 20.dp else 40.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center,
-                                modifier = Modifier.padding(24.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (isSearching) Icons.Default.Search else Icons.Default.People,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.outline,
-                                    modifier = Modifier.size(56.dp)
-                                )
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text(
-                                    text = if (isSearching) "No users found matching \"$searchQuery\"" else "No contacts or connections yet",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = if (isSearching) {
-                                        "Try searching with an exact Leno ID, username or phone number."
-                                    } else if (pendingUsers.isNotEmpty()) {
-                                        "Accept pending connection requests above or search to connect with more users."
-                                    } else {
-                                        "Search by Leno ID or username to find friends and add them to your contacts."
-                                    },
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                )
-                                if (!isSearching && pendingUsers.isEmpty()) {
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    Button(
-                                        onClick = { showAddContactDialog = true },
-                                        shape = RoundedCornerShape(12.dp),
-                                        modifier = Modifier.testTag("discover_empty_add_contact_btn")
-                                    ) {
-                                        Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Add Someone by ID")
-                                    }
-                                }
-                            }
-                        }
+                        LenoEmptyState(
+                            icon = if (isSearching) Icons.Default.Search else Icons.Default.People,
+                            title = if (isSearching) "No users found matching \"$searchQuery\"" else "No contacts or connections yet",
+                            subtitle = if (isSearching) {
+                                "Try searching with an exact Leno ID, username or phone number."
+                            } else if (pendingUsers.isNotEmpty()) {
+                                "Accept pending connection requests above or search to connect with more users."
+                            } else {
+                                "Search by Leno ID or username to find friends and add them to your contacts."
+                            },
+                            actionLabel = if (!isSearching && pendingUsers.isEmpty()) "Add Someone by ID" else null,
+                            onAction = if (!isSearching && pendingUsers.isEmpty()) ({ showAddContactDialog = true }) else null,
+                            actionTestTag = "discover_empty_add_contact_btn",
+                            modifier = Modifier.fillParentMaxWidth()
+                        )
                     }
                 } else {
                     // CONTACTS / SEARCH LIST matching Image 2
@@ -375,6 +308,21 @@ fun DiscoverScreen(
             }
         }
     }
+
+        // Single Clean Floating Action Button for Add Contact
+        FloatingActionButton(
+            onClick = { showAddContactDialog = true },
+            shape = RoundedCornerShape(16.dp),
+            containerColor = LenoPrimary,
+            contentColor = Color.White,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(bottom = 16.dp, end = 16.dp)
+                .size(56.dp)
+                .testTag("discover_add_contact_btn")
+        ) {
+            Icon(Icons.Default.PersonAdd, contentDescription = "Add Contact", tint = Color.White)
+        }
 }
 
     if (showAddContactDialog) {
@@ -461,7 +409,7 @@ fun IncomingRequestCard(
                     Text(
                         text = if (requester.linoId.isNotBlank()) "@${requester.username} • ${requester.linoId}" else "@${requester.username}",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.Medium
                     )
                     Text(
@@ -584,9 +532,10 @@ fun DiscoverUserCard(
                 if (targetUser.isOnline && !isOfficial) {
                     Box(
                         modifier = Modifier
-                            .size(13.dp)
+                            .size(14.dp)
                             .clip(CircleShape)
                             .background(OnlineGreen)
+                            .border(2.dp, MaterialTheme.colorScheme.background, CircleShape)
                             .align(Alignment.BottomEnd)
                     )
                 }
@@ -594,11 +543,9 @@ fun DiscoverUserCard(
 
             Spacer(modifier = Modifier.width(14.dp))
 
-            // Name & @username • Leno ID
+            // Name & @username • Leno ID (Tap anywhere on row to view profile)
             Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable { onOpenProfile(targetUser.userId) }
+                modifier = Modifier.weight(1f)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -624,57 +571,19 @@ fun DiscoverUserCard(
                 )
             }
 
-            Spacer(modifier = Modifier.width(8.dp))
-
-            // Action Pill Buttons matching Image 2
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            // Single clean chat shortcut icon (row tap opens profile)
+            IconButton(
+                onClick = { onOpenChat(targetUser.userId) },
+                modifier = Modifier
+                    .size(48.dp)
+                    .testTag("discover_message_button_${targetUser.username}")
             ) {
-                Button(
-                    onClick = { onOpenChat(targetUser.userId) },
-                    shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    ),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 7.dp),
-                    modifier = Modifier.testTag("discover_message_button_${targetUser.username}")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Chat,
-                        contentDescription = null,
-                        modifier = Modifier.size(15.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Message",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-
-                OutlinedButton(
-                    onClick = { onOpenProfile(targetUser.userId) },
-                    shape = RoundedCornerShape(20.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 7.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    ),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.testTag("discover_view_profile_btn_${targetUser.username}")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = null,
-                        modifier = Modifier.size(15.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Profile",
-                        fontSize = 13.sp
-                    )
-                }
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Chat,
+                    contentDescription = "Message ${targetUser.displayName}",
+                    tint = LenoPrimary,
+                    modifier = Modifier.size(21.dp)
+                )
             }
         }
     }

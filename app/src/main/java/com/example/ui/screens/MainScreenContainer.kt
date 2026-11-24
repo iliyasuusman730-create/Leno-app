@@ -90,7 +90,7 @@ fun MainScreenContainer(
     val isSmall = isSmallScreen()
 
     LaunchedEffect(currentUser, isFetchingUserData) {
-        if (currentUser == null && !isFetchingUserData) {
+        if (currentUser == null && !isFetchingUserData && !viewModel.repository.isSessionActive()) {
             onLogout()
         }
     }
@@ -145,7 +145,7 @@ fun MainScreenContainer(
 
     val isDarkTheme = LocalLenoDarkTheme.current
     val navSelectedColor = if (isDarkTheme) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
-    val navIndicatorColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f)
+    val navIndicatorColor = LenoPrimary.copy(alpha = if (isDarkTheme) 0.24f else 0.13f)
     val navUnselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
 
     if (isLarge) {
@@ -186,7 +186,7 @@ fun MainScreenContainer(
                         onClick = { currentTabRoute = item.route },
                         colors = NavigationRailItemDefaults.colors(
                             selectedIconColor = navSelectedColor,
-                            selectedTextColor = navSelectedColor,
+                            selectedTextColor = MaterialTheme.colorScheme.onSurface,
                             indicatorColor = navIndicatorColor,
                             unselectedIconColor = navUnselectedColor,
                             unselectedTextColor = navUnselectedColor
@@ -199,7 +199,7 @@ fun MainScreenContainer(
                                 )
                                 if (item.route == Screen.ChatsTab.route && totalUnreadChatCount > 0) {
                                     Badge(
-                                        containerColor = androidx.compose.ui.graphics.Color(0xFF25D366),
+                                        containerColor = LenoPrimary,
                                         contentColor = androidx.compose.ui.graphics.Color.White
                                     ) { Text(if (totalUnreadChatCount > 99) "99+" else totalUnreadChatCount.toString()) }
                                 }
@@ -277,21 +277,23 @@ fun MainScreenContainer(
             bottomBar = {
                 androidx.compose.foundation.layout.Column {
                     androidx.compose.material3.HorizontalDivider(
-                        thickness = 1.dp,
-                        color = MaterialTheme.colorScheme.outlineVariant
+                        thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
                     )
                     NavigationBar(
                         containerColor = MaterialTheme.colorScheme.surface,
-                        contentColor = navSelectedColor
+                        contentColor = navSelectedColor,
+                        tonalElevation = 0.dp
                     ) {
                         Screen.bottomNavItems.forEach { item ->
                             val selected = currentTabRoute == item.route
                             NavigationBarItem(
                                 selected = selected,
                                 onClick = { currentTabRoute = item.route },
+                                alwaysShowLabel = true,
                                 colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
                                     selectedIconColor = navSelectedColor,
-                                    selectedTextColor = navSelectedColor,
+                                    selectedTextColor = MaterialTheme.colorScheme.onSurface,
                                     indicatorColor = navIndicatorColor,
                                     unselectedIconColor = navUnselectedColor,
                                     unselectedTextColor = navUnselectedColor
@@ -301,12 +303,12 @@ fun MainScreenContainer(
                                         Icon(
                                             imageVector = (if (selected) item.selectedIcon else item.unselectedIcon)!!,
                                             contentDescription = item.title,
-                                            modifier = Modifier.size(if (isSmall) 22.dp else 24.dp)
+                                            modifier = Modifier.size(if (isSmall) 21.dp else 23.dp)
                                         )
                                         // Show badge on Chats tab for total unread messages
                                         if (item.route == Screen.ChatsTab.route && totalUnreadChatCount > 0) {
                                             Badge(
-                                                containerColor = androidx.compose.ui.graphics.Color(0xFF25D366),
+                                                containerColor = LenoPrimary,
                                                 contentColor = androidx.compose.ui.graphics.Color.White
                                             ) { Text(if (totalUnreadChatCount > 99) "99+" else totalUnreadChatCount.toString()) }
                                         }
@@ -325,8 +327,8 @@ fun MainScreenContainer(
                                 label = {
                                     Text(
                                         text = item.title,
-                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                        fontSize = if (isSmall) 10.sp else 12.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                        fontSize = if (isSmall) 10.sp else 11.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )

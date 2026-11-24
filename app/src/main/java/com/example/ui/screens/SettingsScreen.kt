@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.BrightnessAuto
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DataSaverOn
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.HeadsetMic
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Info
@@ -38,12 +39,14 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Password
 import androidx.compose.material.icons.filled.Pin
+import androidx.compose.material.icons.filled.Policy
 import androidx.compose.material.icons.filled.SwitchAccount
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -106,6 +109,9 @@ fun SettingsScreen(
     var notificationsEnabled by remember(userSettings) { mutableStateOf(userSettings?.notificationsEnabled ?: true) }
 
     var showLogoutDialog by remember { mutableStateOf(false) }
+    var showDeleteAccountDialog by remember { mutableStateOf(false) }
+    var isDeletingAccount by remember { mutableStateOf(false) }
+    var showLegalInfoDialog by remember { mutableStateOf(false) }
     var showBlockedUsersModal by remember { mutableStateOf(false) }
     var showAdminTeacherApplicationsDialog by remember { mutableStateOf(false) }
     var showContactSupportDialog by remember { mutableStateOf(false) }
@@ -135,7 +141,7 @@ fun SettingsScreen(
         Text(
             text = "App Preferences",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            color = accentColor
+            color = MaterialTheme.colorScheme.onBackground
         )
 
         Spacer(modifier = Modifier.height(10.dp))
@@ -158,7 +164,11 @@ fun SettingsScreen(
                     tag = "setting_low_data_switch"
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                    modifier = Modifier.padding(vertical = 12.dp)
+                )
 
                 SettingSwitchRow(
                     icon = Icons.Default.Notifications,
@@ -172,7 +182,11 @@ fun SettingsScreen(
                     tag = "setting_notifications_switch"
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                    modifier = Modifier.padding(vertical = 12.dp)
+                )
 
                 // Theme Mode Selector Header
                 Row(
@@ -257,7 +271,11 @@ fun SettingsScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                    modifier = Modifier.padding(vertical = 14.dp)
+                )
 
                 SettingSwitchRow(
                     icon = Icons.Default.DarkMode,
@@ -299,7 +317,11 @@ fun SettingsScreen(
                     tag = "setting_protect_account_row"
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                    modifier = Modifier.padding(vertical = 12.dp)
+                )
 
                 SettingActionRow(
                     icon = Icons.Default.Password,
@@ -309,7 +331,11 @@ fun SettingsScreen(
                     tag = "setting_change_password_row"
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                    modifier = Modifier.padding(vertical = 12.dp)
+                )
 
                 SettingActionRow(
                     icon = Icons.Default.Pin,
@@ -327,7 +353,11 @@ fun SettingsScreen(
                     tag = "setting_security_pin_row"
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                    modifier = Modifier.padding(vertical = 12.dp)
+                )
 
                 SettingActionRow(
                     icon = Icons.Default.Lock,
@@ -337,7 +367,11 @@ fun SettingsScreen(
                     tag = "setting_id_sec_row"
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                    modifier = Modifier.padding(vertical = 12.dp)
+                )
 
                 SettingActionRow(
                     icon = Icons.Default.Block,
@@ -355,7 +389,7 @@ fun SettingsScreen(
             Text(
                 text = "App Owner & Administration",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.primary
+                color = MaterialTheme.colorScheme.onBackground
             )
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -385,7 +419,7 @@ fun SettingsScreen(
         Text(
             text = "Help & Support",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            color = accentColor
+            color = MaterialTheme.colorScheme.onBackground
         )
 
         Spacer(modifier = Modifier.height(10.dp))
@@ -406,7 +440,11 @@ fun SettingsScreen(
                     tag = "setting_contact_support_row"
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                    modifier = Modifier.padding(vertical = 12.dp)
+                )
 
                 SettingActionRow(
                     icon = Icons.AutoMirrored.Filled.Chat,
@@ -417,6 +455,20 @@ fun SettingsScreen(
                     onClick = { onOpenChat(LenoRepository.OFFICIAL_LENO_ID) },
                     tag = "setting_official_chat_row"
                 )
+
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                    modifier = Modifier.padding(vertical = 12.dp)
+                )
+
+                SettingActionRow(
+                    icon = Icons.Default.Policy,
+                    title = "Privacy Policy & Terms",
+                    subtitle = "Review how Leno handles your data, permissions, and account deletion",
+                    onClick = { showLegalInfoDialog = true },
+                    tag = "setting_privacy_terms_row"
+                )
             }
         }
 
@@ -426,7 +478,7 @@ fun SettingsScreen(
         Text(
             text = "Account Actions",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            color = accentColor
+            color = MaterialTheme.colorScheme.onBackground
         )
 
         Spacer(modifier = Modifier.height(10.dp))
@@ -441,7 +493,7 @@ fun SettingsScreen(
                     icon = Icons.Default.SwitchAccount,
                     title = "Switch Account / Sign In as Other",
                     subtitle = "Currently logged in as @${currentUser?.username ?: ""}",
-                    onClick = { onLogoutSuccess() },
+                    onClick = { viewModel.logout { onLogoutSuccess() } },
                     tag = "setting_switch_account_row"
                 )
 
@@ -452,7 +504,7 @@ fun SettingsScreen(
                         text = "Available Accounts on this device:",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     for (alt in altAccounts) {
@@ -490,8 +542,8 @@ fun SettingsScreen(
                                             Toast.makeText(context, "Switched to @${alt.username}!", Toast.LENGTH_SHORT).show()
                                         }
                                     },
-                                    shape = RoundedCornerShape(8.dp),
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    shape = RoundedCornerShape(50),
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
                                     modifier = Modifier.height(36.dp)
                                 ) {
                                     Text("Switch", fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -501,7 +553,11 @@ fun SettingsScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                    modifier = Modifier.padding(vertical = 12.dp)
+                )
 
                 Row(
                     modifier = Modifier
@@ -532,6 +588,44 @@ fun SettingsScreen(
                         )
                     }
                 }
+
+                if (currentUser?.isOfficial != true) {
+                    HorizontalDivider(
+                        thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showDeleteAccountDialog = true }
+                            .padding(vertical = 4.dp)
+                            .testTag("setting_delete_account_row"),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.DeleteForever,
+                            contentDescription = "Delete Account",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column {
+                            Text(
+                                text = "Delete My Account",
+                                style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            Text(
+                                text = "Permanently remove your profile and account data",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -540,7 +634,7 @@ fun SettingsScreen(
         // About Leno Info Footer
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
         ) {
             Row(
@@ -591,7 +685,7 @@ fun SettingsScreen(
                                     Text(blockedUser?.displayName ?: block.targetId, fontWeight = FontWeight.SemiBold)
                                 }
                                 OutlinedButton(onClick = { viewModel.unblockUser(block.targetId) }) {
-                                    Text("Unblock")
+                                    Text("Unblock", color = MaterialTheme.colorScheme.onSurface)
                                 }
                             }
                         }
@@ -600,7 +694,7 @@ fun SettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showBlockedUsersModal = false }) {
-                    Text("Close")
+                    Text("Close", color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         )
@@ -616,8 +710,9 @@ fun SettingsScreen(
                 Button(
                     onClick = {
                         showLogoutDialog = false
-                        viewModel.logout()
-                        onLogoutSuccess()
+                        viewModel.logout {
+                            onLogoutSuccess()
+                        }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
@@ -626,9 +721,67 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showLogoutDialog = false }) {
-                    Text("Cancel")
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
                 }
             }
+        )
+    }
+
+    if (showDeleteAccountDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!isDeletingAccount) showDeleteAccountDialog = false },
+            title = {
+                Text(
+                    "Delete Account Permanently?",
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error
+                )
+            },
+            text = {
+                Text(
+                    "This action permanently deletes your Leno profile (@${currentUser?.username ?: ""}), username reservation, and cloud session. This cannot be undone."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        isDeletingAccount = true
+                        viewModel.deleteMyAccount { res ->
+                            isDeletingAccount = false
+                            if (res.isSuccess) {
+                                showDeleteAccountDialog = false
+                                onLogoutSuccess()
+                            } else {
+                                showDeleteAccountDialog = false
+                                Toast.makeText(
+                                    context,
+                                    res.exceptionOrNull()?.message ?: "Could not delete account. Please try again.",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    },
+                    enabled = !isDeletingAccount,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    modifier = Modifier.testTag("confirm_delete_account_button")
+                ) {
+                    Text(if (isDeletingAccount) "Deleting..." else "Delete Permanently")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showDeleteAccountDialog = false },
+                    enabled = !isDeletingAccount
+                ) {
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
+                }
+            }
+        )
+    }
+
+    if (showLegalInfoDialog) {
+        com.example.ui.components.LegalInfoDialog(
+            onDismiss = { showLegalInfoDialog = false }
         )
     }
 

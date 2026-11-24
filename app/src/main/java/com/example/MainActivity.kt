@@ -82,8 +82,7 @@ class MainActivity : ComponentActivity() {
                     onDeclineCall = { viewModel.declineIncomingCall() },
                     onEndCall = { viewModel.endCall() },
                     onToggleMute = { viewModel.toggleMute() },
-                    onToggleSpeaker = { viewModel.toggleSpeaker() },
-                    onSimulateAnswer = { viewModel.answerCallForTesting() }
+                    onToggleSpeaker = { viewModel.toggleSpeaker() }
                 )
             }
         }

@@ -54,10 +54,10 @@ fun LenoAvatar(
             contentAlignment = Alignment.Center
         ) {
             Image(
-                painter = painterResource(id = R.drawable.logo),
+                painter = painterResource(id = R.drawable.ic_official_leno_avatar),
                 contentDescription = contentDescription ?: "Official Leno Logo",
                 modifier = Modifier.size(size),
-                contentScale = ContentScale.Fit
+                contentScale = ContentScale.Crop
             )
         }
     } else {

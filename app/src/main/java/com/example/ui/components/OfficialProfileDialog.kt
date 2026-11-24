@@ -85,7 +85,9 @@ fun OfficialProfileDialog(
                         avatarUrl = officialUser.avatarUrl,
                         isOfficial = true,
                         size = 84.dp,
-                        contentDescription = "Official Leno Logo"
+                        contentDescription = "Official Leno Logo",
+                        userId = officialUser.userId,
+                        username = officialUser.username
                     )
                     Surface(
                         shape = CircleShape,
@@ -119,7 +121,7 @@ fun OfficialProfileDialog(
                 Text(
                     text = "@Leno",
                     style = MaterialTheme.typography.titleMedium,
-                    color = LenoPrimary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.SemiBold
                 )
 
@@ -293,7 +295,7 @@ fun OfficialProfileDialog(
         dismissButton = {
             if (onOpenChat != null) {
                 TextButton(onClick = onDismiss) {
-                    Text("Close")
+                    Text("Close", color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         }

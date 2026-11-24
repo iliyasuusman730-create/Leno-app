@@ -23,22 +23,56 @@ class SessionManager(private val prefs: SharedPreferences) {
 
     fun saveActiveUserId(userId: String) {
         prefs.edit().putString(KEY_ACTIVE_USER_ID, userId).commit()
+        if (userId.isNotBlank()) {
+            addDeviceAccountId(userId)
+        }
     }
 
     fun getActiveUserId(): String? {
         return prefs.getString(KEY_ACTIVE_USER_ID, null)
     }
 
+    fun addDeviceAccountId(userId: String) {
+        if (userId.isBlank()) return
+        val existing = prefs.getStringSet(KEY_DEVICE_ACCOUNT_IDS, emptySet())?.toMutableSet() ?: mutableSetOf()
+        if (existing.add(userId)) {
+            prefs.edit().putStringSet(KEY_DEVICE_ACCOUNT_IDS, existing).commit()
+        }
+    }
+
+    fun removeDeviceAccountId(userId: String) {
+        if (userId.isBlank()) return
+        val existing = prefs.getStringSet(KEY_DEVICE_ACCOUNT_IDS, emptySet())?.toMutableSet() ?: return
+        if (existing.remove(userId)) {
+            prefs.edit().putStringSet(KEY_DEVICE_ACCOUNT_IDS, existing).commit()
+        }
+    }
+
+    fun getDeviceAccountIds(): Set<String> {
+        val set = prefs.getStringSet(KEY_DEVICE_ACCOUNT_IDS, emptySet())?.toMutableSet() ?: mutableSetOf()
+        val active = getActiveUserId()
+        if (!active.isNullOrBlank()) {
+            set.add(active)
+        }
+        return set
+    }
+
     fun saveAuthCredentials(email: String, pass: String) {
+        // Never persist plaintext passwords in SharedPreferences.
         prefs.edit()
             .putString(KEY_AUTH_EMAIL, email)
-            .putString(KEY_AUTH_PASS, pass)
+            .remove(KEY_AUTH_PASS)
             .commit()
     }
 
     fun getAuthEmail(): String? = prefs.getString(KEY_AUTH_EMAIL, null)
 
-    fun getAuthPass(): String? = prefs.getString(KEY_AUTH_PASS, null)
+    fun getAuthPass(): String? {
+        if (prefs.contains(KEY_AUTH_PASS)) {
+            prefs.edit().remove(KEY_AUTH_PASS).apply()
+        }
+        return null
+    }
 
     fun clearAuthCredentials() {
         prefs.edit()
@@ -220,6 +254,7 @@ class SessionManager(private val prefs: SharedPreferences) {
     companion object {
         private const val PREF_NAME = "leno_session_prefs"
         private const val KEY_ACTIVE_USER_ID = "active_user_id"
+        private const val KEY_DEVICE_ACCOUNT_IDS = "device_owned_account_ids"
         private const val KEY_AUTH_EMAIL = "active_auth_email"
         private const val KEY_AUTH_PASS = "active_auth_pass"
         private const val KEY_THEME_MODE = "app_theme_mode"

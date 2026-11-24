@@ -2,7 +2,6 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -11,169 +10,380 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function isBootstrapOwnerEmail() {
+      return isAuthenticated() &&
+        'email_verified' in request.auth.token &&
+        request.auth.token.email_verified == true &&
+        'email' in request.auth.token &&
+        request.auth.token.email == "iliyasuusman730@gmail.com";
+    }
+
     function isAdmin() {
       return isAuthenticated() && (
-        request.auth.token.admin == true ||
-        request.auth.token.owner == true ||
-        request.auth.token.name == "iliyasuusman" ||
-        request.auth.token.email == "iliyasuusman730@gmail.com" ||
-        request.auth.token.email == "officialjaiby@leno.chat" ||
-        request.auth.token.email == "official@leno.app" ||
-        (request.auth.token.email != null && request.auth.token.email.matches(".*iliyasuusman.*")) ||
-        request.auth.uid == "usr_officialjaiby_2026" ||
-        request.auth.uid == "user_official_leno" ||
+        ('admin' in request.auth.token && request.auth.token.admin == true) ||
+        ('owner' in request.auth.token && request.auth.token.owner == true) ||
+        isBootstrapOwnerEmail() ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "OWNER" ||
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "ADMIN" ||
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.username == "iliyasuusman" ||
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.username == "iliyasu" ||
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email == "iliyasuusman730@gmail.com" ||
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email == "officialjaiby@leno.chat" ||
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.googleEmail == "iliyasuusman730@gmail.com"))
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ["ADMIN", "OWNER"])
       );
     }
 
-    // Users Collection: Public profile readable; writes allowed so user registration & updates always persist
+    function isApprovedTeacher() {
+      return isAuthenticated() && (
+        isAdmin() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ["TEACHER", "ADMIN", "OWNER"] ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.teacherStatus == "APPROVED"))
+      );
+    }
+
+    function isClassInstructor(classId) {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/classes/$(classId)) &&
+        get(/databases/$(database)/documents/classes/$(classId)).data.instructorUserId == request.auth.uid;
+    }
+
+    function isClassPaid(classId) {
+      return exists(/databases/$(database)/documents/classes/$(classId)) &&
+        get(/databases/$(database)/documents/classes/$(classId)).data.isPaid == true;
+    }
+
+    function isValidUser(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        data.username is string && data.username.size() >= 1 && data.username.size() <= 64 &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+        (!('role' in data) || data.role in ["USER", "STUDENT", "TEACHER", "ADMIN", "OWNER", "OFFICIAL"]) &&
+        (!('teacherStatus' in data) || data.teacherStatus in ["NONE", "NOT_APPLIED", "PENDING", "APPROVED", "REJECTED", ""]);
+    }
+
+    function isValidMessage(data) {
+      return data.messageId is string && data.messageId.size() >= 1 &&
+        data.senderId is string && data.senderId.size() >= 1 &&
+        data.receiverId is string && data.receiverId.size() >= 1 &&
+        data.timestamp is int &&
+        (!('text' in data) || (data.text is string && data.text.size() <= 10000));
+    }
+
+    function isValidReceipt(data) {
+      return data.messageId is string &&
+        data.status in ["SENT", "DELIVERED", "READ"] &&
+        data.timestamp is int;
+    }
+
+    function isValidClass(data) {
+      return data.classId is string && data.classId.size() >= 1 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.instructorUserId is string && data.instructorUserId.size() >= 1;
+    }
+
+    function isValidLesson(data) {
+      return data.lessonId is string && data.lessonId.size() >= 1 &&
+        data.classId is string && data.classId.size() >= 1 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 240;
+    }
+
+    // Users Collection: Authenticated users can discover profiles; writes are strictly owner-scoped without privilege escalation
     match /users/{userId} {
-      allow read, write: if true;
+      allow read: if isAuthenticated();
 
-      // Per-user contacts subcollection
+      allow create: if isAuthenticated() &&
+        isValidUser(request.resource.data) && (
+          isAdmin() ||
+          (isOwner(userId) &&
+           (!('role' in request.resource.data) || !(request.resource.data.role in ["ADMIN", "OWNER", "TEACHER", "OFFICIAL"])) &&
+           (!('isOfficial' in request.resource.data) || request.resource.data.isOfficial == false) &&
+           (!('isVerified' in request.resource.data) || request.resource.data.isVerified == false) &&
+           (!('teacherStatus' in request.resource.data) || request.resource.data.teacherStatus in ["NONE", "PENDING", ""]))
+        );
+
+      allow update: if isAuthenticated() &&
+        isValidUser(request.resource.data) && (
+          isAdmin() ||
+          (isOwner(userId) &&
+           request.resource.data.role == resource.data.role &&
+           (!('isOfficial' in request.resource.data) || request.resource.data.isOfficial == resource.data.isOfficial) &&
+           (!('isVerified' in request.resource.data) || request.resource.data.isVerified == resource.data.isVerified) &&
+           (!('isRestricted' in request.resource.data) || request.resource.data.isRestricted == resource.data.isRestricted) &&
+           (!('teacherStatus' in request.resource.data) ||
+             request.resource.data.teacherStatus == resource.data.teacherStatus ||
+             request.resource.data.teacherStatus == "PENDING"))
+        );
+
+      allow delete: if isOwner(userId) || isAdmin();
+
       match /contacts/{contactId} {
-        allow read, write: if true;
+        allow read, write: if isOwner(userId) || isAdmin();
       }
 
-      // Per-user real-time inbox subcollection
       match /inbox/{messageId} {
-        allow read, write: if true;
+        allow read, delete: if isOwner(userId) || isAdmin();
+        allow create: if isAuthenticated() &&
+          isValidMessage(request.resource.data) &&
+          (request.resource.data.senderId == request.auth.uid || isOwner(userId) || isAdmin());
+        allow update: if isOwner(userId) || isAdmin();
       }
 
-      // Per-user sent messages backup subcollection
       match /sent_messages/{messageId} {
-        allow read, write: if true;
+        allow read: if isOwner(userId) || isAdmin();
+        allow create: if (isOwner(userId) && isValidMessage(request.resource.data) && request.resource.data.senderId == request.auth.uid) || isAdmin();
+        allow update: if isOwner(userId) ||
+          (isAuthenticated() && resource.data.receiverId == request.auth.uid &&
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'status'])) ||
+          isAdmin();
+        allow delete: if isOwner(userId) || isAdmin();
       }
 
-      // Per-user sent receipts subcollection
       match /sent_receipts/{messageId} {
-        allow read, write: if true;
+        allow read, delete: if isOwner(userId) || isAdmin();
+        allow create, update: if isAuthenticated() && isValidReceipt(request.resource.data);
       }
 
-      // Per-user real-time friend requests subcollection
       match /friend_requests/{requestId} {
-        allow read, write: if true;
+        allow read, delete: if isOwner(userId) || (isAuthenticated() && resource.data.requesterId == request.auth.uid) || isAdmin();
+        allow create, update: if isAuthenticated() &&
+          (isOwner(userId) || request.resource.data.requesterId == request.auth.uid || isAdmin());
       }
 
-      // Per-user real-time notifications subcollection
       match /notifications/{notificationId} {
-        allow read, write: if true;
+        allow read, update, delete: if isOwner(userId) || isAdmin();
+        allow create: if isAuthenticated() &&
+          (isOwner(userId) || isAdmin() || request.resource.data.userId == userId);
       }
 
-      // Per-user lesson progress & quiz scores subcollection
       match /lesson_progress/{classId} {
-        allow read, write: if true;
+        allow read, write: if isOwner(userId) || isAdmin();
       }
 
-      // Per-user awarded certificates subcollection
       match /certificates/{classId} {
-        allow read, write: if true;
+        allow read: if isOwner(userId) || isAdmin();
+        allow create, update: if isOwner(userId) || isAdmin() || isClassInstructor(classId);
+        allow delete: if isOwner(userId) || isAdmin();
       }
     }
 
-    // Teacher Applications Collection: Canonical "teacherApplications"
-    match /teacherApplications/{applicationId} {
-      allow read, write: if true;
-    }
-
-    // Support legacy "teacher_applications" collection name as well
-    match /teacher_applications/{applicationId} {
-      allow read, write: if true;
-    }
-
-    // Teacher Roles Collection
-    match /teacher_roles/{userId} {
-      allow read, write: if true;
-    }
-
-    // Classes Collection
-    match /classes/{classId} {
-      allow read, write: if true;
-
-      // Enrollments subcollection
-      match /enrollments/{studentUid} {
-        allow read, write: if true;
-      }
-
-      // Lessons subcollection
-      match /lessons/{lessonId} {
-        allow read, write: if true;
-      }
-
-      // Questions & Voice Notes subcollection
-      match /questions/{questionId} {
-        allow read, write: if true;
-      }
-
-      // Awarded student certificates subcollection
-      match /certificates/{studentId} {
-        allow read, write: if true;
-      }
-    }
-
-    // Top-level Enrollments collection for live student & class queries
-    match /enrollments/{enrollmentId} {
-      allow read, write: if true;
-    }
-
-    // Top-level Friend Requests fallback collection
-    match /friend_requests/{requestId} {
-      allow read, write: if true;
-    }
-
-    // Usernames Collection: Atomic unique username claims
+    // Atomic username & Leno ID registries
     match /usernames/{username} {
-      allow read, write: if true;
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() &&
+        (request.resource.data.uid == request.auth.uid || request.resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() &&
+        (resource.data.uid == request.auth.uid || resource.data.ownerUid == request.auth.uid || isAdmin());
     }
 
-    // Leno IDs Collection: Atomic unique Leno ID claims
     match /leno_ids/{lenoId} {
-      allow read, write: if true;
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() &&
+        (request.resource.data.uid == request.auth.uid || request.resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() &&
+        (resource.data.uid == request.auth.uid || resource.data.ownerUid == request.auth.uid || isAdmin());
     }
 
-    // Chats Collection: Real-time conversation channels
+    // Teacher Applications & Roles
+    match /teacherApplications/{applicationId} {
+      allow read: if isOwner(applicationId) || isAdmin();
+      allow create: if isOwner(applicationId) &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.status == "PENDING";
+      allow update: if isAdmin() ||
+        (isOwner(applicationId) && resource.data.status == "PENDING" && request.resource.data.status == "PENDING");
+      allow delete: if isOwner(applicationId) || isAdmin();
+    }
+
+    match /teacher_applications/{applicationId} {
+      allow read: if isOwner(applicationId) || isAdmin();
+      allow create: if isOwner(applicationId) &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.status == "PENDING";
+      allow update: if isAdmin() ||
+        (isOwner(applicationId) && resource.data.status == "PENDING" && request.resource.data.status == "PENDING");
+      allow delete: if isOwner(applicationId) || isAdmin();
+    }
+
+    match /teacher_roles/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() ||
+        (isOwner(userId) && request.resource.data.userId == request.auth.uid && request.resource.data.status == "PENDING");
+      allow update: if isAdmin() ||
+        (isOwner(userId) && resource.data.status == request.resource.data.status);
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    // Classes, Lessons, Questions & Enrollments
+    match /classes/{classId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() &&
+        isValidClass(request.resource.data) &&
+        isApprovedTeacher() &&
+        (request.resource.data.instructorUserId == request.auth.uid || isAdmin());
+      allow update: if isAuthenticated() && (
+        resource.data.instructorUserId == request.auth.uid ||
+        isAdmin() ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['enrolledStudentsCount', 'updatedAt']) &&
+         request.resource.data.instructorUserId == resource.data.instructorUserId)
+      );
+      allow delete: if isAuthenticated() &&
+        (resource.data.instructorUserId == request.auth.uid || isAdmin());
+
+      match /enrollments/{studentUid} {
+        allow read: if isAuthenticated() &&
+          (studentUid == request.auth.uid || isClassInstructor(classId) || isAdmin());
+        allow create, update: if isAuthenticated() && (
+          isClassInstructor(classId) ||
+          isAdmin() ||
+          (studentUid == request.auth.uid && !isClassPaid(classId))
+        );
+        allow delete: if isAuthenticated() &&
+          (studentUid == request.auth.uid || isClassInstructor(classId) || isAdmin());
+      }
+
+      match /lessons/{lessonId} {
+        allow read: if isAuthenticated();
+        allow create, update, delete: if isAuthenticated() &&
+          (isClassInstructor(classId) || isAdmin()) &&
+          (request.method == 'delete' || isValidLesson(request.resource.data));
+      }
+
+      match /questions/{questionId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() &&
+          request.resource.data.senderUserId == request.auth.uid;
+        allow update, delete: if isAuthenticated() &&
+          (resource.data.senderUserId == request.auth.uid || isClassInstructor(classId) || isAdmin());
+      }
+
+      match /certificates/{studentId} {
+        allow read: if isAuthenticated() &&
+          (studentId == request.auth.uid || isClassInstructor(classId) || isAdmin());
+        allow create, update: if isAuthenticated() &&
+          (isClassInstructor(classId) || isAdmin() || studentId == request.auth.uid);
+        allow delete: if isAdmin();
+      }
+    }
+
+    match /enrollments/{enrollmentId} {
+      allow read: if isAuthenticated() &&
+        (resource.data.studentUserId == request.auth.uid ||
+         resource.data.teacherUserId == request.auth.uid ||
+         isAdmin());
+      allow create, update: if isAuthenticated() && (
+        request.resource.data.teacherUserId == request.auth.uid ||
+        isAdmin() ||
+        (request.resource.data.studentUserId == request.auth.uid &&
+         !isClassPaid(request.resource.data.classId))
+      );
+      allow delete: if isAuthenticated() &&
+        (resource.data.studentUserId == request.auth.uid ||
+         resource.data.teacherUserId == request.auth.uid ||
+         isAdmin());
+    }
+
+    match /friend_requests/{requestId} {
+      allow read: if isAuthenticated() &&
+        (resource.data.requesterId == request.auth.uid ||
+         resource.data.targetId == request.auth.uid ||
+         isAdmin());
+      allow create: if isAuthenticated() &&
+        request.resource.data.requesterId == request.auth.uid;
+      allow update, delete: if isAuthenticated() &&
+        (resource.data.requesterId == request.auth.uid ||
+         resource.data.targetId == request.auth.uid ||
+         isAdmin());
+    }
+
+    // Chats & Conversations: Restricted strictly to participants or admin
     match /chats/{chatId} {
-      allow read, write: if true;
+      allow read: if isAuthenticated() &&
+        (request.auth.uid in resource.data.participants || isAdmin());
+      allow create, update: if isAuthenticated() &&
+        (request.auth.uid in request.resource.data.participants || isAdmin() ||
+         (resource != null && request.auth.uid in resource.data.participants));
+      allow delete: if isAdmin();
 
-      // Messages: Real-time message subcollection
       match /messages/{messageId} {
-        allow read, write: if true;
+        allow read: if isAuthenticated() &&
+          (resource.data.senderId == request.auth.uid ||
+           resource.data.receiverId == request.auth.uid ||
+           isAdmin());
+        allow create: if isAuthenticated() &&
+          isValidMessage(request.resource.data) &&
+          (request.resource.data.senderId == request.auth.uid || isAdmin());
+        allow update: if isAuthenticated() &&
+          (resource.data.senderId == request.auth.uid ||
+           resource.data.receiverId == request.auth.uid ||
+           isAdmin());
+        allow delete: if isAuthenticated() &&
+          (resource.data.senderId == request.auth.uid || isAdmin());
       }
     }
 
-    // Conversations Collection: WhatsApp style conversation channels
     match /conversations/{conversationId} {
-      allow read, write: if true;
+      allow read: if isAuthenticated() &&
+        (request.auth.uid in resource.data.participants || isAdmin());
+      allow create, update: if isAuthenticated() &&
+        (request.auth.uid in request.resource.data.participants || isAdmin() ||
+         (resource != null && request.auth.uid in resource.data.participants));
+      allow delete: if isAdmin();
 
       match /messages/{messageId} {
-        allow read, write: if true;
+        allow read: if isAuthenticated() &&
+          (resource.data.senderId == request.auth.uid ||
+           resource.data.receiverId == request.auth.uid ||
+           isAdmin());
+        allow create: if isAuthenticated() &&
+          isValidMessage(request.resource.data) &&
+          (request.resource.data.senderId == request.auth.uid || isAdmin());
+        allow update: if isAuthenticated() &&
+          (resource.data.senderId == request.auth.uid ||
+           resource.data.receiverId == request.auth.uid ||
+           isAdmin());
+        allow delete: if isAuthenticated() &&
+          (resource.data.senderId == request.auth.uid || isAdmin());
       }
     }
 
-    // Call Signaling: Only caller or receiver can access
-    match /calls/{callId} {
-      allow read, write: if true;
-    }
-
-    // Root messages collection for universal synchronization
     match /messages/{messageId} {
-      allow read, write: if true;
+      allow read: if isAuthenticated() &&
+        (resource.data.senderId == request.auth.uid ||
+         resource.data.receiverId == request.auth.uid ||
+         isAdmin());
+      allow create: if isAuthenticated() &&
+        isValidMessage(request.resource.data) &&
+        (request.resource.data.senderId == request.auth.uid || isAdmin());
+      allow update: if isAuthenticated() &&
+        (resource.data.senderId == request.auth.uid ||
+         resource.data.receiverId == request.auth.uid ||
+         isAdmin());
+      allow delete: if isAuthenticated() &&
+        (resource.data.senderId == request.auth.uid || isAdmin());
     }
 
-    // Support Chats Collection
-    match /support_chats/{chatId} {
-      allow read, write: if true;
+    match /calls/{callId} {
+      allow read: if isAuthenticated() &&
+        (resource.data.callerId == request.auth.uid ||
+         resource.data.receiverId == request.auth.uid ||
+         isAdmin());
+      allow create: if isAuthenticated() &&
+        request.resource.data.callerId == request.auth.uid;
+      allow update: if isAuthenticated() &&
+        (resource.data.callerId == request.auth.uid ||
+         resource.data.receiverId == request.auth.uid ||
+         isAdmin());
+      allow delete: if isAdmin();
+    }
 
-      // Messages subcollection
+    match /support_chats/{chatId} {
+      allow read: if isAuthenticated() &&
+        (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() &&
+        (request.resource.data.userId == request.auth.uid || isAdmin());
+      allow update: if isAuthenticated() &&
+        (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+
       match /messages/{messageId} {
-        allow read, write: if true;
+        allow read, create, update: if isAuthenticated() &&
+          (get(/databases/$(database)/documents/support_chats/$(chatId)).data.userId == request.auth.uid || isAdmin());
+        allow delete: if isAdmin();
       }
     }
   }

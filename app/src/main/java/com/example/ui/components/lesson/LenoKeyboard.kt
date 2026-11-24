@@ -235,7 +235,7 @@ fun LenoKeyboard(
                                 text = tab.label,
                                 fontSize = 12.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) Color(0xFF22C55E) else Color(0xFFA1A1AA)
+                                color = if (isSelected) Color.White else Color(0xFFA1A1AA)
                             )
                         }
                     )

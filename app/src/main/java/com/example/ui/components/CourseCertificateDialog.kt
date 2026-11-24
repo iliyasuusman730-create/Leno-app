@@ -131,7 +131,7 @@ fun CourseCertificateDialog(
                                 text = "LENO ACADEMY",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = Color(0xFF065F46),
+                                color = Color(0xFF111111),
                                 letterSpacing = 1.sp
                             )
                             Text(
@@ -194,7 +194,7 @@ fun CourseCertificateDialog(
                         text = studentName.ifBlank { "Leno Scholar" },
                         fontSize = 19.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF14532D),
+                        color = Color(0xFF111111),
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(vertical = 10.dp, horizontal = 12.dp)
                     )
@@ -256,7 +256,7 @@ fun CourseCertificateDialog(
                             text = classItem.instructorLinoId,
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace,
-                            color = LenoPrimaryDark
+                            color = Color(0xFF1E293B)
                         )
                     }
 
@@ -294,7 +294,7 @@ fun CourseCertificateDialog(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("Close", fontSize = 12.sp)
+                        Text("Close", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
                     }
 
                     Button(

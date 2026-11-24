@@ -1,0 +1,147 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Leno user profile, presence, and verified role status",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "uid": { "type": "string" },
+        "username": { "type": "string" },
+        "username_lowercase": { "type": "string" },
+        "linoId": { "type": "string" },
+        "lenId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "bio": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "email": { "type": "string" },
+        "googleEmail": { "type": "string" },
+        "role": { "type": "string", "enum": ["USER", "STUDENT", "TEACHER", "ADMIN", "OWNER", "OFFICIAL"] },
+        "teacherStatus": { "type": "string", "enum": ["NONE", "PENDING", "APPROVED", "REJECTED", ""] },
+        "isOfficial": { "type": "boolean" },
+        "isVerified": { "type": "boolean" },
+        "isOnline": { "type": "boolean" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["userId", "username", "displayName"]
+    },
+    "ChatChannel": {
+      "title": "ChatChannel",
+      "description": "1-on-1 chat metadata between two authenticated participants",
+      "type": "object",
+      "properties": {
+        "chatId": { "type": "string" },
+        "participants": { "type": "array" },
+        "lastMessageText": { "type": "string" },
+        "lastMessageTimestamp": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["chatId", "participants"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Direct message between two users",
+      "type": "object",
+      "properties": {
+        "messageId": { "type": "string" },
+        "chatId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "receiverId": { "type": "string" },
+        "text": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "status": { "type": "string" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["messageId", "senderId", "receiverId", "timestamp"]
+    },
+    "TeacherApplication": {
+      "title": "TeacherApplication",
+      "description": "Application to become an approved Leno subject instructor",
+      "type": "object",
+      "properties": {
+        "applicationId": { "type": "string" },
+        "userId": { "type": "string" },
+        "applicantUid": { "type": "string" },
+        "subject": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED"] },
+        "submittedAt": { "type": "number" }
+      },
+      "required": ["userId", "subject", "status"]
+    },
+    "OnlineClass": {
+      "title": "OnlineClass",
+      "description": "Online class created by an approved teacher or admin",
+      "type": "object",
+      "properties": {
+        "classId": { "type": "string" },
+        "title": { "type": "string" },
+        "subject": { "type": "string" },
+        "instructorUserId": { "type": "string" },
+        "isPaid": { "type": "boolean" },
+        "price": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["classId", "title", "instructorUserId"]
+    },
+    "ClassLesson": {
+      "title": "ClassLesson",
+      "description": "Individual lesson within an online class",
+      "type": "object",
+      "properties": {
+        "lessonId": { "type": "string" },
+        "classId": { "type": "string" },
+        "title": { "type": "string" },
+        "orderIndex": { "type": "number" }
+      },
+      "required": ["lessonId", "classId", "title"]
+    },
+    "Enrollment": {
+      "title": "Enrollment",
+      "description": "Student enrollment record for a class",
+      "type": "object",
+      "properties": {
+        "enrollmentId": { "type": "string" },
+        "classId": { "type": "string" },
+        "studentUserId": { "type": "string" },
+        "teacherUserId": { "type": "string" },
+        "status": { "type": "string" },
+        "enrolledAt": { "type": "number" }
+      },
+      "required": ["classId", "studentUserId"]
+    },
+    "SupportChat": {
+      "title": "SupportChat",
+      "description": "User support ticket thread with Leno support",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "userName": { "type": "string" },
+        "status": { "type": "string", "enum": ["open", "closed"] },
+        "lastMessage": { "type": "string" },
+        "lastUpdatedAt": { "type": "number" }
+      },
+      "required": ["userId", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": { "schema": "User", "description": "User profile documents" },
+    "/usernames/{username}": { "schema": "User", "description": "Unique lowercase username claims" },
+    "/leno_ids/{lenoId}": { "schema": "User", "description": "Unique Leno ID claims" },
+    "/teacherApplications/{applicationId}": { "schema": "TeacherApplication", "description": "Teacher applications" },
+    "/teacher_applications/{applicationId}": { "schema": "TeacherApplication", "description": "Legacy teacher applications mirror" },
+    "/teacher_roles/{userId}": { "schema": "TeacherApplication", "description": "Teacher role records" },
+    "/classes/{classId}": { "schema": "OnlineClass", "description": "Published online classes" },
+    "/classes/{classId}/lessons/{lessonId}": { "schema": "ClassLesson", "description": "Class lessons" },
+    "/classes/{classId}/enrollments/{studentUid}": { "schema": "Enrollment", "description": "Per-class student enrollments" },
+    "/enrollments/{enrollmentId}": { "schema": "Enrollment", "description": "Top-level enrollments" },
+    "/chats/{chatId}": { "schema": "ChatChannel", "description": "Direct message channels" },
+    "/chats/{chatId}/messages/{messageId}": { "schema": "ChatMessage", "description": "Messages inside chat channel" },
+    "/conversations/{conversationId}": { "schema": "ChatChannel", "description": "Conversation channels mirror" },
+    "/conversations/{conversationId}/messages/{messageId}": { "schema": "ChatMessage", "description": "Messages mirror" },
+    "/messages/{messageId}": { "schema": "ChatMessage", "description": "Direct messages index" },
+    "/support_chats/{chatId}": { "schema": "SupportChat", "description": "Support conversations" }
+  }
+}

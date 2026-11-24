@@ -86,7 +86,8 @@ fun TeacherApplicationDialog(
         teacherIntro: String,
         certificateDocumentName: String,
         sampleTeachingInfo: String,
-        agreedToGuidelines: Boolean
+        agreedToGuidelines: Boolean,
+        onResult: (Boolean, String) -> Unit
     ) -> Unit
 ) {
     val allowedSubjects = listOf(
@@ -288,7 +289,7 @@ fun TeacherApplicationDialog(
                         Text(
                             text = "Status: APPROVED TEACHER",
                             fontSize = 12.sp,
-                            color = LenoPrimaryDark,
+                            color = MaterialTheme.colorScheme.onSurface,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -468,6 +469,7 @@ fun TeacherApplicationDialog(
     var sampleTeachingInfo by remember { mutableStateOf("") }
     var agreedToGuidelines by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var isSubmitting by remember { mutableStateOf(false) }
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -498,7 +500,7 @@ fun TeacherApplicationDialog(
     } ?: "LEN-00000000"
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
@@ -525,7 +527,7 @@ fun TeacherApplicationDialog(
                     Text(
                         text = "One-Time Application • 1 Subject per Teacher",
                         fontSize = 12.sp,
-                        color = LenoPrimaryDark,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
@@ -549,7 +551,7 @@ fun TeacherApplicationDialog(
                             text = "Leno Profile Identity (Attached Role)",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = LenoPrimaryDark
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
@@ -598,7 +600,7 @@ fun TeacherApplicationDialog(
                                 text = "Strict Policy: One Time • One Subject Per Teacher",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = LenoPrimaryDark
+                                color = Color(0xFF111111)
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
@@ -645,7 +647,7 @@ fun TeacherApplicationDialog(
                             Text(
                                 text = "Change ▼",
                                 fontSize = 12.sp,
-                                color = LenoPrimary,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
@@ -819,7 +821,7 @@ fun TeacherApplicationDialog(
                             ) {
                                 Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, tint = LenoPrimary, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Upload Certificate Photo from Gallery", fontSize = 11.sp, color = LenoPrimary, fontWeight = FontWeight.SemiBold)
+                                Text("Upload Certificate Photo from Gallery", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
@@ -906,6 +908,8 @@ fun TeacherApplicationDialog(
                         "${certificateDocumentName.ifBlank { "Credential Document" }} [Photo: $certificatePhotoPath]"
                     } else certificateDocumentName
 
+                    isSubmitting = true
+                    errorMessage = null
                     onSubmit(
                         finalSubject,
                         teachingLevel,
@@ -915,19 +919,36 @@ fun TeacherApplicationDialog(
                         finalDoc,
                         sampleTeachingInfo,
                         agreedToGuidelines
-                    )
-                    onDismiss()
+                    ) { success, message ->
+                        isSubmitting = false
+                        if (success) {
+                            onDismiss()
+                        } else {
+                            errorMessage = message.ifBlank { "Unable to submit application. Please try again." }
+                        }
+                    }
                 },
+                enabled = !isSubmitting,
                 colors = ButtonDefaults.buttonColors(containerColor = LenoPrimary),
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.testTag("submit_teacher_app_btn")
             ) {
-                Text("Submit One-Time Application", fontWeight = FontWeight.Bold)
+                if (isSubmitting) {
+                    androidx.compose.material3.CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Submitting...", fontWeight = FontWeight.Bold)
+                } else {
+                    Text("Submit One-Time Application", fontWeight = FontWeight.Bold)
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
+            TextButton(onClick = onDismiss, enabled = !isSubmitting) {
+                Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
             }
         }
     )

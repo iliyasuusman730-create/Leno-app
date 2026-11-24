@@ -53,12 +53,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -521,7 +523,7 @@ fun ChatDetailScreen(
                                 Text(
                                     text = "Official Announcements • Verified",
                                     style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontWeight = FontWeight.SemiBold,
                                     maxLines = 1,
                                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
@@ -535,7 +537,7 @@ fun ChatDetailScreen(
                                     Text(
                                         text = "typing",
                                         style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.primary,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                     HeaderTypingDots()
@@ -544,7 +546,7 @@ fun ChatDetailScreen(
                                 Text(
                                     text = TimeUtils.formatLastSeen(partner?.isOnline == true, partner?.lastSeen ?: 0L),
                                     style = MaterialTheme.typography.labelMedium,
-                                    color = if (partner?.isOnline == true) OnlineGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    color = if (partner?.isOnline == true) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
                                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                 )
@@ -588,18 +590,6 @@ fun ChatDetailScreen(
                             Icon(Icons.Default.Shield, contentDescription = "Official Information", tint = MaterialTheme.colorScheme.primary)
                         }
                     } else {
-                        if (partner != null) {
-                            IconButton(
-                                onClick = { viewModel.startVoiceCall(partner!!) },
-                                modifier = Modifier.testTag("chat_voice_call_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Call,
-                                    contentDescription = "Voice Call",
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
 
                         IconButton(
                             onClick = { menuExpanded = true },
@@ -688,7 +678,7 @@ fun ChatDetailScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         TextButton(onClick = { viewModel.unblockUser(partnerId) }) {
-                            Text("Unblock")
+                            Text("Unblock", color = MaterialTheme.colorScheme.onSurface)
                         }
                     }
                 }
@@ -717,32 +707,8 @@ fun ChatDetailScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 14.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(0.dp)
                 ) {
-                    // Centered Date chip: "Today" centered, #E5E7EB background, #6B7280 text, 12px, pill shape, margin 16px top/bottom
-                    item(key = "chat_date_chip_today") {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 16.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = Color(0xFFE5E7EB),
-                                shadowElevation = 0.dp
-                            ) {
-                                Text(
-                                    text = "Today",
-                                    color = Color(0xFF6B7280),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
-                                )
-                            }
-                        }
-                    }
-
                     if (displayMessages.isEmpty()) {
                         item(key = "empty_chat_state_greeting") {
                             Box(
@@ -787,12 +753,45 @@ fun ChatDetailScreen(
                             }
                         }
                     } else {
-                        items(displayMessages, key = { it.messageId }) { msg ->
+                        itemsIndexed(displayMessages, key = { _, it -> it.messageId }) { index, msg ->
                             val isFromMe = msg.senderId == (currentUser?.userId ?: "me") || msg.senderId == "me"
+                            val prevMsg = if (index > 0) displayMessages[index - 1] else null
+                            val nextMsg = if (index < displayMessages.lastIndex) displayMessages[index + 1] else null
+                            val prevSameSender = prevMsg != null && prevMsg.senderId == msg.senderId && (msg.timestamp - prevMsg.timestamp) < 120_000L
+                            val nextSameSender = nextMsg != null && nextMsg.senderId == msg.senderId && (nextMsg.timestamp - msg.timestamp) < 120_000L
+                            val currentDateLabel = formatChatDateHeader(msg.timestamp)
+                            val prevDateLabel = prevMsg?.let { formatChatDateHeader(it.timestamp) }
+
+                            if (prevDateLabel != currentDateLabel) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 12.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(50),
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
+                                        shadowElevation = 0.dp
+                                    ) {
+                                        Text(
+                                            text = currentDateLabel,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
+                                        )
+                                    }
+                                }
+                            }
+
                             val isMsgStarred = starredMessageIds.contains(msg.messageId)
+                            Spacer(modifier = Modifier.height(if (prevSameSender) 3.dp else 10.dp))
                             MessageBubble(
                                 message = msg,
                                 isFromMe = isFromMe,
+                                prevSameSender = prevSameSender && prevDateLabel == currentDateLabel,
+                                nextSameSender = nextSameSender,
                                 isStarred = isMsgStarred,
                                 onToggleStar = { viewModel.toggleStarMessage(it.messageId) },
                                 reaction = messageReactions[msg.messageId],
@@ -828,11 +827,16 @@ fun ChatDetailScreen(
 
                     if (isPartnerTyping) {
                         item(key = "typing_indicator_bubble") {
+                            Spacer(modifier = Modifier.height(10.dp))
                             TypingIndicatorBubble(
                                 partnerName = partner?.displayName ?: "Partner",
                                 partnerAvatarUrl = partner?.avatarUrl
                             )
                         }
+                    }
+
+                    item(key = "chat_bottom_spacer") {
+                        Spacer(modifier = Modifier.height(8.dp))
                     }
                 }
 
@@ -881,7 +885,7 @@ fun ChatDetailScreen(
                                     modifier = Modifier
                                         .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
                                         .clip(CircleShape)
-                                        .background(Color(0xFF25D366))
+                                        .background(LenoPrimary)
                                         .padding(horizontal = 5.dp, vertical = 1.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -1185,7 +1189,7 @@ fun ChatDetailScreen(
                                 modifier = Modifier
                                     .size(40.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFF00A86B))
+                                    .background(LenoPrimary)
                                     .clickable {
                                         if (textInput.isBlank()) {
                                             if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
@@ -1344,7 +1348,7 @@ fun ChatDetailScreen(
                         photoErrorMessage = null
                     }
                 ) {
-                    Text("Cancel")
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         )
@@ -1444,7 +1448,7 @@ fun ChatDetailScreen(
                         selectedPhotoFile = null
                     }
                 ) {
-                    Text("Cancel")
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         )
@@ -1469,7 +1473,7 @@ fun ChatDetailScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showBlockDialog = false }) {
-                    Text("Cancel")
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         )
@@ -1505,7 +1509,7 @@ fun ChatDetailScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showReportDialog = false }) {
-                    Text("Cancel")
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         )
@@ -1550,7 +1554,7 @@ fun ChatDetailScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showMicPermissionDeniedDialog = false }) {
-                    Text("Cancel")
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         )
@@ -1654,7 +1658,7 @@ fun ChatDetailScreen(
                                             text = if (isSmFromMe) "You" else partner?.displayName ?: "Partner",
                                             fontWeight = FontWeight.Bold,
                                             style = MaterialTheme.typography.labelMedium,
-                                            color = MaterialTheme.colorScheme.primary
+                                            color = MaterialTheme.colorScheme.onSurface
                                         )
                                         val smTime = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(sm.timestamp))
                                         Text(
@@ -1681,7 +1685,7 @@ fun ChatDetailScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showStarredMessagesDialog = false }) {
-                    Text("Close")
+                    Text("Close", color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         )
@@ -1841,11 +1845,26 @@ private fun MessageActionsToolbar(
     }
 }
 
+private fun formatChatDateHeader(timestamp: Long): String {
+    val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
+    val now = Calendar.getInstance()
+    val sameYear = cal.get(Calendar.YEAR) == now.get(Calendar.YEAR)
+    val dayDiff = now.get(Calendar.DAY_OF_YEAR) - cal.get(Calendar.DAY_OF_YEAR)
+    return when {
+        sameYear && dayDiff == 0 -> "Today"
+        sameYear && dayDiff == 1 -> "Yesterday"
+        sameYear -> SimpleDateFormat("EEE, MMM d", Locale.getDefault()).format(Date(timestamp))
+        else -> SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date(timestamp))
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MessageBubble(
     message: MessageEntity,
     isFromMe: Boolean,
+    prevSameSender: Boolean = false,
+    nextSameSender: Boolean = false,
     isStarred: Boolean = false,
     onToggleStar: (MessageEntity) -> Unit = {},
     reaction: String? = null,
@@ -1862,13 +1881,21 @@ fun MessageBubble(
     // Determine dark mode accurately from current theme background
     val isDark = LocalLenoDarkTheme.current
 
-    // Modern Sleek Chat Bubble Geometry:
-    // Outgoing: 14dp rounded corners with 3dp bottom-end anchor pointing toward sender
-    // Incoming: 14dp rounded corners with 3dp bottom-start anchor pointing toward contact
+    // Grouped consecutive chat bubble radii for smooth modern message flow
     val bubbleShape = if (isFromMe) {
-        RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart = 14.dp, bottomEnd = 3.dp)
+        RoundedCornerShape(
+            topStart = 18.dp,
+            topEnd = if (prevSameSender) 6.dp else 18.dp,
+            bottomStart = 18.dp,
+            bottomEnd = if (nextSameSender) 6.dp else 4.dp
+        )
     } else {
-        RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart = 3.dp, bottomEnd = 14.dp)
+        RoundedCornerShape(
+            topStart = if (prevSameSender) 6.dp else 18.dp,
+            topEnd = 18.dp,
+            bottomStart = if (nextSameSender) 6.dp else 4.dp,
+            bottomEnd = 18.dp
+        )
     }
 
     // Modern vibrant emerald gradient for sent messages; crisp clean white with subtle border for received messages
@@ -2012,7 +2039,7 @@ fun MessageBubble(
                                     Text(
                                         text = "@leno • Official Channel",
                                         fontSize = 10.5.sp,
-                                        color = LenoPrimary,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontWeight = FontWeight.Medium
                                     )
                                 }
@@ -2028,7 +2055,7 @@ fun MessageBubble(
                                             fontWeight = FontWeight.Bold,
                                             letterSpacing = 0.5.sp
                                         ),
-                                        color = if (isDark) Color(0xFF80E5BA) else LenoPrimary,
+                                        color = if (isDark) Color.White else com.example.ui.theme.LenoBlack,
                                         modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
                                     )
                                 }
@@ -2800,28 +2827,61 @@ fun HeaderTypingDots() {
 fun AnimatedTypingDots() {
     val transition = rememberInfiniteTransition(label = "bubble_typing_dots")
     val alpha1 by transition.animateFloat(
-        initialValue = 0.25f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(450, delayMillis = 0, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        initialValue = 0.35f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(420, delayMillis = 0, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "td1"
     )
     val alpha2 by transition.animateFloat(
-        initialValue = 0.25f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(450, delayMillis = 150, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        initialValue = 0.35f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(420, delayMillis = 140, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "td2"
     )
     val alpha3 by transition.animateFloat(
-        initialValue = 0.25f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(450, delayMillis = 300, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        initialValue = 0.35f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(420, delayMillis = 280, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "td3"
+    )
+    val offset1 by transition.animateFloat(
+        initialValue = 0f, targetValue = -3.5f,
+        animationSpec = infiniteRepeatable(tween(420, delayMillis = 0, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "to1"
+    )
+    val offset2 by transition.animateFloat(
+        initialValue = 0f, targetValue = -3.5f,
+        animationSpec = infiniteRepeatable(tween(420, delayMillis = 140, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "to2"
+    )
+    val offset3 by transition.animateFloat(
+        initialValue = 0f, targetValue = -3.5f,
+        animationSpec = infiniteRepeatable(tween(420, delayMillis = 280, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "to3"
     )
 
     Row(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = alpha1)))
-        Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = alpha2)))
-        Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = alpha3)))
+        Box(
+            modifier = Modifier
+                .offset(y = offset1.dp)
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = alpha1))
+        )
+        Box(
+            modifier = Modifier
+                .offset(y = offset2.dp)
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = alpha2))
+        )
+        Box(
+            modifier = Modifier
+                .offset(y = offset3.dp)
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = alpha3))
+        )
     }
 }
 
@@ -2849,17 +2909,17 @@ fun TypingIndicatorBubble(
         )
         Spacer(modifier = Modifier.width(8.dp))
         Surface(
-            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 4.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomEnd = 18.dp, bottomStart = 4.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
             tonalElevation = 1.dp
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 AnimatedTypingDots()
-                Spacer(modifier = Modifier.width(2.dp))
                 Text(
                     text = "typing...",
                     style = MaterialTheme.typography.labelSmall,

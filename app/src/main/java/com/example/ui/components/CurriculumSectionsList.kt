@@ -23,16 +23,24 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Quiz
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -74,8 +82,13 @@ fun CollapsibleCurriculumSectionCard(
     currentUserId: String,
     isLocked: Boolean = false,
     initiallyExpanded: Boolean = true,
+    seenLessonIds: Set<String> = emptySet(),
+    seenByMap: Map<String, Set<String>> = emptyMap(),
+    isInstructor: Boolean = false,
     onOpenLesson: (LessonEntity) -> Unit,
-    onLockedClick: (() -> Unit)? = null
+    onLockedClick: (() -> Unit)? = null,
+    onEditLesson: ((LessonEntity) -> Unit)? = null,
+    onDeleteLesson: ((LessonEntity) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val isDark = LocalLenoDarkTheme.current
@@ -235,6 +248,9 @@ fun CollapsibleCurriculumSectionCard(
                             classId = classId,
                             currentUserId = currentUserId,
                             isLocked = isLocked,
+                            isRemoteSeen = seenLessonIds.contains(lesson.lessonId),
+                            seenCount = seenByMap[lesson.lessonId]?.count { it != currentUserId } ?: 0,
+                            isInstructor = isInstructor,
                             updateTick = updateTick,
                             onClick = {
                                 if (isLocked) {
@@ -242,7 +258,13 @@ fun CollapsibleCurriculumSectionCard(
                                 } else {
                                     onOpenLesson(lesson)
                                 }
-                            }
+                            },
+                            onEdit = if (isInstructor && onEditLesson != null) {
+                                { onEditLesson(lesson) }
+                            } else null,
+                            onDelete = if (isInstructor && onDeleteLesson != null) {
+                                { onDeleteLesson(lesson) }
+                            } else null
                         )
                     }
                 }
@@ -257,21 +279,37 @@ private fun CurriculumLessonRow(
     classId: String,
     currentUserId: String,
     isLocked: Boolean,
+    isRemoteSeen: Boolean,
+    seenCount: Int,
+    isInstructor: Boolean,
     updateTick: Long,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onEdit: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val isDark = LocalLenoDarkTheme.current
+    var menuExpanded by remember { mutableStateOf(false) }
 
     val isDone = remember(lesson.lessonId, currentUserId, updateTick) {
         if (!isLocked && currentUserId.isNotBlank()) {
             LessonProgressManager.isLessonCompleted(context, currentUserId, classId, lesson.lessonId)
         } else false
     }
+    val isSeen = remember(lesson.lessonId, currentUserId, updateTick, isRemoteSeen, isDone) {
+        if (isLocked || currentUserId.isBlank()) false
+        else isDone || isRemoteSeen || LessonProgressManager.isLessonSeen(context, currentUserId, classId, lesson.lessonId)
+    }
     val quizScore = remember(lesson.lessonId, currentUserId, updateTick) {
         if (!isLocked && currentUserId.isNotBlank()) {
             LessonProgressManager.getQuizScore(context, currentUserId, classId, lesson.lessonId)
         } else null
+    }
+    val hasQuiz = remember(lesson.lessonId, lesson.content) {
+        lesson.content.contains("[quiz:", ignoreCase = true)
+    }
+    val cleanSummary = remember(lesson.summary) {
+        lesson.summary.replace(Regex("""^\[[^\]]+]\s*"""), "").trim()
     }
     val estimatedMins = remember(lesson.lessonId, lesson.content) {
         CurriculumSectionHelper.estimateReadingMinutes(lesson)
@@ -279,13 +317,14 @@ private fun CurriculumLessonRow(
 
     val doneCircleBg = if (isDark) Color(0xFF103324) else Color(0xFFDCFCE7)
     val doneTint = if (isDark) Color(0xFF6EE7B7) else Color(0xFF15803D)
+    val seenCircleBg = if (isDark) Color(0xFF1B2B25) else Color(0xFFECFDF5)
     val activeCircleBg = if (isDark) MaterialTheme.colorScheme.primaryContainer else LenoPrimaryVeryLight
     val activeTint = if (isDark) MaterialTheme.colorScheme.onPrimaryContainer else LenoPrimaryDark
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .defaultMinSize(minHeight = 60.dp)
+            .defaultMinSize(minHeight = 64.dp)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp)
             .testTag("curriculum_lesson_${lesson.lessonId}"),
@@ -304,6 +343,7 @@ private fun CurriculumLessonRow(
                         when {
                             isLocked -> MaterialTheme.colorScheme.surfaceVariant
                             isDone -> doneCircleBg
+                            isSeen -> seenCircleBg
                             else -> activeCircleBg
                         }
                     ),
@@ -336,16 +376,16 @@ private fun CurriculumLessonRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = lesson.title,
-                    fontSize = 13.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = if (isLocked) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
 
-                if (lesson.summary.isNotBlank()) {
+                if (cleanSummary.isNotBlank() && !cleanSummary.equals(lesson.title, ignoreCase = true)) {
                     Text(
-                        text = lesson.summary,
+                        text = cleanSummary,
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -357,7 +397,7 @@ private fun CurriculumLessonRow(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
@@ -372,6 +412,24 @@ private fun CurriculumLessonRow(
                             fontSize = 10.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+
+                    if (isInstructor && !isLocked) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Visibility,
+                                contentDescription = "Seen by students",
+                                tint = LenoPrimary,
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = "$seenCount seen",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
 
                     if (quizScore != null) {
@@ -399,65 +457,164 @@ private fun CurriculumLessonRow(
                                 )
                             }
                         }
+                    } else if (hasQuiz && !isLocked) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Quiz,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(10.dp)
+                                )
+                                Spacer(modifier = Modifier.width(2.dp))
+                                Text(
+                                    text = "Quiz",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.width(8.dp))
+        Spacer(modifier = Modifier.width(6.dp))
 
-        when {
-            isLocked -> {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant
-                ) {
-                    Text(
-                        text = "Enroll",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-            }
-            isDone -> {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = doneCircleBg,
-                    border = BorderStroke(1.dp, doneBorderColor(isDark))
-                ) {
-                    Text(
-                        text = "Review",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = doneTint,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-            }
-            else -> {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = LenoPrimary
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            when {
+                isLocked -> {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(12.dp)
-                        )
-                        Spacer(modifier = Modifier.width(2.dp))
                         Text(
-                            text = "Start",
+                            text = "Enroll",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+                isDone -> {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = doneCircleBg,
+                        border = BorderStroke(1.dp, doneBorderColor(isDark))
+                    ) {
+                        Text(
+                            text = "Done ✓",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = doneTint,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                         )
+                    }
+                }
+                isSeen -> {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = seenCircleBg,
+                        border = BorderStroke(1.dp, LenoPrimary.copy(alpha = 0.4f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Visibility,
+                                contentDescription = null,
+                                tint = activeTint,
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = "Seen",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+                else -> {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = LenoPrimary
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Text(
+                                text = "New",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (isInstructor && (onEdit != null || onDelete != null)) {
+                Box {
+                    IconButton(
+                        onClick = { menuExpanded = true },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("lesson_more_${lesson.lessonId}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "Lesson Options",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false }
+                    ) {
+                        if (onEdit != null) {
+                            DropdownMenuItem(
+                                text = { Text("Edit Lesson", fontSize = 13.sp) },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Edit, contentDescription = null, tint = LenoPrimary)
+                                },
+                                onClick = {
+                                    menuExpanded = false
+                                    onEdit()
+                                }
+                            )
+                        }
+                        if (onDelete != null) {
+                            DropdownMenuItem(
+                                text = { Text("Delete Lesson", fontSize = 13.sp, color = MaterialTheme.colorScheme.error) },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                                },
+                                onClick = {
+                                    menuExpanded = false
+                                    onDelete()
+                                }
+                            )
+                        }
                     }
                 }
             }

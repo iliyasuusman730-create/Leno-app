@@ -32,16 +32,45 @@ class MessageBackupStore(context: Context) {
         private const val MAX_MESSAGES = 1000
     }
 
+    private fun statusRank(status: String, read: Boolean): Int {
+        if (read || status.equals("READ", ignoreCase = true)) return 4
+        return when (status.uppercase()) {
+            "DELIVERED" -> 3
+            "SENT" -> 2
+            "SENDING" -> 1
+            else -> 0
+        }
+    }
+
+    private fun mergeMonotonic(existing: MessageEntity?, incoming: MessageEntity): MessageEntity {
+        val normIncomingRead = incoming.read || incoming.isRead || incoming.status.equals("READ", ignoreCase = true)
+        val normIncomingStatus = if (normIncomingRead) "READ" else incoming.status.uppercase()
+        val normalizedIncoming = incoming.copy(status = normIncomingStatus, read = normIncomingRead)
+        if (existing == null) return normalizedIncoming
+
+        val existingRead = existing.read || existing.isRead || existing.status.equals("READ", ignoreCase = true)
+        val mergedRead = existingRead || normIncomingRead
+        val existingRank = statusRank(existing.status, existingRead)
+        val incomingRank = statusRank(normIncomingStatus, normIncomingRead)
+        val finalStatus = when {
+            mergedRead -> "READ"
+            existingRank > incomingRank -> existing.status.uppercase()
+            else -> normIncomingStatus
+        }
+        return normalizedIncoming.copy(status = finalStatus, read = mergedRead)
+    }
+
     /**
-     * Persists a message to the resilient backup store.
+     * Persists a message to the resilient backup store without ever downgrading READ status.
      */
     @Synchronized
     fun saveMessage(message: MessageEntity) {
         try {
             val list = getAllMessagesInternal().toMutableList()
-            // Remove existing version of same message if present
+            val existing = list.firstOrNull { it.messageId == message.messageId }
+            val merged = mergeMonotonic(existing, message)
             list.removeAll { it.messageId == message.messageId }
-            list.add(message)
+            list.add(merged)
 
             // Keep within sensible storage bounds
             val trimmed = if (list.size > MAX_MESSAGES) {
@@ -58,7 +87,7 @@ class MessageBackupStore(context: Context) {
     }
 
     /**
-     * Persists multiple messages in a batch.
+     * Persists multiple messages in a batch while preserving monotonic read/delivery state.
      */
     @Synchronized
     fun saveMessages(messages: List<MessageEntity>) {
@@ -66,7 +95,7 @@ class MessageBackupStore(context: Context) {
         try {
             val map = getAllMessagesInternal().associateBy { it.messageId }.toMutableMap()
             messages.forEach { msg ->
-                map[msg.messageId] = msg
+                map[msg.messageId] = mergeMonotonic(map[msg.messageId], msg)
             }
             val list = map.values.sortedByDescending { it.timestamp }.take(MAX_MESSAGES)
             saveMessagesInternal(list)
@@ -88,7 +117,7 @@ class MessageBackupStore(context: Context) {
             val current = getAllMessagesInternal()
             var modified = false
             val updated = current.map { msg ->
-                if (msg.receiverId in uSet && msg.senderId in pSet && (!msg.isRead || msg.status != "READ")) {
+                if (msg.receiverId in uSet && msg.senderId in pSet && (!msg.isRead || !msg.status.equals("READ", ignoreCase = true))) {
                     modified = true
                     msg.copy(status = "READ", read = true)
                 } else {
@@ -105,7 +134,7 @@ class MessageBackupStore(context: Context) {
     }
 
     /**
-     * Updates status and read flag of a specific message in backup store.
+     * Updates status and read flag of a specific message in backup store monotonically.
      */
     @Synchronized
     fun updateMessageStatus(messageId: String, status: String) {
@@ -114,10 +143,16 @@ class MessageBackupStore(context: Context) {
             val current = getAllMessagesInternal()
             var modified = false
             val isRead = status.equals("READ", ignoreCase = true)
+            val normStatus = if (isRead) "READ" else status.uppercase()
             val updated = current.map { msg ->
                 if (msg.messageId == messageId) {
-                    modified = true
-                    msg.copy(status = status, read = if (isRead) true else msg.read)
+                    val alreadyRead = msg.read || msg.isRead || msg.status.equals("READ", ignoreCase = true)
+                    val newRead = alreadyRead || isRead
+                    val finalStatus = if (newRead) "READ" else if (statusRank(normStatus, isRead) >= statusRank(msg.status, alreadyRead)) normStatus else msg.status.uppercase()
+                    if (finalStatus != msg.status || newRead != msg.read) {
+                        modified = true
+                    }
+                    msg.copy(status = finalStatus, read = newRead)
                 } else {
                     msg
                 }

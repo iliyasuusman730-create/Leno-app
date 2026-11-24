@@ -5,6 +5,9 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -61,7 +64,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -82,6 +87,7 @@ import coil.compose.AsyncImage
 import com.example.data.entity.ClassEntity
 import com.example.data.entity.LessonEntity
 import com.example.ui.theme.LenoActionGreen
+import com.example.ui.theme.LenoMonoFont
 import com.example.ui.theme.LenoPrimary
 import com.example.ui.theme.LenoPrimaryDark
 import com.example.ui.theme.LenoPrimaryLight
@@ -150,110 +156,15 @@ fun ClassDetailDialog(
     ) {
         BackHandler(onBack = onDismiss)
 
+        val scrollState = rememberScrollState()
+        val isScrolledPastHero = scrollState.value > 220
+
         Scaffold(
             modifier = Modifier
                 .fillMaxSize()
                 .testTag("course_detail_fullscreen"),
             containerColor = MaterialTheme.colorScheme.background,
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
-            topBar = {
-                Surface(
-                    color = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 2.dp,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .statusBarsPadding()
-                            .padding(horizontal = 8.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            IconButton(
-                                onClick = onDismiss,
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .testTag("course_detail_back_btn")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-
-                            Text(
-                                text = "Course Overview",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                                modifier = Modifier.clickable {
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                    val clip = ClipData.newPlainText("Class Code", classCode)
-                                    clipboard?.setPrimaryClip(clip)
-                                    Toast.makeText(context, "Class Code $classCode copied! 📋", Toast.LENGTH_SHORT).show()
-                                }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = classCode,
-                                        fontSize = 11.sp,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Icon(
-                                        imageVector = Icons.Default.ContentCopy,
-                                        contentDescription = "Copy class code",
-                                        tint = LenoPrimary,
-                                        modifier = Modifier.size(13.dp)
-                                    )
-                                }
-                            }
-
-                            if ((isInstructor || isAdmin) && onEditClass != null) {
-                                IconButton(
-                                    onClick = onEditClass,
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .testTag(
-                                            if (isAdmin) "dialog_admin_edit_class_btn"
-                                            else "dialog_instructor_edit_class_btn"
-                                        )
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Edit,
-                                        contentDescription = "Edit Class",
-                                        tint = LenoPrimary
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            },
             bottomBar = {
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
@@ -285,10 +196,11 @@ fun ClassDetailDialog(
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.Chat,
                                     contentDescription = "Chat with Instructor",
+                                    tint = MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Chat", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Chat", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                             }
 
                             when {
@@ -366,20 +278,17 @@ fun ClassDetailDialog(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding),
+                    .padding(bottom = innerPadding.calculateBottomPadding()),
                 contentAlignment = Alignment.TopCenter
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .widthIn(max = 760.dp)
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                        .verticalScroll(scrollState)
                 ) {
-                    // Hero Course Banner
+                    // Full-Bleed Edge-to-Edge Hero Course Banner (extends under status bar)
                     val heroBrush = if (isDark) {
-                        Brush.linearGradient(listOf(Color(0xFF0A3628), Color(0xFF0F4C38), Color(0xFF082E22)))
+                        Brush.linearGradient(listOf(Color(0xFF07291E), Color(0xFF0E4D39), Color(0xFF062319)))
                     } else {
                         Brush.linearGradient(listOf(LenoPrimaryDark, LenoPrimary, LenoActionGreen))
                     }
@@ -387,7 +296,6 @@ fun ClassDetailDialog(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(20.dp))
                             .background(heroBrush)
                     ) {
                         if (classItem.imageUrl.isNotBlank()) {
@@ -395,9 +303,7 @@ fun ClassDetailDialog(
                                 model = classItem.imageUrl,
                                 contentDescription = classItem.title,
                                 contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .matchParentSize()
-                                    .clip(RoundedCornerShape(20.dp))
+                                modifier = Modifier.matchParentSize()
                             )
                             Box(
                                 modifier = Modifier
@@ -405,8 +311,9 @@ fun ClassDetailDialog(
                                     .background(
                                         Brush.verticalGradient(
                                             listOf(
-                                                Color.Black.copy(alpha = 0.45f),
-                                                Color.Black.copy(alpha = 0.78f)
+                                                Color.Black.copy(alpha = 0.55f),
+                                                Color.Black.copy(alpha = 0.35f),
+                                                Color.Black.copy(alpha = 0.82f)
                                             )
                                         )
                                     )
@@ -416,7 +323,10 @@ fun ClassDetailDialog(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(18.dp)
+                                .widthIn(max = 760.dp)
+                                .align(Alignment.BottomCenter)
+                                .statusBarsPadding()
+                                .padding(start = 18.dp, end = 18.dp, top = 66.dp, bottom = 22.dp)
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -425,7 +335,7 @@ fun ClassDetailDialog(
                             ) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Surface(
-                                        shape = RoundedCornerShape(8.dp),
+                                        shape = RoundedCornerShape(50),
                                         color = Color.White.copy(alpha = 0.2f)
                                     ) {
                                         Text(
@@ -433,11 +343,11 @@ fun ClassDetailDialog(
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = Color.White,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 4.dp)
                                         )
                                     }
                                     Surface(
-                                        shape = RoundedCornerShape(8.dp),
+                                        shape = RoundedCornerShape(50),
                                         color = Color.White.copy(alpha = 0.16f)
                                     ) {
                                         Text(
@@ -445,21 +355,21 @@ fun ClassDetailDialog(
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold,
                                             color = Color.White,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 4.dp)
                                         )
                                     }
                                 }
 
                                 Surface(
-                                    shape = RoundedCornerShape(8.dp),
+                                    shape = RoundedCornerShape(50),
                                     color = if (formattedPrice == "Free") Color(0xFFDCFCE7) else Color.White
                                 ) {
                                     Text(
                                         text = if (formattedPrice == "Free") "FREE" else formattedPrice,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.ExtraBold,
-                                        color = if (formattedPrice == "Free") Color(0xFF15803D) else LenoPrimaryDark,
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                        color = Color(0xFF111111),
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
                                     )
                                 }
                             }
@@ -468,10 +378,10 @@ fun ClassDetailDialog(
 
                             Text(
                                 text = classItem.title,
-                                style = MaterialTheme.typography.headlineSmall.copy(
+                                style = MaterialTheme.typography.headlineMedium.copy(
                                     fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 22.sp,
-                                    lineHeight = 28.sp
+                                    fontSize = 24.sp,
+                                    lineHeight = 30.sp
                                 ),
                                 color = Color.White
                             )
@@ -479,13 +389,23 @@ fun ClassDetailDialog(
                             Spacer(modifier = Modifier.height(8.dp))
 
                             Text(
-                                text = "Low-Data Course • Structured Notes + Q&A + Quizzes",
+                                text = "Structured Lessons • Interactive Quizzes • Teacher Q&A",
                                 fontSize = 12.sp,
-                                color = Color.White.copy(alpha = 0.88f),
+                                color = Color.White.copy(alpha = 0.86f),
                                 fontWeight = FontWeight.Medium
                             )
                         }
                     }
+
+                    // Centered Scroll Body
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .widthIn(max = 760.dp)
+                            .align(Alignment.CenterHorizontally)
+                            .padding(horizontal = 16.dp, vertical = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
 
                     // Course Metrics Strip
                     Row(
@@ -553,7 +473,7 @@ fun ClassDetailDialog(
                                         text = "INSTRUCTOR",
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (isDark) MaterialTheme.colorScheme.onPrimaryContainer else LenoPrimaryDark,
+                                        color = if (isDark) MaterialTheme.colorScheme.onPrimaryContainer else Color(0xFF111111),
                                         letterSpacing = 0.8.sp
                                     )
                                     Text(
@@ -636,7 +556,7 @@ fun ClassDetailDialog(
                         val progressPercent = (progressFraction * 100).toInt()
                         val doneBg = if (isDark) Color(0xFF103324) else Color(0xFFF0FDF4)
                         val doneBorder = if (isDark) Color(0xFF10B981).copy(alpha = 0.5f) else Color(0xFF86EFAC)
-                        val doneTitle = if (isDark) Color(0xFF6EE7B7) else Color(0xFF15803D)
+                        val doneTitle = if (isDark) Color.White else Color(0xFF111111)
 
                         Surface(
                             shape = RoundedCornerShape(14.dp),
@@ -697,11 +617,13 @@ fun ClassDetailDialog(
                         }
                     }
 
-                    // Course Description
+                    // Expandable Course Description
+                    val descText = classItem.shortDescription.ifBlank { "Structured low-data lessons with interactive quizzes and direct teacher support." }
+                    var isDescExpanded by remember { mutableStateOf(false) }
                     Card(
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(18.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(14.dp)) {
@@ -713,11 +635,26 @@ fun ClassDetailDialog(
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = classItem.shortDescription.ifBlank { "Structured low-data lessons with interactive quizzes and direct teacher support." },
+                                text = descText,
                                 fontSize = 13.sp,
                                 lineHeight = 20.sp,
+                                maxLines = if (isDescExpanded) Int.MAX_VALUE else 3,
+                                overflow = TextOverflow.Ellipsis,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            if (descText.length > 110) {
+                                TextButton(
+                                    onClick = { isDescExpanded = !isDescExpanded },
+                                    contentPadding = PaddingValues(horizontal = 0.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = if (isDescExpanded) "Show less" else "Read more",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -745,9 +682,9 @@ fun ClassDetailDialog(
 
                         if (isInstructor || isAdmin) {
                             TextButton(onClick = onAddLesson) {
-                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface)
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Add Lesson", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text("Add Lesson", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                             }
                         }
                     }
@@ -816,6 +753,129 @@ fun ClassDetailDialog(
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
+                }
+                }
+
+                // Floating Sticky Header Overlay (translucent over hero -> solid surface when scrolled)
+                Surface(
+                    color = if (isScrolledPastHero) MaterialTheme.colorScheme.surface.copy(alpha = 0.96f) else Color.Transparent,
+                    tonalElevation = if (isScrolledPastHero) 2.dp else 0.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.TopCenter)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = if (isScrolledPastHero) Color.Transparent else Color.Black.copy(alpha = 0.38f),
+                                modifier = Modifier.size(42.dp)
+                            ) {
+                                IconButton(
+                                    onClick = onDismiss,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .testTag("course_detail_back_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "Back",
+                                        tint = if (isScrolledPastHero) MaterialTheme.colorScheme.onSurface else Color.White
+                                    )
+                                }
+                            }
+
+                            AnimatedVisibility(
+                                visible = isScrolledPastHero,
+                                enter = fadeIn(),
+                                exit = fadeOut()
+                            ) {
+                                Text(
+                                    text = classItem.title,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(start = 10.dp, end = 8.dp)
+                                )
+                            }
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = if (isScrolledPastHero) MaterialTheme.colorScheme.surfaceVariant else Color.Black.copy(alpha = 0.38f),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isScrolledPastHero) MaterialTheme.colorScheme.outlineVariant else Color.White.copy(alpha = 0.25f)
+                                ),
+                                modifier = Modifier.clickable {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                    val clip = ClipData.newPlainText("Class Code", classCode)
+                                    clipboard?.setPrimaryClip(clip)
+                                    Toast.makeText(context, "Class Code $classCode copied! 📋", Toast.LENGTH_SHORT).show()
+                                }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = classCode,
+                                        fontSize = 11.sp,
+                                        fontFamily = LenoMonoFont,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isScrolledPastHero) MaterialTheme.colorScheme.onSurface else Color.White
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Icon(
+                                        imageVector = Icons.Default.ContentCopy,
+                                        contentDescription = "Copy class code",
+                                        tint = if (isScrolledPastHero) LenoPrimary else Color.White,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                }
+                            }
+
+                            if ((isInstructor || isAdmin) && onEditClass != null) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = if (isScrolledPastHero) MaterialTheme.colorScheme.surfaceVariant else Color.Black.copy(alpha = 0.38f),
+                                    modifier = Modifier.size(42.dp)
+                                ) {
+                                    IconButton(
+                                        onClick = onEditClass,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .testTag(
+                                                if (isAdmin) "dialog_admin_edit_class_btn"
+                                                else "dialog_instructor_edit_class_btn"
+                                            )
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Edit,
+                                            contentDescription = "Edit Class",
+                                            tint = if (isScrolledPastHero) LenoPrimary else Color.White
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

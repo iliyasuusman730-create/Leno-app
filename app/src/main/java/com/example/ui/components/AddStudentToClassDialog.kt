@@ -169,7 +169,7 @@ fun AddStudentToClassDialog(
                     Text(
                         text = "💡 Direct Enrollment: Add school students by username or Leno ID. They will instantly find this class in their \"My Learning\" tab.",
                         fontSize = 11.sp,
-                        color = LenoPrimaryDark,
+                        color = Color(0xFF111111),
                         lineHeight = 15.sp,
                         modifier = Modifier.padding(10.dp)
                     )
@@ -280,7 +280,7 @@ fun AddStudentToClassDialog(
                                                 text = studentName.take(1).uppercase(),
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 13.sp,
-                                                color = LenoPrimaryDark
+                                                color = Color(0xFF111111)
                                             )
                                         }
 
@@ -322,7 +322,7 @@ fun AddStudentToClassDialog(
                                                     text = "Enrolled",
                                                     fontSize = 10.sp,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = Color(0xFF2E7D32)
+                                                    color = Color(0xFF111111)
                                                 )
                                             }
                                         }

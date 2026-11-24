@@ -155,12 +155,6 @@ fun UserProfileScreen(
                 },
                 actions = {
                     if (targetUser != null && !isSelf && !isOfficial) {
-                        IconButton(
-                            onClick = { viewModel.startVoiceCall(targetUser!!) },
-                            modifier = Modifier.testTag("user_profile_call_btn")
-                        ) {
-                            Icon(Icons.Default.Call, contentDescription = "Voice Call", tint = MaterialTheme.colorScheme.primary)
-                        }
 
                         IconButton(
                             onClick = { menuExpanded = true },
@@ -395,7 +389,7 @@ fun UserProfileScreen(
                     Text(
                         text = "@${user.username}",
                         style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.SemiBold
                     )
 
@@ -406,7 +400,7 @@ fun UserProfileScreen(
                         Text(
                             text = "Official Platform Channel • Verified",
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.onBackground,
                             fontWeight = FontWeight.SemiBold
                         )
                     } else {
@@ -421,7 +415,7 @@ fun UserProfileScreen(
                             Text(
                                 text = if (user.isOnline) "Online Now" else TimeUtils.formatLastSeen(false, user.lastSeen),
                                 style = MaterialTheme.typography.bodySmall,
-                                color = if (user.isOnline) OnlineGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                                color = if (user.isOnline) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -605,24 +599,6 @@ fun UserProfileScreen(
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
-
-                                Button(
-                                    onClick = { viewModel.startVoiceCall(user) },
-                                    shape = RoundedCornerShape(14.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(52.dp)
-                                        .testTag("user_profile_voice_call_button"),
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
-                                ) {
-                                    Icon(Icons.Default.Call, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Call",
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
                             }
                         }
 
@@ -637,9 +613,9 @@ fun UserProfileScreen(
                                         .height(48.dp)
                                         .testTag("user_profile_remove_contact_button")
                                 ) {
-                                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurface)
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Contact Added • Tap to Remove")
+                                    Text("Contact Added • Tap to Remove", color = MaterialTheme.colorScheme.onSurface)
                                 }
                             } else if (isPending) {
                                 if (friendship?.targetId == myId) {
@@ -685,9 +661,9 @@ fun UserProfileScreen(
                                             .height(48.dp)
                                             .testTag("user_profile_cancel_request_button")
                                     ) {
-                                        Icon(Icons.Default.HourglassTop, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Icon(Icons.Default.HourglassTop, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurface)
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Request Pending • Tap to Cancel")
+                                        Text("Request Pending • Tap to Cancel", color = MaterialTheme.colorScheme.onSurface)
                                     }
                                 }
                             } else {
@@ -699,9 +675,9 @@ fun UserProfileScreen(
                                         .height(48.dp)
                                         .testTag("user_profile_add_contact_button")
                                 ) {
-                                    Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurface)
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Add to Contacts")
+                                    Text("Add to Contacts", color = MaterialTheme.colorScheme.onSurface)
                                 }
                             }
                         }
@@ -732,7 +708,7 @@ fun UserProfileScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showBlockDialog = false }) {
-                    Text("Cancel")
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         )
@@ -771,7 +747,7 @@ fun UserProfileScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showReportDialog = false }) {
-                    Text("Cancel")
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         )
@@ -811,7 +787,7 @@ fun UserProfileScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showRestrictDialog = false }) {
-                    Text("Cancel")
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         )
@@ -845,7 +821,7 @@ fun UserProfileScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteDialog = false }) {
-                    Text("Cancel")
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         )

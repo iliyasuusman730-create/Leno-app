@@ -1,6 +1,6 @@
 {
   "name": "Leno",
-  "description": "Leno Chat with voice notes, message bubbles, and real-time read receipts",
+  "description": "Leno messaging and online classes with voice notes, lessons, and real-time sync",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

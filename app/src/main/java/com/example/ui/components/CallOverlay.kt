@@ -67,8 +67,7 @@ fun CallOverlay(
     onDeclineCall: () -> Unit,
     onEndCall: () -> Unit,
     onToggleMute: () -> Unit,
-    onToggleSpeaker: () -> Unit,
-    onSimulateAnswer: () -> Unit = {}
+    onToggleSpeaker: () -> Unit
 ) {
     if (callState is CallState.Idle) return
 

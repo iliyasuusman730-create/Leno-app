@@ -25,7 +25,7 @@ class MessageRepository(
     private val storageService: FirebaseStorageService = FirebaseStorageService()
 ) {
     private val firestore: FirebaseFirestore? = firestoreInstance ?: try {
-        FirebaseFirestore.getInstance()
+        com.example.LenoApplication.getFirestoreInstance()
     } catch (e: Exception) {
         null
     }
@@ -36,7 +36,10 @@ class MessageRepository(
      * Emits real-time stream of messages from the specified Firestore collection
      * using a snapshot listener, ordered chronologically by timestamp.
      */
-    fun getMessagesFlow(collectionName: String = "messages"): Flow<List<Message>> = callbackFlow {
+    fun getMessagesFlow(
+        collectionName: String = "messages",
+        currentUserId: String? = null
+    ): Flow<List<Message>> = callbackFlow {
         val db = firestore
         if (db == null) {
             trySend(synchronized(inMemoryFallback) { inMemoryFallback.sortedBy { it.timestamp } })
@@ -44,12 +47,24 @@ class MessageRepository(
             return@callbackFlow
         }
 
-        val query = db.collection(collectionName)
-            .orderBy("timestamp", Query.Direction.ASCENDING)
-            .limit(200)
+        val uid = currentUserId?.takeIf { it.isNotBlank() && it != "anonymous_user" }
+        val baseCollection = db.collection(collectionName)
+        val query: Query = if (uid != null) {
+            baseCollection.where(
+                com.google.firebase.firestore.Filter.or(
+                    com.google.firebase.firestore.Filter.equalTo("senderId", uid),
+                    com.google.firebase.firestore.Filter.equalTo("receiverId", uid)
+                )
+            ).limit(200)
+        } else {
+            baseCollection
+                .orderBy("timestamp", Query.Direction.ASCENDING)
+                .limit(200)
+        }
 
         val registration = query.addSnapshotListener { snapshot, error ->
             if (error != null) {
+                com.example.util.handleFirestoreError(error, com.example.util.OperationType.LIST, collectionName)
                 trySend(synchronized(inMemoryFallback) { inMemoryFallback.sortedBy { it.timestamp } })
                 return@addSnapshotListener
             }
@@ -58,7 +73,7 @@ class MessageRepository(
                 val list = snapshot.documents.mapNotNull { doc ->
                     val data = doc.data ?: return@mapNotNull null
                     Message.fromMap(doc.id, data)
-                }
+                }.sortedBy { it.timestamp }
                 trySend(list)
             }
         }
@@ -87,6 +102,7 @@ class MessageRepository(
 
         val registration = query.addSnapshotListener { snapshot, error ->
             if (error != null) {
+                com.example.util.handleFirestoreError(error, com.example.util.OperationType.LIST, "$collectionName/$chatId")
                 trySend(synchronized(inMemoryFallback) {
                     inMemoryFallback.filter { it.chatId == chatId }.sortedBy { it.timestamp }
                 })
@@ -263,6 +279,7 @@ class MessageRepository(
             val db = firestore ?: return@withContext Result.success(Unit)
 
             var query: Query = db.collection(collectionName)
+                .whereEqualTo("receiverId", currentUserId)
                 .whereEqualTo("read", false)
 
             if (!chatId.isNullOrBlank()) {
@@ -272,8 +289,7 @@ class MessageRepository(
             val snapshot = query.get().await()
             val unreadForUser = snapshot.documents.filter { doc ->
                 val senderId = doc.getString("senderId") ?: ""
-                val receiverId = doc.getString("receiverId") ?: ""
-                (receiverId == currentUserId) || (senderId.isNotBlank() && senderId != currentUserId)
+                senderId != currentUserId
             }
 
             if (unreadForUser.isNotEmpty()) {
@@ -286,6 +302,7 @@ class MessageRepository(
 
             Result.success(Unit)
         } catch (e: Exception) {
+            com.example.util.handleFirestoreError(e, com.example.util.OperationType.UPDATE, collectionName)
             Result.failure(e)
         }
     }

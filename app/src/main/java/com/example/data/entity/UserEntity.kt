@@ -62,13 +62,9 @@ data class UserEntity(
     // Platform Access Roles
     val isOwner: Boolean
         get() = role.equals("OWNER", ignoreCase = true) ||
-                username.equals("iliyasuusman", ignoreCase = true) ||
-                username.equals("iliyasu", ignoreCase = true) ||
                 username.equals("officialjaiby", ignoreCase = true) ||
                 email.equals("iliyasuusman730@gmail.com", ignoreCase = true) ||
                 googleEmail.equals("iliyasuusman730@gmail.com", ignoreCase = true) ||
-                email.contains("iliyasuusman", ignoreCase = true) ||
-                googleEmail.contains("iliyasuusman", ignoreCase = true) ||
                 linoId == "LEN-50638964" || linoId == "50638964" ||
                 userId == "usr_officialjaiby_2026"
 

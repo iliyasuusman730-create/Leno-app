@@ -302,10 +302,10 @@ fun AdminTeacherApplicationsDialog(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Monitoring 'teacher_applications' collection",
+                                text = "Live Firestore teacher applications sync",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = LenoPrimaryDark
+                                color = Color(0xFF111111)
                             )
                         }
 
@@ -328,7 +328,7 @@ fun AdminTeacherApplicationsDialog(
                                     text = "Firestore Live",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF047857)
+                                    color = Color(0xFF111111)
                                 )
                             }
                         }
@@ -341,7 +341,7 @@ fun AdminTeacherApplicationsDialog(
                 TabRow(
                     selectedTabIndex = activeAdminTab,
                     containerColor = MaterialTheme.colorScheme.surface,
-                    contentColor = LenoPrimary,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
                     indicator = { tabPositions ->
                         TabRowDefaults.SecondaryIndicator(
                             Modifier.tabIndicatorOffset(tabPositions[activeAdminTab]),
@@ -572,7 +572,7 @@ fun AdminTeacherApplicationsDialog(
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(
-                                    text = "New submissions to the 'teacher_applications' collection will automatically appear here in real-time.",
+                                    text = "New teacher applications submitted from any device will automatically appear here in real time.",
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -937,7 +937,7 @@ fun AdminTeacherApplicationsDialog(
                         text = "Select Assigned Subject:",
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 12.sp,
-                        color = LenoPrimary
+                        color = MaterialTheme.colorScheme.onSurface
                     )
 
                     LazyRow(
@@ -1229,14 +1229,14 @@ private fun ApplicationCard(
                             text = "Subject: ${application.effectiveSubject}",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = LenoPrimaryDark
+                            color = Color(0xFF111111)
                         )
                     }
 
                     Text(
                         text = application.teachingLevel,
                         fontSize = 11.sp,
-                        color = LenoPrimaryDark
+                        color = Color(0xFF111111)
                     )
                 }
             }
@@ -1303,7 +1303,7 @@ private fun ApplicationCard(
                     Text(
                         text = "Approved: $approvedDate",
                         fontSize = 10.sp,
-                        color = Color(0xFF059669),
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -1476,7 +1476,7 @@ private fun UserAdminCard(
                     ) {
                         Text(
                             text = if (isTeacher) "TEACHER" else "USER",
-                            color = if (isTeacher) Color(0xFF065F46) else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (isTeacher) Color(0xFF111111) else MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 10.sp,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -1494,7 +1494,7 @@ private fun UserAdminCard(
                         text = "Assigned Subject: ${user.assignedSubject}",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = LenoPrimary
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
@@ -1516,9 +1516,9 @@ private fun UserAdminCard(
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.height(34.dp)
                         ) {
-                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurface)
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Subject", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("Subject", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                         }
                         Spacer(modifier = Modifier.width(6.dp))
                         TextButton(
@@ -1549,7 +1549,7 @@ private fun UserAdminCard(
                         onClick = onToggleRestrict,
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = if (user.isRestricted) LenoPrimary else Color(0xFFD97706)
+                            contentColor = if (user.isRestricted) MaterialTheme.colorScheme.onSurface else Color(0xFFD97706)
                         ),
                         modifier = Modifier.height(34.dp)
                     ) {
@@ -1757,7 +1757,7 @@ private fun OwnerActivitiesOverview(
                         )
                         TextButton(
                             onClick = onRefreshData,
-                            colors = ButtonDefaults.textButtonColors(contentColor = LenoPrimary)
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
                         ) {
                             Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
@@ -1833,7 +1833,7 @@ private fun OwnerActivitiesOverview(
                 }
                 TextButton(
                     onClick = { onFilterApplications("APPROVED") },
-                    colors = ButtonDefaults.textButtonColors(contentColor = LenoPrimary)
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
                 ) {
                     Text("View Applications", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 }
@@ -1909,7 +1909,7 @@ private fun OwnerActivitiesOverview(
                                             text = teacher.subject,
                                             fontSize = 10.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF047857),
+                                            color = Color(0xFF111111),
                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                         )
                                     }
@@ -1936,9 +1936,9 @@ private fun OwnerActivitiesOverview(
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                             modifier = Modifier.height(30.dp)
                         ) {
-                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(12.dp))
+                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurface)
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Manage", fontSize = 11.sp)
+                            Text("Manage", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
                         }
                     }
                 }
@@ -2183,7 +2183,7 @@ private fun OfficialLenoBroadcastStudio(
                 ) {
                     Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, tint = LenoOfficialBadge, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Attach Picture from Gallery", fontSize = 11.sp, color = LenoOfficialBadge, fontWeight = FontWeight.SemiBold)
+                    Text("Attach Picture from Gallery", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                 }
                 Spacer(modifier = Modifier.height(8.dp))
             }
@@ -2358,7 +2358,7 @@ private fun SupportInboxView(
                                 ) {
                                     Text(
                                         text = "OPEN",
-                                        color = Color(0xFF059669),
+                                        color = MaterialTheme.colorScheme.onSurface,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
@@ -2404,7 +2404,7 @@ private fun SupportInboxView(
                                     shape = RoundedCornerShape(8.dp),
                                     modifier = Modifier.height(38.dp)
                                 ) {
-                                    Text("Resolve Ticket", fontSize = 12.sp)
+                                    Text("Resolve Ticket", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
                                 }
                             }
                         }

@@ -160,6 +160,12 @@ interface MessageDao {
     """)
     fun getTotalUnreadCountForUserAliases(currentUserIds: List<String>): Flow<Int>
 
+    @Query("""
+        SELECT DISTINCT senderId FROM messages 
+        WHERE receiverId IN (:currentUserIds) AND senderId NOT IN (:currentUserIds) AND (UPPER(status) != 'READ' AND read = 0)
+    """)
+    fun getUnreadSenderIdsForUserAliases(currentUserIds: List<String>): Flow<List<String>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: MessageEntity)
 
@@ -172,16 +178,19 @@ interface MessageDao {
     @Query("UPDATE messages SET status = 'READ', read = 1 WHERE senderId = :senderId AND receiverId = :receiverId")
     suspend fun markSentMessagesAsRead(senderId: String, receiverId: String)
 
-    @Query("UPDATE messages SET status = 'READ', read = 1 WHERE receiverId IN (:currentUserIds) AND senderId IN (:otherUserIds) AND (status != 'READ' OR read = 0)")
+    @Query("UPDATE messages SET status = 'READ', read = 1 WHERE receiverId IN (:currentUserIds) AND senderId IN (:otherUserIds) AND (UPPER(status) != 'READ' OR read = 0)")
     suspend fun markMessagesAsReadWithAliases(currentUserIds: List<String>, otherUserIds: List<String>)
 
     @Query("SELECT * FROM messages WHERE messageId = :messageId LIMIT 1")
     suspend fun getMessageByIdSync(messageId: String): MessageEntity?
 
+    @Query("SELECT * FROM messages WHERE messageId IN (:ids)")
+    suspend fun getMessagesByIdsSync(ids: List<String>): List<MessageEntity>
+
     @Query("SELECT * FROM messages WHERE senderId = :currentUserId AND (status = 'SENDING' OR status = 'FAILED')")
     suspend fun getPendingMessagesForUserSync(currentUserId: String): List<MessageEntity>
 
-    @Query("UPDATE messages SET status = :status, read = CASE WHEN :status = 'READ' THEN 1 ELSE read END WHERE messageId = :messageId")
+    @Query("UPDATE messages SET status = CASE WHEN UPPER(:status) = 'READ' THEN 'READ' ELSE :status END, read = CASE WHEN UPPER(:status) = 'READ' THEN 1 ELSE read END WHERE messageId = :messageId")
     suspend fun updateMessageStatus(messageId: String, status: String)
 
     @Query("UPDATE messages SET read = :read, status = CASE WHEN :read = 1 THEN 'READ' ELSE status END WHERE messageId = :messageId")

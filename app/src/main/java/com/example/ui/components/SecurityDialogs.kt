@@ -527,7 +527,7 @@ fun DisableSecurityPinDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
             }
         }
     )
@@ -722,7 +722,7 @@ fun AppSecurityLockOverlay(
                         text = "Forgot PIN? Sign out & recover",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = LenoPrimary
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             }

@@ -1,12 +1,18 @@
 package com.example.ui.screens
 
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
@@ -30,12 +36,16 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -43,6 +53,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -90,6 +101,10 @@ import com.example.ui.components.CourseCertificateDialog
 import com.example.ui.components.CreateClassDialog
 import com.example.ui.components.EditClassDialog
 import com.example.ui.components.JoinConfirmationDialog
+import com.example.ui.components.LenoEmptyState
+import com.example.ui.components.LenoHeaderActionButton
+import com.example.ui.components.LenoSearchPill
+import com.example.ui.components.LenoTabHeader
 import com.example.ui.components.LessonViewerDialog
 import com.example.ui.components.PaymentCheckoutDialog
 import androidx.compose.material.icons.filled.Edit
@@ -121,6 +136,7 @@ fun ClassScreen(
 ) {
     val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
+    var isSearchOpen by remember { mutableStateOf(false) }
     var selectedFilter by remember { mutableStateOf("All") }
     var selectedMainTab by remember { mutableIntStateOf(0) } // 0 = Explore Classes, 1 = My Learning
 
@@ -128,6 +144,7 @@ fun ClassScreen(
     val publishedClasses by viewModel.publishedClasses.collectAsState()
     val enrolledClasses by viewModel.currentUserEnrolledClasses.collectAsState()
     val userTeacherRole by viewModel.currentUserTeacherRole.collectAsState()
+    val lessonSeenByMap by viewModel.lessonSeenByMap.collectAsState()
     val updateTick by LessonProgressManager.updateTick.collectAsState()
 
     LaunchedEffect(currentUser?.userId) {
@@ -159,6 +176,8 @@ fun ClassScreen(
     var classForPaymentCheckout by remember { mutableStateOf<ClassEntity?>(null) }
     var selectedLessonForView by remember { mutableStateOf<Pair<LessonEntity, ClassEntity>?>(null) }
     var classForAddingLesson by remember { mutableStateOf<ClassEntity?>(null) }
+    var lessonForEditing by remember { mutableStateOf<Pair<ClassEntity, LessonEntity>?>(null) }
+    var lessonToDelete by remember { mutableStateOf<Pair<ClassEntity, LessonEntity>?>(null) }
     var classForEditing by remember { mutableStateOf<ClassEntity?>(null) }
     var joinedClassConfirmation by remember { mutableStateOf<ClassEntity?>(null) }
     var showContactSupportDialog by remember { mutableStateOf(false) }
@@ -313,250 +332,204 @@ fun ClassScreen(
                 .padding(horizontal = com.example.util.responsiveHorizontalPadding())
                 .testTag("class_screen_root")
         ) {
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
-            // Top Header: "Classes" title + "+ Create" button
+            LenoTabHeader(
+                title = "Classes",
+                subtitle = if (selectedMainTab == 1) {
+                    "${enrolledClasses.size} enrolled course${if (enrolledClasses.size == 1) "" else "s"}"
+                } else {
+                    "${filteredExploreClasses.size} published course${if (filteredExploreClasses.size == 1) "" else "s"}"
+                }
+            ) {
+                LenoHeaderActionButton(
+                    icon = if (isSearchOpen) Icons.Default.Clear else Icons.Default.Search,
+                    contentDescription = if (isSearchOpen) "Close search" else "Search classes",
+                    isActive = isSearchOpen,
+                    onClick = {
+                        isSearchOpen = !isSearchOpen
+                        if (!isSearchOpen) searchQuery = ""
+                    },
+                    modifier = Modifier.testTag("class_search_toggle_btn")
+                )
+            }
+
+            LenoSearchPill(
+                visible = isSearchOpen || searchQuery.isNotEmpty(),
+                query = searchQuery,
+                onQueryChange = { searchQuery = it },
+                placeholder = "Search lessons, subjects or skills...",
+                onCloseOrClear = {
+                    if (searchQuery.isNotEmpty()) searchQuery = "" else isSearchOpen = false
+                },
+                inputTestTag = "class_search_input"
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+        // Segmented Pill Switcher: Explore Classes | My Learning
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier.fillMaxWidth()
+        ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text(
-                    text = "Classes",
-                    style = MaterialTheme.typography.displayLarge.copy(fontSize = 30.sp, fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-
-                if (isApprovedTeacher || isAdmin) {
-                    Button(
-                        onClick = {
-                            showCreateClassDialog = true
-                        },
-                        shape = RoundedCornerShape(20.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = LenoPrimary),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                        modifier = Modifier
-                            .height(36.dp)
-                            .testTag("top_create_class_button")
+                val isExploreSelected = selectedMainTab == 0
+                Surface(
+                    onClick = { selectedMainTab = 0 },
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isExploreSelected) MaterialTheme.colorScheme.surface else Color.Transparent,
+                    shadowElevation = if (isExploreSelected) 2.dp else 0.dp,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("tab_explore_classes")
+                ) {
+                    Box(
+                        modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Create",
+                            text = "Explore (${filteredExploreClasses.size})",
+                            fontWeight = if (isExploreSelected) FontWeight.Bold else FontWeight.Medium,
                             fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
+                            color = if (isExploreSelected) {
+                                if (LocalLenoDarkTheme.current) MaterialTheme.colorScheme.secondary else LenoPrimary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
-                } else {
-                    OutlinedButton(
-                        onClick = {
-                            showMustBecomeTeacherDialog = true
-                        },
-                        shape = RoundedCornerShape(20.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = LenoPrimary),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, LenoPrimary.copy(alpha = 0.5f)),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                        modifier = Modifier
-                            .height(36.dp)
-                            .testTag("top_create_class_button_non_teacher")
+                }
+
+                val isLearningSelected = selectedMainTab == 1
+                Surface(
+                    onClick = { selectedMainTab = 1 },
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isLearningSelected) MaterialTheme.colorScheme.surface else Color.Transparent,
+                    shadowElevation = if (isLearningSelected) 2.dp else 0.dp,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("tab_my_learning")
+                ) {
+                    Box(
+                        modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Lock,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                            tint = LenoPrimary
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Create",
+                            text = "My Learning (${enrolledClasses.size})",
+                            fontWeight = if (isLearningSelected) FontWeight.Bold else FontWeight.Medium,
                             fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = LenoPrimary
+                            color = if (isLearningSelected) {
+                                if (LocalLenoDarkTheme.current) MaterialTheme.colorScheme.secondary else LenoPrimary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Clean, rounded Capsule Search Bar
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                placeholder = {
-                    Text(
-                        text = "Search lessons, subjects or skills...",
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Search",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(
-                                imageVector = Icons.Default.Clear,
-                                contentDescription = "Clear search",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                },
-                shape = RoundedCornerShape(24.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                    cursorColor = MaterialTheme.colorScheme.primary,
-                    focusedBorderColor = Color.Transparent,
-                    unfocusedBorderColor = Color.Transparent
-                ),
-                singleLine = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("class_search_input")
-            )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Categories: All | Maths | Quran | JAMB | Skills | Online Skills | Content Creator
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            filterOptions.forEach { filterName ->
-                val selected = selectedFilter == filterName
-                FilterChip(
-                    selected = selected,
-                    onClick = { selectedFilter = filterName },
-                    label = {
-                        Text(
-                            text = filterName,
-                            fontSize = 13.sp,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-                        )
-                    },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = LenoPrimary,
-                        selectedLabelColor = Color.White,
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    ),
-                    modifier = Modifier.testTag("filter_chip_$filterName")
-                )
-            }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Tab Row: Explore Classes | My Learning (enrolled count)
-        TabRow(
-            selectedTabIndex = selectedMainTab,
-            containerColor = MaterialTheme.colorScheme.surface,
-            contentColor = LenoPrimary,
-            indicator = { tabPositions ->
-                TabRowDefaults.SecondaryIndicator(
-                    Modifier.tabIndicatorOffset(tabPositions[selectedMainTab]),
-                    color = LenoPrimary
-                )
-            }
-        ) {
-            Tab(
-                selected = selectedMainTab == 0,
-                onClick = { selectedMainTab = 0 },
-                text = {
-                    Text(
-                        text = "Explore Classes (${filteredExploreClasses.size})",
-                        fontWeight = if (selectedMainTab == 0) FontWeight.Bold else FontWeight.Normal,
-                        fontSize = 13.sp
-                    )
-                },
-                modifier = Modifier.testTag("tab_explore_classes")
-            )
-
-            Tab(
-                selected = selectedMainTab == 1,
-                onClick = { selectedMainTab = 1 },
-                text = {
-                    Text(
-                        text = "My Learning (${enrolledClasses.size})",
-                        fontWeight = if (selectedMainTab == 1) FontWeight.Bold else FontWeight.Normal,
-                        fontSize = 13.sp
-                    )
-                },
-                modifier = Modifier.testTag("tab_my_learning")
-            )
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         val displayClasses = if (selectedMainTab == 0) filteredExploreClasses else filteredEnrolledClasses
 
-        // Class Cards List
-        if (displayClasses.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Default.School,
-                        contentDescription = null,
-                        tint = LenoPrimaryLight,
-                        modifier = Modifier.size(48.dp)
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text(
-                        text = if (selectedMainTab == 1) {
-                            "You haven't joined any classes yet.\nExplore classes and tap Join to add to My Learning."
-                        } else if (searchQuery.isNotEmpty()) {
-                            "No classes match \"$searchQuery\""
-                        } else {
-                            "No published classes in \"$selectedFilter\""
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-
-                    if (selectedMainTab == 1) {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        OutlinedButton(
-                            onClick = { selectedMainTab = 0 },
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("Browse Classes")
+        // Class Cards List (subject filter chips scroll smoothly inside)
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .testTag("classes_list"),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(top = 4.dp, bottom = 88.dp)
+        ) {
+            item(key = "subject_filters_row") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    filterOptions.forEach { filterName ->
+                        val selected = selectedFilter == filterName
+                        val chipIcon = when (filterName) {
+                            "All" -> Icons.Default.AutoAwesome
+                            "Computer Science", "Online Skills" -> Icons.Default.Code
+                            "JAMB", "Maths", "Physics", "Chemistry", "Biology", "Economics" -> Icons.Default.School
+                            "English", "Quran" -> Icons.Default.MenuBook
+                            "Content Creator" -> Icons.Default.Star
+                            else -> Icons.Default.Book
                         }
+                        FilterChip(
+                            selected = selected,
+                            onClick = { selectedFilter = filterName },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = chipIcon,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            },
+                            label = {
+                                Text(
+                                    text = filterName,
+                                    fontSize = 12.5.sp,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            },
+                            shape = RoundedCornerShape(50),
+                            border = FilterChipDefaults.filterChipBorder(
+                                enabled = true,
+                                selected = selected,
+                                borderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
+                                selectedBorderColor = LenoPrimary
+                            ),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = LenoPrimary,
+                                selectedLabelColor = Color.White,
+                                selectedLeadingIconColor = Color.White,
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                iconColor = LenoPrimary
+                            ),
+                            modifier = Modifier.testTag("filter_chip_$filterName")
+                        )
                     }
                 }
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .testTag("classes_list"),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 6.dp, bottom = 24.dp)
-            ) {
+
+            if (displayClasses.isEmpty()) {
+                item(key = "classes_empty_state") {
+                    LenoEmptyState(
+                        icon = if (searchQuery.isNotEmpty()) Icons.Default.Search else Icons.Default.School,
+                        title = when {
+                            selectedMainTab == 1 -> "No enrolled classes yet"
+                            searchQuery.isNotEmpty() -> "No matching classes"
+                            else -> "No classes in $selectedFilter"
+                        },
+                        subtitle = when {
+                            selectedMainTab == 1 -> "Explore published classes and tap one to join your classroom."
+                            searchQuery.isNotEmpty() -> "No classes match \"$searchQuery\". Try another keyword or subject."
+                            else -> "Check back soon or switch to All subjects to discover courses."
+                        },
+                        actionLabel = if (selectedMainTab == 1) "Browse Classes" else null,
+                        onAction = if (selectedMainTab == 1) ({ selectedMainTab = 0 }) else null,
+                        modifier = Modifier.fillParentMaxWidth()
+                    )
+                }
+            } else {
                 if (continueLearningTarget != null && searchQuery.isBlank() && selectedFilter == "All") {
                     item(key = "continue_learning_hero") {
                         ContinueLearningHeroCard(
@@ -638,11 +611,36 @@ fun ClassScreen(
                 }
 
                 item {
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
             }
         }
     }
+
+        // Single Floating Action Button for Create Class
+        FloatingActionButton(
+            onClick = {
+                if (isApprovedTeacher || isAdmin) {
+                    showCreateClassDialog = true
+                } else {
+                    showMustBecomeTeacherDialog = true
+                }
+            },
+            shape = RoundedCornerShape(16.dp),
+            containerColor = LenoPrimary,
+            contentColor = Color.White,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(bottom = 16.dp, end = 16.dp)
+                .size(56.dp)
+                .testTag(if (isApprovedTeacher || isAdmin) "top_create_class_button" else "top_create_class_button_non_teacher")
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "Create Class",
+                tint = Color.White
+            )
+        }
 }
 
     // Dialogs & Modals
@@ -806,7 +804,7 @@ fun ClassScreen(
         )
     }
 
-    // Payment Checkout Dialog (for paid classes)
+    // Paid Class Enrollment Inquiry Dialog
     classForPaymentCheckout?.let { payClass ->
         val instructorRole by viewModel.getTeacherRole(payClass.instructorUserId).collectAsState(initial = null)
         PaymentCheckoutDialog(
@@ -814,15 +812,18 @@ fun ClassScreen(
             currentUser = currentUser,
             instructorTeacherRole = instructorRole,
             onDismiss = { classForPaymentCheckout = null },
-            onPaymentSuccess = {
-                viewModel.enrollInClass(payClass.classId, payClass.instructorUserId) { success ->
-                    if (success) {
-                        classForPaymentCheckout = null
-                        joinedClassConfirmation = payClass
-                    } else {
-                        Toast.makeText(context, "Payment failed. Please try again.", Toast.LENGTH_SHORT).show()
-                    }
+            onMessageInstructor = {
+                val targetId = payClass.instructorUserId
+                classForPaymentCheckout = null
+                if (targetId.isNotBlank()) {
+                    onOpenChat(targetId)
+                } else {
+                    showContactSupportDialog = true
                 }
+            },
+            onContactSupport = {
+                classForPaymentCheckout = null
+                showContactSupportDialog = true
             }
         )
     }
@@ -916,6 +917,17 @@ fun ClassScreen(
                 val target = groupClass
                 selectedClassForGroupRoom = null
                 classForEditing = target
+            },
+            seenByMap = lessonSeenByMap,
+            onEditLesson = { targetLesson ->
+                if (groupClass.instructorUserId == (currentUser?.userId ?: "") || isAdmin) {
+                    lessonForEditing = Pair(groupClass, targetLesson)
+                }
+            },
+            onDeleteLesson = { targetLesson ->
+                if (groupClass.instructorUserId == (currentUser?.userId ?: "") || isAdmin) {
+                    lessonToDelete = Pair(groupClass, targetLesson)
+                }
             }
         )
     }
@@ -927,16 +939,85 @@ fun ClassScreen(
             classForAddingLesson = null
             Toast.makeText(context, "Unauthorized: Teachers cannot add lessons to another teacher's class.", Toast.LENGTH_SHORT).show()
         } else {
+            val clsLessons by viewModel.getLessonsForClass(cls.classId).collectAsState(initial = emptyList<LessonEntity>())
+            val existingModules = remember(clsLessons) {
+                val bracketRegex = Regex("""^\[([^\]]+)]\s*""")
+                clsLessons.mapNotNull { bracketRegex.find(it.summary.trim())?.groupValues?.getOrNull(1)?.trim() }
+                    .filter { it.isNotBlank() }
+                    .distinct()
+            }
             AddLessonDialog(
+                classId = cls.classId,
                 classTitle = cls.title,
+                existingModules = existingModules,
                 onDismiss = { classForAddingLesson = null },
-                onSubmitLesson = { title, content, summary ->
+                onSubmitLesson = { title, content, summary, onResult ->
                     viewModel.addLessonToClass(cls.classId, title, content, summary) { success, msg ->
                         Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                        onResult(success, msg)
                     }
                 }
             )
         }
+    }
+
+    // Edit Lesson Dialog (for instructor)
+    lessonForEditing?.let { (cls, targetLesson) ->
+        val isOwner = cls.instructorUserId == (currentUser?.userId ?: "")
+        if (!isOwner && !isAdmin) {
+            lessonForEditing = null
+            Toast.makeText(context, "Unauthorized: Only the creator of this class can edit lessons.", Toast.LENGTH_SHORT).show()
+        } else {
+            val clsLessons by viewModel.getLessonsForClass(cls.classId).collectAsState(initial = emptyList<LessonEntity>())
+            val existingModules = remember(clsLessons) {
+                val bracketRegex = Regex("""^\[([^\]]+)]\s*""")
+                clsLessons.mapNotNull { bracketRegex.find(it.summary.trim())?.groupValues?.getOrNull(1)?.trim() }
+                    .filter { it.isNotBlank() }
+                    .distinct()
+            }
+            AddLessonDialog(
+                classId = cls.classId,
+                classTitle = cls.title,
+                initialLesson = targetLesson,
+                existingModules = existingModules,
+                onDismiss = { lessonForEditing = null },
+                onSubmitLesson = { title, content, summary, onResult ->
+                    viewModel.updateLessonInClass(cls.classId, targetLesson.lessonId, title, content, summary) { success, msg ->
+                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                        onResult(success, msg)
+                    }
+                }
+            )
+        }
+    }
+
+    // Delete Lesson Confirmation Dialog
+    lessonToDelete?.let { (cls, targetLesson) ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { lessonToDelete = null },
+            title = { Text("Delete Lesson?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text("Remove \"${targetLesson.title}\" from ${cls.title}? Students will no longer see it.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        lessonToDelete = null
+                        viewModel.deleteLessonFromClass(cls.classId, targetLesson.lessonId) { _, msg ->
+                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { lessonToDelete = null }) {
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
+                }
+            }
+        )
     }
 
     // Edit Class Dialog (for creator teacher / instructor only)
@@ -996,6 +1077,9 @@ fun ClassScreen(
             allLessons = parentLessons,
             onSelectLesson = { targetLesson ->
                 selectedLessonForView = Pair(targetLesson, parentClass)
+            },
+            onMarkLessonSeen = { viewedLesson ->
+                viewModel.markLessonSeen(context, parentClass.classId, viewedLesson.lessonId)
             },
             onDismiss = { selectedLessonForView = null },
             onAskTeacherInChat = { formulaQuote ->
@@ -1078,9 +1162,6 @@ fun ClassCard(
     val updateTick by LessonProgressManager.updateTick.collectAsState()
     val isOwnerInstructor = classItem.instructorUserId == currentUserId
     val isAnotherTeacher = isCurrentUserTeacher && !isOwnerInstructor && !isAdmin
-    val classCode = remember(classItem.classId) {
-        LessonProgressManager.formatClassCode(classItem.classId)
-    }
     val completedCount = remember(classItem.classId, currentUserId, updateTick) {
         if (currentUserId.isNotBlank()) {
             LessonProgressManager.getCompletedCount(context, currentUserId, classItem.classId)
@@ -1102,12 +1183,28 @@ fun ClassCard(
             "₦$raw"
         }
     }
+    val isFree = formattedPrice.equals("Free", ignoreCase = true) || !classItem.isPaid
+
+    val headerGradientColors = remember(classItem.subject, isDark) {
+        val s = classItem.subject.lowercase()
+        when {
+            "math" in s -> if (isDark) listOf(Color(0xFF1E293B), Color(0xFF1D4ED8).copy(alpha = 0.55f)) else listOf(Color(0xFFEEF2FF), Color(0xFFDBEAFE))
+            "phys" in s -> if (isDark) listOf(Color(0xFF0F292E), Color(0xFF0E7490).copy(alpha = 0.55f)) else listOf(Color(0xFFECFEFF), Color(0xFFCFFAFE))
+            "chem" in s -> if (isDark) listOf(Color(0xFF281A3B), Color(0xFF6D28D9).copy(alpha = 0.5f)) else listOf(Color(0xFFF5F3FF), Color(0xFFEDE9FE))
+            "eng" in s || "lit" in s -> if (isDark) listOf(Color(0xFF2E2314), Color(0xFFB45309).copy(alpha = 0.5f)) else listOf(Color(0xFFFFFBEB), Color(0xFFFEF3C7))
+            "comp" in s || "code" in s || "skill" in s -> if (isDark) listOf(Color(0xFF142B24), Color(0xFF0F766E).copy(alpha = 0.55f)) else listOf(Color(0xFFECFDF5), Color(0xFFCCFBF1))
+            else -> if (isDark) listOf(Color(0xFF0D2E22), Color(0xFF065F46).copy(alpha = 0.65f)) else listOf(LenoPrimaryVeryLight, Color(0xFFD1FAE5))
+        }
+    }
 
     Card(
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (isDark) 0.35f else 0.5f)
+        ),
         modifier = Modifier
             .fillMaxWidth()
             .defaultMinSize(minHeight = 140.dp)
@@ -1120,327 +1217,281 @@ fun ClassCard(
             }
             .testTag("class_card_${classItem.classId}")
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp)
-        ) {
-            // Row 1: Subject badge + Price pill
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (isDark) MaterialTheme.colorScheme.surfaceVariant else LenoPrimaryVeryLight
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Top Visual Header (Cover Image Banner or Subject Gradient Strip)
+            if (classItem.imageUrl.isNotBlank()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(118.dp)
                 ) {
-                    Text(
-                        text = classItem.subject,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (isDark) MaterialTheme.colorScheme.onSurfaceVariant else LenoPrimaryDark,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    AsyncImage(
+                        model = classItem.imageUrl,
+                        contentDescription = classItem.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
                     )
-                }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(
+                                        Color.Black.copy(alpha = 0.35f),
+                                        Color.Black.copy(alpha = 0.1f),
+                                        Color.Black.copy(alpha = 0.55f)
+                                    )
+                                )
+                            )
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.TopCenter)
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = Color.Black.copy(alpha = 0.55f)
+                        ) {
+                            Text(
+                                text = classItem.subject,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
 
-                val isFree = formattedPrice.equals("Free", ignoreCase = true) || !classItem.isPaid
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (isFree) {
-                        if (isDark) Color(0xFF0D3828) else Color(0xFFE8F7F0)
-                    } else {
-                        if (isDark) MaterialTheme.colorScheme.primaryContainer else LenoPrimaryVeryLight
-                    },
-                    border = androidx.compose.foundation.BorderStroke(
-                        1.dp,
-                        if (isFree) Color(0xFF10B981) else LenoPrimary.copy(alpha = 0.45f)
-                    )
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = if (isFree) Color(0xFF047857).copy(alpha = 0.9f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+                        ) {
+                            Text(
+                                text = if (isFree) "Free" else formattedPrice,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isFree) Color.White else MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 11.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Brush.horizontalGradient(headerGradientColors))
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
                 ) {
-                    Text(
-                        text = if (isFree) "Free" else formattedPrice,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = if (isFree) {
-                            if (isDark) Color(0xFF6EE7B7) else Color(0xFF047857)
-                        } else {
-                            if (isDark) MaterialTheme.colorScheme.onPrimaryContainer else LenoPrimary
-                        },
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = if (isDark) Color.White.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
+                            ) {
+                                Text(
+                                    text = classItem.subject,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isDark) Color.White else com.example.ui.theme.LenoBlack,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                )
+                            }
+                            if (classItem.level.isNotBlank()) {
+                                Text(
+                                    text = classItem.level,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = if (isDark) Color.White.copy(alpha = 0.78f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = if (isFree) {
+                                if (isDark) Color(0xFF0D3828) else Color(0xFFE8F7F0)
+                            } else {
+                                if (isDark) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
+                            },
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (isFree) Color(0xFF10B981).copy(alpha = 0.7f) else LenoPrimary.copy(alpha = 0.45f)
+                            )
+                        ) {
+                            Text(
+                                text = if (isFree) "Free" else formattedPrice,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (isDark) Color.White else com.example.ui.theme.LenoBlack,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Row 2: Class Title
-            Text(
-                text = classItem.title,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            // Optional 1-line description snippet if available
-            if (classItem.shortDescription.isNotBlank()) {
-                Spacer(modifier = Modifier.height(3.dp))
+            // Clean Card Body (Tap anywhere on card for full Course Overview / Classroom)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 14.dp)
+            ) {
+                // Class Title
                 Text(
-                    text = classItem.shortDescription,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
+                    text = classItem.title,
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontSize = 17.5.sp,
+                        lineHeight = 23.sp,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
-            }
 
-            // Compact Progress Bar (if enrolled)
-            if (isEnrolled && currentUserId.isNotBlank()) {
-                val totalLessons = maxOf(classItem.lessonCount, 1)
-                val progressFraction = (completedCount.toFloat() / totalLessons.toFloat()).coerceIn(0f, 1f)
-                val progressPercent = (progressFraction * 100).toInt()
+                Spacer(modifier = Modifier.height(10.dp))
 
-                Spacer(modifier = Modifier.height(8.dp))
+                // Single Compact Metadata Row (Avatar + Name + Verified + Lesson Count + Status Pill)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    LinearProgressIndicator(
-                        progress = { progressFraction },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(5.dp)
-                            .clip(RoundedCornerShape(3.dp)),
-                        color = Color(0xFF22C55E),
-                        trackColor = if (isDark) Color(0xFF1B3B2B) else Color(0xFFDCFCE7)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "$completedCount/$totalLessons ($progressPercent%)",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isDark) Color(0xFF6EE7B7) else Color(0xFF15803D)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            val hasMultipleButtons = (isOwnerInstructor && onEdit != null) || (isCertAwarded && onOpenCertificate != null)
-
-            // Row 3: Teacher Row & Single-Button Actions (or Chat only when multi-button row follows)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Teacher Info Column
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(LenoPrimaryLight),
-                        contentAlignment = Alignment.Center
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Text(
-                            text = classItem.instructorName.take(1).uppercase(),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = LenoPrimaryDark
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    Column(
-                        verticalArrangement = Arrangement.Center,
-                        modifier = Modifier.weight(1f, fill = false)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
+                        Box(
+                            modifier = Modifier
+                                .size(26.dp)
+                                .clip(CircleShape)
+                                .background(if (isDark) LenoPrimaryDark.copy(alpha = 0.45f) else LenoPrimaryLight),
+                            contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = classItem.instructorName,
-                                fontSize = 13.sp,
+                                text = classItem.instructorName.take(1).uppercase(),
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false)
+                                color = if (isDark) Color.White else com.example.ui.theme.LenoBlack
                             )
-                            if (classItem.instructorIsTeacher) {
-                                Spacer(modifier = Modifier.width(5.dp))
-                                Surface(
-                                    shape = RoundedCornerShape(4.dp),
-                                    color = LenoPrimary,
-                                    contentColor = Color.White
-                                ) {
-                                    Text(
-                                        text = "Teacher ✓",
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                                    )
-                                }
-                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        Text(
+                            text = classItem.instructorName,
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+
+                        if (classItem.instructorIsTeacher) {
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                imageVector = Icons.Default.Verified,
+                                contentDescription = "Verified Teacher",
+                                tint = LenoPrimary,
+                                modifier = Modifier.size(14.dp)
+                            )
                         }
 
                         val lessonText = if (classItem.lessonCount == 1) "1 lesson" else "${classItem.lessonCount} lessons"
                         Text(
-                            text = lessonText,
-                            fontSize = 11.sp,
+                            text = " • $lessonText",
+                            fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
-                }
 
-                Spacer(modifier = Modifier.width(8.dp))
-
-                // Actions: Chat icon button + single button (or Chat only when multi-button row renders below)
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    IconButton(
-                        onClick = onOpenChat,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .testTag("chat_instructor_btn_${classItem.classId}")
-                    ) {
+                    if (isAnotherTeacher) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Chat,
-                            contentDescription = "Chat with instructor",
-                            tint = LenoPrimary,
-                            modifier = Modifier.size(18.dp)
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = "Locked",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(15.dp)
                         )
-                    }
-
-                    if (!hasMultipleButtons) {
-                        if (isOwnerInstructor) {
-                            Button(
-                                onClick = onViewDetails,
-                                colors = ButtonDefaults.buttonColors(containerColor = LenoPrimary),
-                                shape = RoundedCornerShape(16.dp),
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                modifier = Modifier
-                                    .height(34.dp)
-                                    .testTag("enrolled_class_button_${classItem.classId}")
+                    } else if (isCertAwarded) {
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = Color(0xFFD97706).copy(alpha = if (isDark) 0.25f else 0.14f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Classroom", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
-                            }
-                        } else if (isAnotherTeacher) {
-                            OutlinedButton(
-                                onClick = {
-                                    Toast.makeText(context, "Access Denied: Teachers cannot access another teacher's class.", Toast.LENGTH_SHORT).show()
-                                },
-                                shape = RoundedCornerShape(16.dp),
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Gray),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color.Gray.copy(alpha = 0.4f)),
-                                modifier = Modifier
-                                    .height(34.dp)
-                                    .testTag("locked_teacher_class_button_${classItem.classId}")
-                            ) {
-                                Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(11.dp), tint = Color.Gray)
+                                Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(12.dp), tint = Color(0xFFD97706))
                                 Spacer(modifier = Modifier.width(3.dp))
-                                Text("Teacher Locked", fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
-                            }
-                        } else if (isAdmin || isEnrolled) {
-                            Button(
-                                onClick = onViewDetails,
-                                colors = ButtonDefaults.buttonColors(containerColor = LenoPrimary),
-                                shape = RoundedCornerShape(16.dp),
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                modifier = Modifier
-                                    .height(34.dp)
-                                    .testTag("enrolled_class_button_${classItem.classId}")
-                            ) {
-                                Text("Classroom", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
-                            }
-                        } else {
-                            val isPaid = classItem.isPaid && !classItem.price.equals("FREE", ignoreCase = true)
-                            Button(
-                                onClick = onJoin,
-                                colors = ButtonDefaults.buttonColors(containerColor = LenoPrimary),
-                                shape = RoundedCornerShape(16.dp),
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                modifier = Modifier
-                                    .height(34.dp)
-                                    .testTag("join_class_button_${classItem.classId}")
-                            ) {
                                 Text(
-                                    text = if (isPaid) "Pay & Join" else "Join Free",
+                                    text = "Certified",
+                                    fontSize = 10.5.sp,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp,
-                                    color = Color.White,
-                                    maxLines = 1,
-                                    softWrap = false
+                                    color = if (isDark) Color(0xFFFBBF24) else Color(0xFFB45309)
                                 )
                             }
                         }
+                    } else if (isOwnerInstructor) {
+                        Text(
+                            text = "Teaching",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    } else if (isEnrolled || isAdmin) {
+                        Text(
+                            text = "Enrolled",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 }
-            }
 
-            if (hasMultipleButtons) {
-                Spacer(modifier = Modifier.height(10.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (isCertAwarded && onOpenCertificate != null) {
-                        Button(
-                            onClick = onOpenCertificate,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
-                            shape = RoundedCornerShape(16.dp),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            modifier = Modifier
-                                .height(34.dp)
-                                .testTag("class_cert_button_${classItem.classId}")
-                        ) {
-                            Text("Cert 🎓", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
-                        }
-                    }
+                // Compact Progress Bar (if enrolled)
+                if (isEnrolled && currentUserId.isNotBlank()) {
+                    val totalLessons = maxOf(classItem.lessonCount, 1)
+                    val progressFraction = (completedCount.toFloat() / totalLessons.toFloat()).coerceIn(0f, 1f)
+                    val progressPercent = (progressFraction * 100).toInt()
 
-                    if (isOwnerInstructor && onEdit != null) {
-                        OutlinedButton(
-                            onClick = onEdit,
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = LenoPrimary),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, LenoPrimary),
-                            shape = RoundedCornerShape(16.dp),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        LinearProgressIndicator(
+                            progress = { progressFraction },
                             modifier = Modifier
-                                .height(34.dp)
-                                .testTag("edit_class_button_${classItem.classId}")
-                        ) {
-                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(13.dp), tint = LenoPrimary)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Edit", fontSize = 11.sp, color = LenoPrimary, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
-                        }
-                    }
-
-                    if (isOwnerInstructor || isAdmin || isEnrolled) {
-                        Button(
-                            onClick = onViewDetails,
-                            colors = ButtonDefaults.buttonColors(containerColor = LenoPrimary),
-                            shape = RoundedCornerShape(16.dp),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                            modifier = Modifier
-                                .height(34.dp)
-                                .testTag("enrolled_class_button_${classItem.classId}")
-                        ) {
-                            Text("Classroom", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
-                        }
+                                .weight(1f)
+                                .height(5.dp)
+                                .clip(RoundedCornerShape(50)),
+                            color = LenoPrimary,
+                            trackColor = if (isDark) Color(0xFF1B3B2B) else Color(0xFFDCFCE7)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "$progressPercent%",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 }
             }
@@ -1501,7 +1552,7 @@ private fun ContinueLearningHeroCard(
                                 text = "• ${target.progressPercent}%",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFFA7F3D0)
+                                color = Color.White
                             )
                         }
                         Spacer(modifier = Modifier.height(2.dp))

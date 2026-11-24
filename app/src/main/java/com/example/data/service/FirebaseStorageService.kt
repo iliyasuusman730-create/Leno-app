@@ -176,6 +176,106 @@ class FirebaseStorageService(
         }
     }
 
+    /**
+     * Uploads a lesson photo/diagram from an Android content Uri so students on all devices can view it.
+     * Falls back to a compact compressed JPEG data URL (max 900px, 65% quality) if Cloud Storage is unprovisioned.
+     */
+    suspend fun uploadLessonImage(
+        uri: Uri,
+        context: Context,
+        classId: String = ""
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val stream: InputStream? = context.contentResolver.openInputStream(uri)
+            val bytes = stream?.use { it.readBytes() }
+                ?: return@withContext Result.failure(Exception("Cannot read selected image"))
+
+            val compressedBytes = compressImageBytes(bytes, maxDimension = 900, quality = 65)
+            val finalName = "lesson_img_${UUID.randomUUID()}.jpg"
+            val path = if (classId.isNotBlank()) "lessons/$classId/images/$finalName" else "lessons/images/$finalName"
+
+            uploadBytesToStorage(compressedBytes, path)
+        } catch (e: Exception) {
+            logE("Failed to upload lesson image from Uri: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Uploads a lesson whiteboard/camera File so students on all devices can view it.
+     */
+    suspend fun uploadLessonImageFile(
+        file: File,
+        classId: String = ""
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            if (!file.exists()) {
+                return@withContext Result.failure(Exception("Image file does not exist"))
+            }
+            val bytes = file.readBytes()
+            val compressedBytes = compressImageBytes(bytes, maxDimension = 900, quality = 65)
+            val finalName = "lesson_wb_${UUID.randomUUID()}.jpg"
+            val path = if (classId.isNotBlank()) "lessons/$classId/images/$finalName" else "lessons/images/$finalName"
+
+            uploadBytesToStorage(compressedBytes, path)
+        } catch (e: Exception) {
+            logE("Failed to upload lesson image file: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Uploads a lesson attachment file (PDF, slides, worksheet, doc) to Cloud Storage, or embeds
+     * compact files (<= 350 KB) as a base64 data URL so students on any device can open it.
+     */
+    suspend fun uploadLessonFile(
+        uri: Uri,
+        context: Context,
+        fileName: String,
+        classId: String = ""
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                ?: return@withContext Result.failure(Exception("Unable to read selected file"))
+
+            val storageRef = if (isStorageProvisioned) storage?.reference else null
+            val safeName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
+            val path = if (classId.isNotBlank()) {
+                "lessons/$classId/files/${UUID.randomUUID().toString().take(8)}_$safeName"
+            } else {
+                "lessons/files/${UUID.randomUUID().toString().take(8)}_$safeName"
+            }
+
+            if (storageRef != null) {
+                try {
+                    val metadata = StorageMetadata.Builder()
+                        .setContentType(mime)
+                        .build()
+                    val uploadTask = storageRef.child(path).putBytes(bytes, metadata).await()
+                    val downloadUrl = uploadTask.storage.downloadUrl.await().toString()
+                    return@withContext Result.success(downloadUrl)
+                } catch (e: Exception) {
+                    isStorageProvisioned = false
+                    logW("Firebase Storage file upload fallback: ${e.message}")
+                }
+            }
+
+            // Without Cloud Storage, Firestore document size is capped at 1 MiB.
+            // Keep inline base64 attachments safely <= 350 KB (~470 KB base64).
+            if (bytes.size > 350 * 1024) {
+                return@withContext Result.failure(
+                    Exception("File is ${(bytes.size / 1024)} KB. Files over 350 KB require Cloud Storage enabled; please attach a smaller PDF/doc or share a link.")
+                )
+            }
+            val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+            Result.success("data:$mime;base64,$base64")
+        } catch (e: Exception) {
+            logE("Failed to upload lesson file: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
     private fun compressImageBytes(bytes: ByteArray, maxDimension: Int = 1024, quality: Int = 75): ByteArray {
         return try {
             val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return bytes

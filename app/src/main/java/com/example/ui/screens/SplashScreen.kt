@@ -70,7 +70,7 @@ fun SplashScreen(
                     painter = painterResource(id = R.drawable.ic_official_leno_avatar),
                     contentDescription = "Leno Logo",
                     modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Fit
+                    contentScale = ContentScale.Crop
                 )
             }
 
@@ -82,7 +82,7 @@ fun SplashScreen(
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 1.sp
                 ),
-                color = MaterialTheme.colorScheme.primary
+                color = MaterialTheme.colorScheme.onBackground
             )
 
             Spacer(modifier = Modifier.height(8.dp))

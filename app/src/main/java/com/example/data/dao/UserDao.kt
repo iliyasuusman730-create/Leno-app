@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.example.data.entity.UserEntity
 import kotlinx.coroutines.flow.Flow
@@ -171,6 +172,35 @@ interface UserDao {
 
     @Query("UPDATE users SET isCurrentUser = (CASE WHEN userId = :userId THEN 1 ELSE 0 END)")
     suspend fun setCurrentUser(userId: String)
+
+    @Transaction
+    suspend fun switchActiveUserAtomic(user: UserEntity) {
+        clearCurrentUser()
+        insertUser(user.copy(isCurrentUser = true))
+        setCurrentUser(user.userId)
+    }
+
+    @Transaction
+    suspend fun upsertRemoteUsersSafely(users: List<UserEntity>, activeUserId: String?) {
+        if (users.isEmpty()) return
+        val existingById = getAllUsersSync().associateBy { it.userId }
+        val merged = users.mapNotNull { remote ->
+            if (remote.userId.isBlank()) return@mapNotNull null
+            val existing = existingById[remote.userId]
+            val keepCurrent = existing?.isCurrentUser == true ||
+                (!activeUserId.isNullOrBlank() && remote.userId == activeUserId)
+            remote.copy(
+                isCurrentUser = keepCurrent,
+                password = "",
+                passwordHash = remote.passwordHash.ifBlank { existing?.passwordHash ?: "" },
+                passwordSalt = remote.passwordSalt.ifBlank { existing?.passwordSalt ?: "" },
+                recoveryCode = remote.recoveryCode.ifBlank { existing?.recoveryCode ?: "" }
+            )
+        }
+        if (merged.isNotEmpty()) {
+            insertUsers(merged)
+        }
+    }
 
     @Query("UPDATE users SET isOnline = :isOnline, lastSeen = :lastSeen WHERE userId = :userId")
     suspend fun updateOnlineStatus(userId: String, isOnline: Boolean, lastSeen: Long = System.currentTimeMillis())

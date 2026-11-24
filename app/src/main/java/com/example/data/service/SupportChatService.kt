@@ -33,7 +33,7 @@ class SupportChatService(
 
     private val db: FirebaseFirestore? by lazy {
         firestoreInstance ?: try {
-            FirebaseFirestore.getInstance()
+            com.example.LenoApplication.getFirestoreInstance()
         } catch (e: Throwable) {
             Log.w(TAG, "Firebase Firestore not initialized: ${e.message}")
             null
@@ -142,6 +142,7 @@ class SupportChatService(
             inMemoryChats[newChatId] = createdChat
             Result.success(createdChat)
         } catch (e: Exception) {
+            com.example.util.handleFirestoreError(e, com.example.util.OperationType.WRITE, COLLECTION_SUPPORT_CHATS)
             Log.e(TAG, "Error in getOrCreateSupportChat: ${e.message}", e)
             // Fallback to local
             val fallbackChat = inMemoryChats.values.firstOrNull { it.userId == userId }
@@ -175,6 +176,7 @@ class SupportChatService(
             .orderBy("timestamp", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
+                    com.example.util.handleFirestoreError(error, com.example.util.OperationType.LIST, "$COLLECTION_SUPPORT_CHATS/$chatId/$SUBCOLLECTION_MESSAGES")
                     Log.w(TAG, "Snapshot error for support messages in $chatId: ${error.message}")
                     val list = inMemoryMessages[chatId] ?: emptyList()
                     trySend(list.sortedBy { it.timestamp })
@@ -262,6 +264,7 @@ class SupportChatService(
         val registration = database.collection(COLLECTION_SUPPORT_CHATS)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
+                    com.example.util.handleFirestoreError(error, com.example.util.OperationType.LIST, COLLECTION_SUPPORT_CHATS)
                     Log.w(TAG, "Snapshot error for open support chats: ${error.message}")
                     val list = inMemoryChats.values.filter { it.isOpen }.sortedByDescending { it.lastUpdatedAt }
                     trySend(list)

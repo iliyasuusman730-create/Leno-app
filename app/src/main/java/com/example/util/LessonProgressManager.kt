@@ -13,6 +13,10 @@ import kotlinx.coroutines.flow.asStateFlow
 object LessonProgressManager {
     private const val PREF_NAME = "leno_lesson_progress"
     private const val KEY_COMPLETED_LESSONS = "completed_lessons_"
+    private const val KEY_SEEN_LESSONS = "seen_lessons_"
+    private const val KEY_BOOKMARKED_LESSONS = "bookmarked_lessons_"
+    private const val KEY_READER_FONT_SCALE = "reader_font_scale"
+    private const val KEY_READER_THEME_MODE = "reader_theme_mode"
     private const val KEY_ANNOUNCEMENTS = "class_announcements_"
     
     private var prefs: SharedPreferences? = null
@@ -99,6 +103,84 @@ object LessonProgressManager {
         if (totalLessons <= 0) return 0
         val completed = getCompletedCount(context, userId, classId)
         return ((completed.toFloat() / totalLessons.toFloat()) * 100).toInt().coerceIn(0, 100)
+    }
+
+    private fun makeSeenKey(userId: String, classId: String): String =
+        "$KEY_SEEN_LESSONS${userId.trim()}_${classId.trim()}"
+
+    fun isLessonSeen(context: Context, userId: String, classId: String, lessonId: String): Boolean {
+        if (userId.isBlank() || classId.isBlank() || lessonId.isBlank()) return false
+        val p = getPrefs(context) ?: return false
+        val set = p.getStringSet(makeSeenKey(userId, classId), emptySet()) ?: emptySet()
+        return set.contains(lessonId) || isLessonCompleted(context, userId, classId, lessonId)
+    }
+
+    fun markLessonSeen(context: Context, userId: String, classId: String, lessonId: String) {
+        if (userId.isBlank() || classId.isBlank() || lessonId.isBlank()) return
+        val p = getPrefs(context) ?: return
+        val key = makeSeenKey(userId, classId)
+        val current = p.getStringSet(key, emptySet())?.toMutableSet() ?: mutableSetOf()
+        if (current.add(lessonId)) {
+            p.edit().putStringSet(key, current).apply()
+            _updateTick.value = System.currentTimeMillis()
+        }
+    }
+
+    fun getSeenLessonIds(context: Context, userId: String, classId: String): Set<String> {
+        if (userId.isBlank() || classId.isBlank()) return emptySet()
+        val p = getPrefs(context) ?: return emptySet()
+        val seen = p.getStringSet(makeSeenKey(userId, classId), emptySet()) ?: emptySet()
+        return seen + getCompletedLessonIds(context, userId, classId)
+    }
+
+    private fun makeBookmarkKey(userId: String): String =
+        "$KEY_BOOKMARKED_LESSONS${userId.trim()}"
+
+    fun isLessonBookmarked(context: Context, userId: String, lessonId: String): Boolean {
+        if (userId.isBlank() || lessonId.isBlank()) return false
+        val p = getPrefs(context) ?: return false
+        val set = p.getStringSet(makeBookmarkKey(userId), emptySet()) ?: emptySet()
+        return set.contains(lessonId)
+    }
+
+    fun toggleLessonBookmark(context: Context, userId: String, lessonId: String): Boolean {
+        if (userId.isBlank() || lessonId.isBlank()) return false
+        val p = getPrefs(context) ?: return false
+        val key = makeBookmarkKey(userId)
+        val set = p.getStringSet(key, emptySet())?.toMutableSet() ?: mutableSetOf()
+        val nowBookmarked = if (set.contains(lessonId)) {
+            set.remove(lessonId)
+            false
+        } else {
+            set.add(lessonId)
+            true
+        }
+        p.edit().putStringSet(key, set).apply()
+        _updateTick.value = System.currentTimeMillis()
+        return nowBookmarked
+    }
+
+    fun getReaderFontScale(context: Context): Float {
+        val p = getPrefs(context) ?: return 1.0f
+        return p.getFloat(KEY_READER_FONT_SCALE, 1.0f).coerceIn(0.85f, 1.35f)
+    }
+
+    fun setReaderFontScale(context: Context, scale: Float) {
+        val p = getPrefs(context) ?: return
+        p.edit().putFloat(KEY_READER_FONT_SCALE, scale.coerceIn(0.85f, 1.35f)).apply()
+        _updateTick.value = System.currentTimeMillis()
+    }
+
+    /** 0 = App Default, 1 = Warm Paper (Sepia), 2 = Dark Slate */
+    fun getReaderThemeMode(context: Context): Int {
+        val p = getPrefs(context) ?: return 0
+        return p.getInt(KEY_READER_THEME_MODE, 0).coerceIn(0, 2)
+    }
+
+    fun setReaderThemeMode(context: Context, mode: Int) {
+        val p = getPrefs(context) ?: return
+        p.edit().putInt(KEY_READER_THEME_MODE, mode.coerceIn(0, 2)).apply()
+        _updateTick.value = System.currentTimeMillis()
     }
 
     /**

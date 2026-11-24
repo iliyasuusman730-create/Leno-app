@@ -115,7 +115,7 @@ fun NotificationsScreen(
                     text = "Pending Connection Requests (${pendingRequests.size})",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier.padding(top = 8.dp)
                 )
             }
@@ -148,7 +148,7 @@ fun NotificationsScreen(
                                 Text(
                                     text = "@${requester?.username ?: req.requesterId}",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -191,9 +191,9 @@ fun NotificationsScreen(
                                     .testTag("decline_request_${req.requesterId}"),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurface)
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Decline")
+                                Text("Decline", color = MaterialTheme.colorScheme.onSurface)
                             }
                         }
                     }
@@ -207,7 +207,7 @@ fun NotificationsScreen(
                 text = "Activity & System Alerts",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier.padding(top = 8.dp)
             )
         }

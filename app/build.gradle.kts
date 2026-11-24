@@ -3,6 +3,7 @@ plugins {
   alias(libs.plugins.compose.compiler)
   alias(libs.plugins.kotlin.serialization)
   alias(libs.plugins.google.devtools.ksp)
+  alias(libs.plugins.google.services)
 }
 
 android {
@@ -14,10 +15,6 @@ android {
     targetSdk = 36
     versionCode = 1
     versionName = "1.0"
-    buildConfigField("String", "FIREBASE_API_KEY", "\"AIzaSyB9oI7Amr9C8WqUBgpettT6UA23d89qMao\"")
-    buildConfigField("String", "FIREBASE_PROJECT_ID", "\"leno-9235f\"")
-    buildConfigField("String", "FIREBASE_APP_ID", "\"1:92383670612:android:23fc556e98ea1440a498c1\"")
-    buildConfigField("String", "FIREBASE_MESSAGING_SENDER_ID", "\"92383670612\"")
   }
 
   signingConfigs {
@@ -38,7 +35,7 @@ android {
 
   buildTypes {
     release {
-      isMinifyEnabled = false
+      isMinifyEnabled = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
@@ -114,6 +111,11 @@ dependencies {
   implementation("com.google.firebase:firebase-storage")
   implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
 
+  // Credential Manager & Google Sign-In
+  implementation(libs.androidx.credentials)
+  implementation(libs.androidx.credentials.play.services)
+  implementation(libs.googleid)
+
   // Room
   implementation(libs.androidx.room.runtime)
   implementation(libs.androidx.room.ktx)
@@ -122,6 +124,6 @@ dependencies {
   // Image loading
   implementation("io.coil-kt:coil-compose:2.7.0")
 
-  // RecyclerView
-  implementation("androidx.recyclerview:recyclerview:1.4.0")
+  // Unused template dependency trimmed to reduce APK size:
+  // implementation("androidx.recyclerview:recyclerview:1.4.0")
 }

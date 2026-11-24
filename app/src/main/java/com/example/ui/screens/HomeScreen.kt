@@ -132,7 +132,7 @@ fun HomeScreen(
                     Text(
                         text = if (currentUser?.isOnline == true) "Online" else "Offline",
                         style = MaterialTheme.typography.labelMedium,
-                        color = if (currentUser?.isOnline == true) OnlineGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (currentUser?.isOnline == true) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Switch(
                         checked = currentUser?.isOnline == true,

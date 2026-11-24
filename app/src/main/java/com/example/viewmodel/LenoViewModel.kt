@@ -27,6 +27,7 @@ import com.example.util.CallAudioHelper
 import com.example.util.SecurityEvent
 import com.example.util.ThemeMode
 import com.google.firebase.firestore.ListenerRegistration
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
@@ -38,11 +39,15 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 
@@ -51,8 +56,7 @@ sealed class CallState {
     data class Outgoing(
         val partner: UserEntity,
         val statusText: String = "Calling...",
-        val isRinging: Boolean = false,
-        val canSimulateAnswer: Boolean = false
+        val isRinging: Boolean = false
     ) : CallState()
     data class Incoming(val caller: UserEntity) : CallState()
     data class Connected(
@@ -73,7 +77,7 @@ class LenoViewModel @JvmOverloads constructor(
 
     val currentUser: StateFlow<UserEntity?> = repository.currentUser.stateIn(
         scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
+        started = SharingStarted.Eagerly,
         initialValue = null
     )
 
@@ -232,6 +236,8 @@ class LenoViewModel @JvmOverloads constructor(
     // Admin directory of all users for role management
     private val _adminDirectoryUsers = MutableStateFlow<List<UserEntity>>(emptyList())
     val adminDirectoryUsers: StateFlow<List<UserEntity>> = _adminDirectoryUsers.asStateFlow()
+
+    val lessonSeenByMap: StateFlow<Map<String, Set<String>>> = repository.lessonSeenByMap
 
     // Real-time open support chats for Owner Console
     val openSupportChats: StateFlow<List<SupportChatItem>> = repository.listenToOpenSupportChats()
@@ -423,6 +429,17 @@ class LenoViewModel @JvmOverloads constructor(
             initialValue = 0
         )
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val unreadSenderIds: StateFlow<Set<String>> = currentUser
+        .flatMapLatest { user ->
+            if (user != null) repository.getUnreadSenderIds(user.userId)
+            else flowOf(emptySet())
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = emptySet()
+        )
+
     val pinnedChatIds: StateFlow<Set<String>> = repository.pinnedChatIds
     val starredMessageIds: StateFlow<Set<String>> = repository.starredMessageIds
 
@@ -441,7 +458,7 @@ class LenoViewModel @JvmOverloads constructor(
             authStateListener = repository.registerAuthStateListener { authUid ->
                 viewModelScope.launch {
                     try {
-                        if (authUid != null) {
+                        if (!repository.isAuthTransitionInProgress && authUid != null) {
                             if (currentUser.value == null || currentUser.value?.userId != authUid) {
                                 repository.syncCurrentUserFromFirebase()
                             }
@@ -469,8 +486,19 @@ class LenoViewModel @JvmOverloads constructor(
         }
 
         viewModelScope.launch {
+            currentUser
+                .map { it?.isAdmin == true || it?.isOwner == true }
+                .distinctUntilChanged()
+                .collect { isAdminOrOwner ->
+                    if (isAdminOrOwner) {
+                        startTeacherApplicationsMonitor()
+                    }
+                }
+        }
+
+        viewModelScope.launch {
             try {
-                currentUser.collect { user ->
+                currentUser.distinctUntilChangedBy { it?.userId }.collect { user ->
                     if (user != null) {
                         try {
                             val pinEnabled = repository.isSecurityPinEnabled(user.userId)
@@ -569,8 +597,13 @@ class LenoViewModel @JvmOverloads constructor(
                             userCertificatesListener?.remove()
                             userCertificatesListener = repository.listenToUserCertificates(user.userId)
 
-                            // Initial background sync for all historical user chats, contacts, classes, and enrollments
+                            if (allUsersListener == null) {
+                                allUsersListener = repository.listenToAllUsers()
+                            }
+
+                            // Initial background sync for all historical user chats, contacts, users, classes, and enrollments
                             viewModelScope.launch {
+                                repository.syncAllRemoteUsersIntoRoom()
                                 repository.syncAllUserChatsAndMessages(user.userId)
                                 repository.syncRemoteContactsIntoRoom(user.userId)
                                 repository.syncClassesFromRemote()
@@ -589,6 +622,8 @@ class LenoViewModel @JvmOverloads constructor(
                         _securityEvents.value = emptyList()
                         hasCheckedStartupLockForUserId = null
                         interactiveSessionBypassLockUserId = null
+                        allUsersListener?.remove()
+                        allUsersListener = null
                         classesListener?.remove()
                         classesListener = null
                         enrollmentsListener?.remove()
@@ -657,6 +692,7 @@ class LenoViewModel @JvmOverloads constructor(
 
     fun openChat(partnerId: String) {
         activeChatPartnerId.value = partnerId
+        repository.setActiveChatPartnerId(partnerId)
         _isFetchingChatMessages.value = false
         activeChatMessagesListener?.remove()
         activeChatMessagesListener = null
@@ -702,12 +738,12 @@ class LenoViewModel @JvmOverloads constructor(
                     }
                     if (remoteMsgs.isNotEmpty()) {
                         val readMsgs = remoteMsgs.map { msg ->
-                            if (msg.senderId != myId) msg.copy(status = "read", read = true) else msg
+                            if (msg.senderId != myId) msg.copy(status = "READ", read = true) else msg
                         }
                         repository.insertMessages(readMsgs)
                         remoteMsgs.forEach { msg ->
-                            if (msg.senderId != myId && (!msg.isRead || !msg.status.equals("read", ignoreCase = true))) {
-                                repository.updateMessageStatus(msg.messageId, "read")
+                            if (msg.senderId != myId && (!msg.isRead || !msg.status.equals("READ", ignoreCase = true))) {
+                                repository.updateMessageStatus(msg.messageId, "READ")
                                 repository.remoteAccountService.markMessageReadInRemote(chatId, msg.messageId, msg.senderId)
                             }
                         }
@@ -772,6 +808,7 @@ class LenoViewModel @JvmOverloads constructor(
             }
         }
         activeChatPartnerId.value = null
+        repository.setActiveChatPartnerId(null)
         activeChatMessagesListener?.remove()
         activeChatMessagesListener = null
         activeChatPartnerListener?.remove()
@@ -1312,16 +1349,19 @@ class LenoViewModel @JvmOverloads constructor(
         }
     }
 
-    fun connectGoogleAccount(googleEmail: String, onResult: (Result<UserEntity>) -> Unit) {
+    fun linkVerifiedGoogleAccount(
+        firebaseUser: com.google.firebase.auth.FirebaseUser,
+        onResult: (Result<UserEntity>) -> Unit
+    ) {
         val uid = currentUser.value?.userId ?: run {
             onResult(Result.failure(Exception("No active user logged in.")))
             return
         }
         viewModelScope.launch {
-            val res = repository.connectGoogleAccount(uid, googleEmail)
+            val res = repository.connectGoogleAccount(uid, firebaseUser)
             if (res.isSuccess) {
                 refreshSecurityState(uid)
-                showNotification("Account Protected: Google account connected ✓")
+                showNotification("Account Protected: Verified Google account connected ✓")
             }
             onResult(res)
         }
@@ -1357,9 +1397,12 @@ class LenoViewModel @JvmOverloads constructor(
         }
     }
 
-    fun loginWithGoogle(googleEmail: String, onResult: (Result<UserEntity>) -> Unit) {
+    fun completeGoogleSignIn(
+        firebaseUser: com.google.firebase.auth.FirebaseUser,
+        onResult: (Result<UserEntity>) -> Unit
+    ) {
         viewModelScope.launch {
-            val res = repository.loginWithGoogle(googleEmail)
+            val res = repository.loginWithAuthenticatedGoogleUser(firebaseUser)
             if (res.isSuccess) {
                 val u = res.getOrNull()
                 if (u != null) {
@@ -1368,16 +1411,46 @@ class LenoViewModel @JvmOverloads constructor(
                     _isAppLocked.value = false
                     refreshSecurityState(u.userId)
                 }
-                showNotification("Welcome back to Leno!")
+                showNotification("Signed in with Google ✓")
             }
             onResult(res)
         }
     }
 
-    fun logout(onComplete: () -> Unit = {}) {
-        val myId = currentUser.value?.userId
+    fun deleteMyAccount(onResult: (Result<Unit>) -> Unit = {}) {
         closeChat()
         stopAdminDirectoryMonitor()
+        allUsersListener?.remove()
+        allUsersListener = null
+        stopObservingUserProfile()
+        stopClassroomListeners()
+        searchQuery.value = ""
+        _typingStatusMap.value = emptyMap()
+        _isAppLocked.value = false
+        _isSecurityPinEnabled.value = false
+        _securityEvents.value = emptyList()
+        interactiveSessionBypassLockUserId = null
+        hasCheckedStartupLockForUserId = null
+        endCallInternal(saveLog = false)
+        viewModelScope.launch {
+            val res = repository.deleteOwnAccount()
+            if (res.isSuccess) {
+                com.example.util.GoogleAuthHelper.signOut(getApplication())
+                showNotification("Your account has been permanently deleted.")
+                _loggedOutEvent.emit(Unit)
+            }
+            withContext(Dispatchers.Main) {
+                onResult(res)
+            }
+        }
+    }
+
+    fun logout(onComplete: () -> Unit = {}) {
+        val myId = currentUser.value?.userId ?: repository.getCurrentUserIdSync()
+        closeChat()
+        stopAdminDirectoryMonitor()
+        allUsersListener?.remove()
+        allUsersListener = null
         stopObservingUserProfile()
         stopClassroomListeners()
         searchQuery.value = ""
@@ -1394,9 +1467,12 @@ class LenoViewModel @JvmOverloads constructor(
             } else {
                 repository.clearCurrentSession()
             }
+            com.example.util.GoogleAuthHelper.signOut(getApplication())
             showNotification("Logged out")
             _loggedOutEvent.emit(Unit)
-            onComplete()
+            withContext(Dispatchers.Main) {
+                onComplete()
+            }
         }
     }
 
@@ -1433,8 +1509,7 @@ class LenoViewModel @JvmOverloads constructor(
             _callState.value = CallState.Outgoing(
                 partner = partner,
                 statusText = "${partner.displayName} is offline",
-                isRinging = false,
-                canSimulateAnswer = false
+                isRinging = false
             )
             viewModelScope.launch {
                 delay(3000)
@@ -1520,28 +1595,6 @@ class LenoViewModel @JvmOverloads constructor(
                 }
                 endCallInternal(saveLog = true)
             }
-        }
-    }
-
-    fun answerCallForTesting() {
-        val current = _callState.value
-        if (current is CallState.Outgoing) {
-            val partner = current.partner
-            callConnectJob?.cancel()
-            currentCloudCallId?.let { id ->
-                viewModelScope.launch {
-                    repository.remoteAccountService.updateCallStatus(id, "CONNECTED")
-                }
-            }
-            callAudioHelper.playConnectedTone()
-            _callState.value = CallState.Connected(
-                partner = partner,
-                durationSeconds = 0,
-                isMuted = false,
-                isSpeakerOn = false,
-                isIncoming = false
-            )
-            startCallTimer()
         }
     }
 
@@ -2046,12 +2099,14 @@ class LenoViewModel @JvmOverloads constructor(
     fun startTeacherApplicationsMonitor() {
         if (teacherApplicationsListener != null) return
         _isMonitoringApplications.value = true
+        var hasReceivedSnapshot = false
         teacherApplicationsListener = repository.listenToTeacherApplications { list ->
+            hasReceivedSnapshot = true
             _teacherApplications.value = list
         }
         viewModelScope.launch {
             val fetched = repository.fetchTeacherApplications()
-            if (fetched.isNotEmpty()) {
+            if (!hasReceivedSnapshot && fetched.isNotEmpty()) {
                 _teacherApplications.value = fetched
             }
         }
@@ -2123,52 +2178,6 @@ class LenoViewModel @JvmOverloads constructor(
         }
     }
 
-    /**
-     * Seeds a realistic applicant to Firestore 'teacher_applications' collection
-     * allowing admins to test application monitoring, approval, and role changes immediately.
-     */
-    fun seedSampleTeacherApplication(
-        subject: String = "Mathematics",
-        onResult: (Boolean, String) -> Unit = { _, _ -> }
-    ) {
-        viewModelScope.launch {
-            val randomNum = (1000..9999).random()
-            val sampleUid = "applicant_$randomNum"
-            val sampleRole = TeacherRoleEntity(
-                userId = sampleUid,
-                status = "PENDING",
-                approvedSubject = subject,
-                subjects = subject,
-                teachingLevel = "Senior Secondary & University",
-                educationQualification = "B.Sc. Mathematics & Education (Second Class Upper)",
-                teachingExperience = "4+ years preparing students for WAEC, JAMB & university calculus",
-                teacherIntro = "Passionate educator dedicated to demystifying complex concepts with relatable real-world applications.",
-                submittedAt = System.currentTimeMillis()
-            )
-            val dummyNames = listOf("Dr. Amina Bello", "Mr. Tunde Bakare", "Engr. Emeka Obi", "Mrs. Zainab Yusuf", "Prof. Dayo Adeyemi")
-            val dummyName = dummyNames.random()
-            val dummyUsername = dummyName.lowercase().replace(" ", "_").replace(".", "")
-            val dummyEmail = "$dummyUsername@example.com"
-
-            val dummyUser = UserEntity(
-                userId = sampleUid,
-                username = dummyUsername,
-                displayName = dummyName,
-                email = dummyEmail,
-                bio = "Passionate educator on Leno ✨",
-                role = "USER"
-            )
-            val res = repository.seedSampleTeacherApplication(sampleRole, dummyUser)
-            if (res.isSuccess) {
-                val updated = repository.fetchTeacherApplications()
-                _teacherApplications.value = updated
-                onResult(true, "Sample application created for $dummyName ($subject) in 'teacher_applications'!")
-            } else {
-                onResult(false, "Failed to submit sample application.")
-            }
-        }
-    }
-
     fun approveTeacherApplication(
         userId: String,
         subject: String,
@@ -2201,10 +2210,17 @@ class LenoViewModel @JvmOverloads constructor(
             allUsersListener = repository.listenToAllUsers()
         }
         if (adminDirectoryMonitorJob == null) {
+            val ignoredUsernames = setOf("bello_maths", "ibrahim_quran", "fatima_english", "usman_skills", "jibril")
             adminDirectoryMonitorJob = viewModelScope.launch {
                 allUsers.collect { users ->
                     val filtered = users
-                        .filter { it.userId.isNotBlank() && !it.userId.endsWith("_teacher") && it.userId != "test_dummy_user_to_purge" }
+                        .filter {
+                            it.userId.isNotBlank() &&
+                                !it.userId.endsWith("_teacher") &&
+                                it.userId != "user_len_50638964" &&
+                                it.userId != "test_dummy_user_to_purge" &&
+                                it.username.lowercase() !in ignoredUsernames
+                        }
                         .distinctBy { it.userId }
                     if (filtered.isNotEmpty()) {
                         _adminDirectoryUsers.value = filtered
@@ -2216,8 +2232,6 @@ class LenoViewModel @JvmOverloads constructor(
     }
 
     fun stopAdminDirectoryMonitor() {
-        allUsersListener?.remove()
-        allUsersListener = null
         adminDirectoryMonitorJob?.cancel()
         adminDirectoryMonitorJob = null
     }
@@ -2521,6 +2535,73 @@ class LenoViewModel @JvmOverloads constructor(
         }
     }
 
+    fun updateLessonInClass(
+        classId: String,
+        lessonId: String,
+        title: String,
+        content: String,
+        summary: String = "",
+        onResult: (Boolean, String) -> Unit
+    ) {
+        val user = currentUser.value
+        if (user == null) {
+            onResult(false, "You must be logged in.")
+            return
+        }
+        if (title.isBlank() || content.isBlank()) {
+            onResult(false, "Title and content are required.")
+            return
+        }
+        viewModelScope.launch {
+            val existing = repository.getLessonsForClassSync(classId).firstOrNull { it.lessonId == lessonId }
+            val updated = (existing ?: LessonEntity(
+                lessonId = lessonId,
+                classId = classId,
+                title = title.trim(),
+                content = content.trim()
+            )).copy(
+                title = title.trim(),
+                content = content.trim(),
+                summary = summary.ifBlank { content.take(80) }
+            )
+            val res = repository.updateLessonInClass(updated, callerUserId = user.userId)
+            if (res.isSuccess) {
+                onResult(true, "Lesson updated!")
+            } else {
+                onResult(false, res.exceptionOrNull()?.message ?: "Failed to update lesson.")
+            }
+        }
+    }
+
+    fun deleteLessonFromClass(
+        classId: String,
+        lessonId: String,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        val user = currentUser.value
+        if (user == null) {
+            onResult(false, "You must be logged in.")
+            return
+        }
+        viewModelScope.launch {
+            val res = repository.deleteLessonFromClass(classId, lessonId, callerUserId = user.userId)
+            if (res.isSuccess) {
+                onResult(true, "Lesson deleted.")
+            } else {
+                onResult(false, res.exceptionOrNull()?.message ?: "Failed to delete lesson.")
+            }
+        }
+    }
+
+    fun markLessonSeen(context: android.content.Context, classId: String, lessonId: String) {
+        val userId = currentUser.value?.userId ?: return
+        if (userId.isBlank() || classId.isBlank() || lessonId.isBlank()) return
+        com.example.util.LessonProgressManager.markLessonSeen(context, userId, classId, lessonId)
+        viewModelScope.launch {
+            repository.recordLessonSeen(classId, lessonId, userId)
+        }
+    }
+
     fun publishClassDraft(classId: String, onResult: (Boolean, String) -> Unit) {
         val user = currentUser.value ?: return
         viewModelScope.launch {
@@ -2736,6 +2817,8 @@ class LenoViewModel @JvmOverloads constructor(
         notificationsListener?.remove()
         lessonProgressListener?.remove()
         userCertificatesListener?.remove()
+        allUsersListener?.remove()
+        allUsersListener = null
         stopAdminDirectoryMonitor()
         stopObservingUserProfile()
         stopClassroomListeners()

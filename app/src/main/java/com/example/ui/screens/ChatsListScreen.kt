@@ -5,10 +5,16 @@ import com.example.ui.components.AddContactDialog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.platform.LocalContext
 import android.widget.Toast
@@ -16,6 +22,7 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,6 +38,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.PersonAdd
@@ -42,13 +50,19 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -107,6 +121,10 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.TextButton
 
+import com.example.ui.components.LenoEmptyState
+import com.example.ui.components.LenoHeaderActionButton
+import com.example.ui.components.LenoSearchPill
+import com.example.ui.components.LenoTabHeader
 import com.example.util.isSmallScreen
 import com.example.util.responsiveHorizontalPadding
 import com.example.util.responsiveTitleSize
@@ -123,21 +141,38 @@ fun ChatsListScreen(
     val currentUser by viewModel.currentUser.collectAsState()
     val chatPartnersList by viewModel.chatPartners.collectAsState()
     val contactsList by viewModel.contactsList.collectAsState()
+    val allUsersList by viewModel.allUsers.collectAsState()
+    val unreadSenderIds by viewModel.unreadSenderIds.collectAsState()
     val isFetchingUsers by viewModel.isFetchingUserData.collectAsState()
     val pinnedChatIds by viewModel.pinnedChatIds.collectAsState()
     var chatFilterQuery by remember { mutableStateOf("") }
+    var isSearchOpen by remember { mutableStateOf(false) }
+    var selectedChatFilter by remember { mutableStateOf("All") }
     val isSmall = isSmallScreen()
+    val context = LocalContext.current
 
     val myId = currentUser?.userId ?: ""
-    val chatPartners = remember(chatPartnersList, chatFilterQuery, myId, pinnedChatIds) {
-        val filtered = chatPartnersList
+    val chatPartners = remember(chatPartnersList, chatFilterQuery, myId, pinnedChatIds, selectedChatFilter, unreadSenderIds) {
+        val base = chatPartnersList
             .distinctBy { it.userId }
             .filter { it.userId != myId && it.userId.isNotBlank() }
 
+        val byCategory = when (selectedChatFilter) {
+            "Unread" -> base.filter { partner ->
+                partner.userId in unreadSenderIds ||
+                    (partner.username.isNotBlank() && partner.username in unreadSenderIds) ||
+                    (partner.linoId.isNotBlank() && partner.linoId in unreadSenderIds) ||
+                    viewModel.repository.getCachedUnreadCount(partner.userId) > 0
+            }
+            "Teachers" -> base.filter { it.isTeacher || it.teacherStatus.equals("APPROVED", ignoreCase = true) || it.role.equals("TEACHER", ignoreCase = true) }
+            "Pinned" -> base.filter { pinnedChatIds.contains(it.userId) }
+            else -> base
+        }
+
         val matches = if (chatFilterQuery.isBlank()) {
-            filtered
+            byCategory
         } else {
-            filtered.filter {
+            byCategory.filter {
                 it.displayName.contains(chatFilterQuery, ignoreCase = true) ||
                 it.username.contains(chatFilterQuery, ignoreCase = true) ||
                 it.linoId.contains(chatFilterQuery, ignoreCase = true)
@@ -173,144 +208,90 @@ fun ChatsListScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .widthIn(max = MaxContentWidth)
-                .padding(horizontal = 14.dp, vertical = 8.dp)
+                .padding(horizontal = 14.dp, vertical = 4.dp)
         ) {
-            // Clean Header matching Image 1: "Chats" title + Camera icon + 3-dots More Menu
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            val isDark = LocalLenoDarkTheme.current
+            LenoTabHeader(
+                title = "Chats",
+                subtitle = if (chatPartners.isNotEmpty()) "${chatPartners.size} conversation${if (chatPartners.size == 1) "" else "s"}" else null,
+                modifier = Modifier.padding(horizontal = 2.dp)
             ) {
-                Text(
-                    text = "Chats",
-                    style = MaterialTheme.typography.displayLarge.copy(fontSize = 30.sp, fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onBackground
+                LenoHeaderActionButton(
+                    icon = if (isSearchOpen) Icons.Default.Close else Icons.Default.Search,
+                    contentDescription = if (isSearchOpen) "Close search" else "Search chats",
+                    isActive = isSearchOpen,
+                    onClick = {
+                        isSearchOpen = !isSearchOpen
+                        if (!isSearchOpen) chatFilterQuery = ""
+                    },
+                    modifier = Modifier.testTag("chats_search_toggle_btn")
                 )
 
-                val isDark = LocalLenoDarkTheme.current
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = { viewModel.toggleLightDarkTheme(isDark) },
-                        modifier = Modifier
-                            .size(48.dp)
-                            .testTag("quick_theme_toggle_btn")
+                Box {
+                    LenoHeaderActionButton(
+                        icon = Icons.Default.MoreVert,
+                        contentDescription = "More Options",
+                        onClick = { showChatsMenu = true },
+                        modifier = Modifier.testTag("chats_more_menu_btn")
+                    )
+
+                    DropdownMenu(
+                        expanded = showChatsMenu,
+                        onDismissRequest = { showChatsMenu = false }
                     ) {
-                        Icon(
-                            imageVector = if (isDark) Icons.Default.LightMode else Icons.Default.DarkMode,
-                            contentDescription = if (isDark) "Switch to light mode" else "Switch to dark mode",
-                            tint = if (isDark) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onBackground,
-                            modifier = Modifier.size(22.dp)
+                        DropdownMenuItem(
+                            text = { Text("New chat") },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null) },
+                            onClick = {
+                                showChatsMenu = false
+                                showNewChatDialog = true
+                            }
                         )
-                    }
-
-                    IconButton(
-                        onClick = { showNewChatDialog = true },
-                        modifier = Modifier
-                            .size(48.dp)
-                            .testTag("chats_camera_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PhotoCamera,
-                            contentDescription = "Camera",
-                            tint = MaterialTheme.colorScheme.onBackground,
-                            modifier = Modifier.size(24.dp)
+                        DropdownMenuItem(
+                            text = { Text("Add contact") },
+                            leadingIcon = { Icon(Icons.Default.PersonAdd, contentDescription = null) },
+                            onClick = {
+                                showChatsMenu = false
+                                showAddContactDialog = true
+                            }
                         )
-                    }
-
-                    Box {
-                        IconButton(
-                            onClick = { showChatsMenu = true },
-                            modifier = Modifier
-                                .size(48.dp)
-                                .testTag("chats_more_menu_btn")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.MoreVert,
-                                contentDescription = "More Options",
-                                tint = MaterialTheme.colorScheme.onBackground,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-
-                        DropdownMenu(
-                            expanded = showChatsMenu,
-                            onDismissRequest = { showChatsMenu = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("New chat") },
-                                onClick = {
-                                    showChatsMenu = false
-                                    showNewChatDialog = true
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Add contact") },
-                                onClick = {
-                                    showChatsMenu = false
-                                    showAddContactDialog = true
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(if (isDark) "Switch to Light Mode" else "Switch to Dark Mode") },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = if (isDark) Icons.Default.LightMode else Icons.Default.DarkMode,
-                                        contentDescription = null
-                                    )
-                                },
-                                onClick = {
-                                    showChatsMenu = false
-                                    viewModel.toggleLightDarkTheme(isDark)
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Refresh") },
-                                onClick = {
-                                    showChatsMenu = false
-                                    viewModel.refreshUserData()
-                                }
-                            )
-                        }
+                        DropdownMenuItem(
+                            text = { Text(if (isDark) "Switch to Light Mode" else "Switch to Dark Mode") },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = if (isDark) Icons.Default.LightMode else Icons.Default.DarkMode,
+                                    contentDescription = null
+                                )
+                            },
+                            onClick = {
+                                showChatsMenu = false
+                                viewModel.toggleLightDarkTheme(isDark)
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Refresh") },
+                            leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+                            onClick = {
+                                showChatsMenu = false
+                                viewModel.refreshUserData()
+                            }
+                        )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Capsule/Pill Search Bar matching Image 1
-            OutlinedTextField(
-                value = chatFilterQuery,
-                onValueChange = { chatFilterQuery = it },
-                placeholder = { Text("Search messages & friends...", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                leadingIcon = {
-                    Icon(
-                        Icons.Default.Search,
-                        contentDescription = "Search",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
-                    )
+            LenoSearchPill(
+                visible = isSearchOpen || chatFilterQuery.isNotEmpty(),
+                query = chatFilterQuery,
+                onQueryChange = { chatFilterQuery = it },
+                placeholder = "Search messages & friends...",
+                onCloseOrClear = {
+                    if (chatFilterQuery.isNotEmpty()) chatFilterQuery = "" else isSearchOpen = false
                 },
-                singleLine = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("chats_search_input"),
-                shape = RoundedCornerShape(24.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                    cursorColor = MaterialTheme.colorScheme.primary,
-                    focusedBorderColor = Color.Transparent,
-                    unfocusedBorderColor = Color.Transparent
-                )
+                inputTestTag = "chats_search_input"
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            if (isFetchingUsers && chatPartners.isEmpty() && !fetchTimeout) {
+            if (isFetchingUsers && chatPartners.isEmpty() && !fetchTimeout && selectedChatFilter == "All") {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -336,57 +317,96 @@ fun ChatsListScreen(
                         )
                     }
                 }
-            } else if (chatPartners.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Chat,
-                            contentDescription = "No Chats",
-                            modifier = Modifier.size(64.dp),
-                            tint = MaterialTheme.colorScheme.outline
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = "No chats yet. Start a new conversation",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Tap the chat icon below to start a message",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
             } else {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = 2.dp, bottom = 88.dp)
                 ) {
-                    items(chatPartners, key = { it.userId }) { partner ->
-                        ChatItemRow(
-                            viewModel = viewModel,
-                            myId = myId,
-                            partner = partner,
-                            onOpenChat = onOpenChat,
-                            onOpenProfile = onOpenProfile
-                        )
-                        androidx.compose.material3.HorizontalDivider(
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
-                            thickness = 0.5.dp,
-                            modifier = Modifier.padding(start = 74.dp)
-                        )
+                    // Scrolling Telegram/WhatsApp-style quick filter strip
+                    item(key = "chats_filter_strip") {
+                        val filters = listOf("All", "Unread", "Teachers", "Pinned")
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                        ) {
+                            items(filters) { f ->
+                                val selected = selectedChatFilter == f
+                                FilterChip(
+                                    selected = selected,
+                                    onClick = { selectedChatFilter = f },
+                                    label = {
+                                        Text(
+                                            text = f,
+                                            fontSize = 12.sp,
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                        )
+                                    },
+                                    shape = RoundedCornerShape(50),
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = selected,
+                                        borderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                                        selectedBorderColor = LenoPrimary
+                                    ),
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = LenoPrimary,
+                                        selectedLabelColor = Color.White,
+                                        containerColor = MaterialTheme.colorScheme.surface,
+                                        labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    if (chatPartners.isEmpty()) {
+                        item(key = "chats_empty_state") {
+                            LenoEmptyState(
+                                icon = Icons.AutoMirrored.Filled.Chat,
+                                title = if (selectedChatFilter != "All") "No $selectedChatFilter conversations" else "No chats yet",
+                                subtitle = if (selectedChatFilter != "All") "Switch back to All above to view every conversation." else "Start a conversation with a classmate, teacher, or friend.",
+                                actionLabel = if (selectedChatFilter != "All") "Show All" else "New Chat",
+                                onAction = {
+                                    if (selectedChatFilter != "All") selectedChatFilter = "All" else showNewChatDialog = true
+                                }
+                            )
+                        }
+                    } else {
+                        items(chatPartners, key = { it.userId }) { partner ->
+                            SwipeableChatRow(
+                                viewModel = viewModel,
+                                partner = partner,
+                                onTogglePin = {
+                                    val pinned = viewModel.togglePinChat(partner.userId)
+                                    Toast.makeText(context, if (pinned) "Chat pinned 📌" else "Chat unpinned", Toast.LENGTH_SHORT).show()
+                                },
+                                onMarkRead = {
+                                    viewModel.markChatRead(partner.userId)
+                                    Toast.makeText(context, "Marked as read", Toast.LENGTH_SHORT).show()
+                                }
+                            ) {
+                                ChatItemRow(
+                                    viewModel = viewModel,
+                                    myId = myId,
+                                    partner = partner,
+                                    onOpenChat = onOpenChat,
+                                    onOpenProfile = onOpenProfile
+                                )
+                            }
+                            androidx.compose.material3.HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                                thickness = 0.5.dp,
+                                modifier = Modifier.padding(start = 74.dp)
+                            )
+                        }
                     }
                 }
             }
         }
 
-        // New Chat FAB matching Image 1
+        // Single Clean Floating Action Button
         FloatingActionButton(
             onClick = { showNewChatDialog = true },
             shape = RoundedCornerShape(16.dp),
@@ -405,7 +425,9 @@ fun ChatsListScreen(
     if (showNewChatDialog) {
         var pickerQuery by remember { mutableStateOf("") }
         val searchResults by viewModel.repository.searchUsers(pickerQuery, myId).collectAsState(initial = emptyList())
-        val allKnownUsers = (contactsList + chatPartnersList).distinctBy { it.userId }.filter { it.userId != myId }
+        val allKnownUsers = (contactsList + chatPartnersList + allUsersList)
+            .distinctBy { it.userId }
+            .filter { it.userId != myId && it.userId.isNotBlank() }
         val displayUsers = if (pickerQuery.isBlank()) allKnownUsers else searchResults
 
         AlertDialog(
@@ -529,7 +551,7 @@ fun ChatsListScreen(
                                             Text(
                                                 text = if (u.linoId.isNotBlank()) "@${u.username} • ${u.linoId}" else "@${u.username}",
                                                 style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.primary
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
                                         Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Select", tint = MaterialTheme.colorScheme.primary)
@@ -543,7 +565,7 @@ fun ChatsListScreen(
             confirmButton = {},
             dismissButton = {
                 TextButton(onClick = { showNewChatDialog = false }) {
-                    Text("Cancel")
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         )
@@ -579,9 +601,7 @@ fun ChatItemRow(
     val unreadFlow = remember(myId, partner.userId) {
         viewModel.repository.getUnreadCount(myId, partner.userId)
     }
-    val unreadCount by unreadFlow.collectAsState(
-        initial = viewModel.repository.getCachedUnreadCount(partner.userId)
-    )
+    val unreadCount by unreadFlow.collectAsState(initial = 0)
 
     val pinnedChatIds by viewModel.pinnedChatIds.collectAsState()
     val isPinned = remember(pinnedChatIds, partner.userId) {
@@ -635,9 +655,10 @@ fun ChatItemRow(
                 if (partner.isOnline && !partner.isOfficial && partner.userId != LenoRepository.OFFICIAL_LENO_ID) {
                     Box(
                         modifier = Modifier
-                            .size(13.dp)
+                            .size(14.dp)
                             .clip(CircleShape)
                             .background(OnlineGreen)
+                            .border(2.dp, MaterialTheme.colorScheme.background, CircleShape)
                             .align(Alignment.BottomEnd)
                     )
                 }
@@ -679,12 +700,14 @@ fun ChatItemRow(
                                     .padding(end = 3.dp)
                             )
                         }
-                        Text(
-                            text = if (timeFormatted.isNotBlank()) timeFormatted else "12:24 AM",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (unreadCount > 0) LenoPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = if (unreadCount > 0) FontWeight.Bold else FontWeight.Normal
-                        )
+                        if (timeFormatted.isNotBlank()) {
+                            Text(
+                                text = timeFormatted,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (unreadCount > 0) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = if (unreadCount > 0) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
                     }
                 }
 
@@ -770,14 +793,15 @@ fun ChatItemRow(
                         )
                     }
 
-                    // Badges matching Image 1
+                    // Capsule unread badge & official lock indicator
                     if (unreadCount > 0) {
                         Spacer(modifier = Modifier.width(8.dp))
                         Box(
                             modifier = Modifier
-                                .size(20.dp)
-                                .clip(CircleShape)
+                                .defaultMinSize(minWidth = 22.dp, minHeight = 22.dp)
+                                .clip(RoundedCornerShape(50))
                                 .background(LenoActionGreen)
+                                .padding(horizontal = 6.dp)
                                 .testTag("unread_badge_${partner.userId}"),
                             contentAlignment = Alignment.Center
                         ) {
@@ -786,6 +810,8 @@ fun ChatItemRow(
                                 color = Color.White,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
                             )
                         }
@@ -793,8 +819,8 @@ fun ChatItemRow(
                         Spacer(modifier = Modifier.width(8.dp))
                         Box(
                             modifier = Modifier
-                                .size(20.dp)
-                                .clip(CircleShape)
+                                .size(22.dp)
+                                .clip(RoundedCornerShape(50))
                                 .background(LenoActionGreen),
                             contentAlignment = Alignment.Center
                         ) {
@@ -802,7 +828,7 @@ fun ChatItemRow(
                                 imageVector = Icons.Default.Lock,
                                 contentDescription = "Protected",
                                 tint = Color.White,
-                                modifier = Modifier.size(11.dp)
+                                modifier = Modifier.size(12.dp)
                             )
                         }
                     }
@@ -924,10 +950,70 @@ fun ChatItemRow(
             },
             confirmButton = {
                 TextButton(onClick = { showContextMenu = false }) {
-                    Text("Close")
+                    Text("Close", color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         )
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SwipeableChatRow(
+    viewModel: LenoViewModel,
+    partner: UserEntity,
+    onTogglePin: () -> Unit,
+    onMarkRead: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            when (value) {
+                SwipeToDismissBoxValue.StartToEnd -> {
+                    onTogglePin()
+                    false
+                }
+                SwipeToDismissBoxValue.EndToStart -> {
+                    onMarkRead()
+                    false
+                }
+                SwipeToDismissBoxValue.Settled -> false
+            }
+        }
+    )
+
+    SwipeToDismissBox(
+        state = dismissState,
+        backgroundContent = {
+            val dir = dismissState.dismissDirection
+            val bgColor = when (dir) {
+                SwipeToDismissBoxValue.StartToEnd -> Color(0xFFF59E0B)
+                SwipeToDismissBoxValue.EndToStart -> LenoPrimary
+                SwipeToDismissBoxValue.Settled -> Color.Transparent
+            }
+            val alignment = when (dir) {
+                SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
+                SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
+                SwipeToDismissBoxValue.Settled -> Alignment.CenterStart
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(bgColor)
+                    .padding(horizontal = 20.dp),
+                contentAlignment = alignment
+            ) {
+                if (dir == SwipeToDismissBoxValue.StartToEnd) {
+                    Icon(Icons.Default.PushPin, contentDescription = "Pin Chat", tint = Color.White)
+                } else if (dir == SwipeToDismissBoxValue.EndToStart) {
+                    Icon(Icons.Default.DoneAll, contentDescription = "Mark Read", tint = Color.White)
+                }
+            }
+        },
+        content = {
+            Box(modifier = Modifier.background(MaterialTheme.colorScheme.background)) {
+                content()
+            }
+        }
+    )
+}

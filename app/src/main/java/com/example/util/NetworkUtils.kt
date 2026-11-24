@@ -30,6 +30,7 @@ object NetworkUtils {
                 capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
                 capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
                 capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN) ||
                 capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
             )
         } catch (_: Exception) {

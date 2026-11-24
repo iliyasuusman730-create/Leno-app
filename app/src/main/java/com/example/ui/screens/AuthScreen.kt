@@ -136,13 +136,103 @@ fun AuthScreen(
     var recoverNewPasswordInput by remember { mutableStateOf("") }
     var recoverPasswordVisible by remember { mutableStateOf(false) }
 
-    // Google recovery / login dialog
-    var showGoogleLoginDialog by remember { mutableStateOf(false) }
-    var googleLoginEmailInput by remember { mutableStateOf("") }
+    // Legal dialog
+    var showLegalDialog by remember { mutableStateOf(false) }
 
     // Common states
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
+    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
+
+    fun launchRealGoogleSignIn() {
+        if (!com.example.util.NetworkUtils.isNetworkAvailable(context)) {
+            errorMessage = "No internet connection detected. Please connect to mobile data or Wi-Fi to sign in with Google."
+            return
+        }
+        isLoading = true
+        errorMessage = null
+        com.example.util.GoogleAuthHelper.launchGoogleSignIn(
+            context = context,
+            scope = coroutineScope,
+            onAuthSuccess = { firebaseUser ->
+                viewModel.completeGoogleSignIn(firebaseUser) { result ->
+                    isLoading = false
+                    if (result.isSuccess) {
+                        Toast.makeText(context, "Signed in with Google ✓", Toast.LENGTH_SHORT).show()
+                        onAuthSuccess()
+                    } else {
+                        errorMessage = result.exceptionOrNull()?.message ?: "Failed to complete Google sign-in."
+                    }
+                }
+            },
+            onAuthError = { errMsg ->
+                isLoading = false
+                errorMessage = errMsg
+            },
+            onAuthCancelled = {
+                isLoading = false
+            }
+        )
+    }
+
+    fun submitLinoRegistration(
+        name: String,
+        uname: String,
+        pass: String,
+        onRegistered: (com.example.data.entity.UserEntity?) -> Unit
+    ) {
+        if (!com.example.util.NetworkUtils.isNetworkAvailable(context)) {
+            errorMessage = "No internet connection detected. Please connect to mobile data or Wi-Fi to register."
+            return
+        }
+        isLoading = true
+        errorMessage = null
+        val activeFbUser = try {
+            com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+        } catch (_: Throwable) {
+            null
+        }
+        if (activeFbUser != null) {
+            viewModel.registerWithLino(
+                fullName = name,
+                username = uname,
+                password = pass
+            ) { res ->
+                isLoading = false
+                if (res.isSuccess) {
+                    onRegistered(res.getOrNull())
+                } else {
+                    errorMessage = res.exceptionOrNull()?.message ?: "Registration failed."
+                }
+            }
+        } else {
+            com.example.util.GoogleAuthHelper.launchGoogleSignIn(
+                context = context,
+                scope = coroutineScope,
+                onAuthSuccess = { _ ->
+                    viewModel.registerWithLino(
+                        fullName = name,
+                        username = uname,
+                        password = pass
+                    ) { res ->
+                        isLoading = false
+                        if (res.isSuccess) {
+                            onRegistered(res.getOrNull())
+                        } else {
+                            errorMessage = res.exceptionOrNull()?.message ?: "Registration failed."
+                        }
+                    }
+                },
+                onAuthError = { errMsg ->
+                    isLoading = false
+                    errorMessage = errMsg
+                },
+                onAuthCancelled = {
+                    isLoading = false
+                }
+            )
+        }
+    }
 
     // Automatic safety watchdog to guarantee loading spinner never hangs indefinitely
     LaunchedEffect(isLoading) {
@@ -235,9 +325,9 @@ fun AuthScreen(
                         painter = painterResource(id = R.drawable.ic_official_leno_avatar),
                         contentDescription = "Leno Logo",
                         modifier = Modifier
-                            .size(42.dp)
+                            .size(46.dp)
                             .clip(CircleShape),
-                        contentScale = ContentScale.Fit
+                        contentScale = ContentScale.Crop
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
@@ -264,6 +354,48 @@ fun AuthScreen(
                         tint = if (isDarkAuth) MaterialTheme.colorScheme.secondary else textPrimary,
                         modifier = Modifier.size(22.dp)
                     )
+                }
+            }
+
+            // Step indicator for 4-step account creation
+            val onboardingStepIndex = when (currentStep) {
+                OnboardingStep.STEP_1_NAME -> 1
+                OnboardingStep.STEP_2_USERNAME -> 2
+                OnboardingStep.STEP_3_PASSWORD -> 3
+                OnboardingStep.STEP_4_LINO_ID -> 4
+                else -> 0
+            }
+            if (onboardingStepIndex > 0) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp, bottom = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Step $onboardingStepIndex of 4",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = textSecondary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.widthIn(max = 220.dp).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        for (i in 1..4) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(
+                                        if (i <= onboardingStepIndex) brandOrange
+                                        else inputBorder.copy(alpha = 0.55f)
+                                    )
+                            )
+                        }
+                    }
                 }
             }
 
@@ -401,7 +533,7 @@ fun AuthScreen(
                                             text = "@",
                                             fontSize = 20.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = brandOrange,
+                                            color = textPrimary,
                                             modifier = Modifier.padding(start = 16.dp, end = 4.dp)
                                         )
                                     },
@@ -472,7 +604,7 @@ fun AuthScreen(
                                         ) {
                                             Text(
                                                 text = "Log In to @$usernameInput →",
-                                                color = brandOrange,
+                                                color = textPrimary,
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 14.sp
                                             )
@@ -536,29 +668,17 @@ fun AuthScreen(
                                     ),
                                     keyboardActions = KeyboardActions(
                                         onDone = {
-                                            if (!com.example.util.NetworkUtils.isNetworkAvailable(context)) {
-                                                errorMessage = "No internet connection detected. Please connect to mobile data or Wi-Fi to register."
-                                                return@KeyboardActions
-                                            }
                                             if (passwordInput.length < 6) {
                                                 errorMessage = "Password must be at least 6 characters."
                                                 return@KeyboardActions
                                             }
-                                            isLoading = true
-                                            errorMessage = null
-                                            viewModel.registerWithLino(
-                                                fullName = fullNameInput.trim(),
-                                                username = usernameInput.trim(),
-                                                password = passwordInput.trim()
-                                            ) { res ->
-                                                isLoading = false
-                                                if (res.isSuccess) {
-                                                    val createdUser = res.getOrNull()
-                                                    generatedLinoId = createdUser?.linoId ?: "LEN-${(10000000..99999999).random()}"
-                                                    currentStep = OnboardingStep.STEP_4_LINO_ID
-                                                } else {
-                                                    errorMessage = res.exceptionOrNull()?.message ?: "Registration failed."
-                                                }
+                                            submitLinoRegistration(
+                                                name = fullNameInput.trim(),
+                                                uname = usernameInput.trim(),
+                                                pass = passwordInput.trim()
+                                            ) { createdUser ->
+                                                generatedLinoId = createdUser?.linoId ?: "LEN-${(10000000..99999999).random()}"
+                                                currentStep = OnboardingStep.STEP_4_LINO_ID
                                             }
                                         }
                                     ),
@@ -602,7 +722,7 @@ fun AuthScreen(
                                         ) {
                                             Text(
                                                 text = "Log In with @$usernameInput →",
-                                                color = brandOrange,
+                                                color = textPrimary,
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 14.sp
                                             )
@@ -840,7 +960,7 @@ fun AuthScreen(
                                         text = "Forgot Password?",
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = brandOrange,
+                                        color = textPrimary,
                                         modifier = Modifier
                                             .clickable(
                                                 interactionSource = remember { MutableInteractionSource() },
@@ -880,7 +1000,7 @@ fun AuthScreen(
                                         ) {
                                             Text(
                                                 text = "Reset password for @$cleanId →",
-                                                color = brandOrange,
+                                                color = textPrimary,
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 14.sp
                                             )
@@ -895,33 +1015,22 @@ fun AuthScreen(
                                         Spacer(modifier = Modifier.height(10.dp))
                                         OutlinedButton(
                                             onClick = {
-                                                if (!com.example.util.NetworkUtils.isNetworkAvailable(context)) {
-                                                    errorMessage = "No internet connection detected. Please connect to mobile data or Wi-Fi to register."
+                                                if (loginPasswordInput.length < 6) {
+                                                    errorMessage = "Password must be at least 6 characters."
                                                     return@OutlinedButton
                                                 }
-                                                if (loginPasswordInput.length < 4) {
-                                                    errorMessage = "Password must be at least 4 characters."
-                                                    return@OutlinedButton
-                                                }
-                                                isLoading = true
-                                                errorMessage = null
                                                 val name = cleanId.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
-                                                viewModel.registerWithLino(
-                                                    fullName = name,
-                                                    username = cleanId,
-                                                    password = loginPasswordInput.trim()
-                                                ) { res ->
-                                                    isLoading = false
-                                                    if (res.isSuccess) {
-                                                        onAuthSuccess()
-                                                    } else {
-                                                        errorMessage = res.exceptionOrNull()?.message ?: "Failed to create account."
-                                                    }
+                                                submitLinoRegistration(
+                                                    name = name,
+                                                    uname = cleanId,
+                                                    pass = loginPasswordInput.trim()
+                                                ) {
+                                                    onAuthSuccess()
                                                 }
                                             },
                                             shape = RoundedCornerShape(14.dp),
                                             border = androidx.compose.foundation.BorderStroke(1.dp, brandOrange),
-                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = brandOrange),
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = textPrimary),
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .height(48.dp)
@@ -930,13 +1039,13 @@ fun AuthScreen(
                                             Icon(
                                                 Icons.AutoMirrored.Filled.ArrowForward,
                                                 contentDescription = null,
-                                                tint = brandOrange,
+                                                tint = textPrimary,
                                                 modifier = Modifier.size(18.dp)
                                             )
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Text(
                                                 text = "Create @$cleanId account now",
-                                                color = brandOrange,
+                                                color = textPrimary,
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.Bold
                                             )
@@ -1164,6 +1273,34 @@ fun AuthScreen(
                             )
                         }
 
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        OutlinedButton(
+                            onClick = { launchRealGoogleSignIn() },
+                            enabled = !isLoading,
+                            shape = RoundedCornerShape(18.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, inputBorder),
+                            colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surface),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                                .testTag("step1_google_continue_button")
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_leno_sparkle),
+                                contentDescription = "Google",
+                                tint = Color.Unspecified,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "Continue with Google",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = textPrimary
+                            )
+                        }
+
                         Spacer(modifier = Modifier.height(12.dp))
 
                         Row(
@@ -1180,7 +1317,7 @@ fun AuthScreen(
                                 text = "Log In",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = brandOrange,
+                                color = textPrimary,
                                 modifier = Modifier
                                     .clickable(
                                         interactionSource = remember { MutableInteractionSource() },
@@ -1256,29 +1393,17 @@ fun AuthScreen(
                     OnboardingStep.STEP_3_PASSWORD -> {
                         Button(
                             onClick = {
-                                if (!com.example.util.NetworkUtils.isNetworkAvailable(context)) {
-                                    errorMessage = "No internet connection detected. Please connect to mobile data or Wi-Fi to register."
-                                    return@Button
-                                }
                                 if (passwordInput.length < 6) {
                                     errorMessage = "Password must be at least 6 characters."
                                     return@Button
                                 }
-                                isLoading = true
-                                errorMessage = null
-                                viewModel.registerWithLino(
-                                    fullName = fullNameInput.trim(),
-                                    username = usernameInput.trim(),
-                                    password = passwordInput.trim()
-                                ) { res ->
-                                    isLoading = false
-                                    if (res.isSuccess) {
-                                        val createdUser = res.getOrNull()
-                                        generatedLinoId = createdUser?.linoId ?: "LEN-${(10000000..99999999).random()}"
-                                        currentStep = OnboardingStep.STEP_4_LINO_ID
-                                    } else {
-                                        errorMessage = res.exceptionOrNull()?.message ?: "Failed to complete registration."
-                                    }
+                                submitLinoRegistration(
+                                    name = fullNameInput.trim(),
+                                    uname = usernameInput.trim(),
+                                    pass = passwordInput.trim()
+                                ) { createdUser ->
+                                    generatedLinoId = createdUser?.linoId ?: "LEN-${(10000000..99999999).random()}"
+                                    currentStep = OnboardingStep.STEP_4_LINO_ID
                                 }
                             },
                             enabled = !isLoading,
@@ -1417,10 +1542,8 @@ fun AuthScreen(
                         Spacer(modifier = Modifier.height(14.dp))
 
                         OutlinedButton(
-                            onClick = {
-                                errorMessage = null
-                                showGoogleLoginDialog = true
-                            },
+                            onClick = { launchRealGoogleSignIn() },
+                            enabled = !isLoading,
                             shape = RoundedCornerShape(18.dp),
                             border = androidx.compose.foundation.BorderStroke(1.dp, inputBorder),
                             colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -1460,7 +1583,7 @@ fun AuthScreen(
                                 text = "Create Leno Account",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = brandOrange,
+                                color = textPrimary,
                                 modifier = Modifier
                                     .clickable(
                                         interactionSource = remember { MutableInteractionSource() },
@@ -1577,10 +1700,8 @@ fun AuthScreen(
                         Spacer(modifier = Modifier.height(14.dp))
 
                         OutlinedButton(
-                            onClick = {
-                                errorMessage = null
-                                showGoogleLoginDialog = true
-                            },
+                            onClick = { launchRealGoogleSignIn() },
+                            enabled = !isLoading,
                             shape = RoundedCornerShape(18.dp),
                             border = androidx.compose.foundation.BorderStroke(1.dp, inputBorder),
                             colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -1620,7 +1741,7 @@ fun AuthScreen(
                                 text = "Back to Log In",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = brandOrange,
+                                color = textPrimary,
                                 modifier = Modifier
                                     .clickable(
                                         interactionSource = remember { MutableInteractionSource() },
@@ -1634,88 +1755,26 @@ fun AuthScreen(
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                TextButton(
+                    onClick = { showLegalDialog = true },
+                    modifier = Modifier.testTag("auth_privacy_terms_button")
+                ) {
+                    Text(
+                        text = "Privacy Policy & Terms of Service",
+                        fontSize = 12.sp,
+                        color = textSecondary
+                    )
+                }
             }
         }
     }
 
-    if (showGoogleLoginDialog) {
-        AlertDialog(
-            onDismissRequest = { showGoogleLoginDialog = false },
-            title = {
-                Text(
-                    text = "Sign in with Google",
-                    fontWeight = FontWeight.Bold,
-                    color = textPrimary
-                )
-            },
-            text = {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = "Enter your Google account email to sign in or recover your existing Leno account:",
-                        fontSize = 14.sp,
-                        color = textSecondary
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    OutlinedTextField(
-                        value = googleLoginEmailInput,
-                        onValueChange = { googleLoginEmailInput = it },
-                        placeholder = { Text("your.google.account@gmail.com", color = textSecondary, fontSize = 14.sp) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Done),
-                        textStyle = TextStyle(
-                            fontSize = 16.sp,
-                            color = textPrimary
-                        ),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = inputBg,
-                            unfocusedContainerColor = inputBg,
-                            focusedBorderColor = brandOrange,
-                            unfocusedBorderColor = inputBorder,
-                            cursorColor = brandOrange
-                        ),
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("google_login_email_input")
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val email = googleLoginEmailInput.trim()
-                        if (email.isBlank() || !email.contains("@")) {
-                            Toast.makeText(context, "Please enter a valid Google email address.", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        showGoogleLoginDialog = false
-                        isLoading = true
-                        errorMessage = null
-                        viewModel.loginWithGoogle(email) { result ->
-                            isLoading = false
-                            if (result.isSuccess) {
-                                Toast.makeText(context, "Welcome back! Account recovered successfully.", Toast.LENGTH_SHORT).show()
-                                onAuthSuccess()
-                            } else {
-                                errorMessage = result.exceptionOrNull()?.message ?: "No Leno account found for this Google email."
-                            }
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = brandOrange),
-                    modifier = Modifier.testTag("confirm_google_login_btn")
-                ) {
-                    Text("Continue", color = Color.White, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { showGoogleLoginDialog = false }
-                ) {
-                    Text("Cancel", color = textSecondary)
-                }
-            },
-            containerColor = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(20.dp)
+    if (showLegalDialog) {
+        com.example.ui.components.LegalInfoDialog(
+            onDismiss = { showLegalDialog = false }
         )
     }
 }

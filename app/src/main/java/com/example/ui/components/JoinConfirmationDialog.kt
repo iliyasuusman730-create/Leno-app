@@ -97,7 +97,7 @@ fun JoinConfirmationDialog(
                         text = "Instructor: $instructorName ($instructorLinoId)",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = LenoPrimary,
+                        color = MaterialTheme.colorScheme.onSurface,
                         textAlign = TextAlign.Center
                     )
                 }
@@ -136,7 +136,7 @@ fun JoinConfirmationDialog(
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Chat with Teacher")
+                    Text("Chat with Teacher", color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         },
@@ -145,7 +145,7 @@ fun JoinConfirmationDialog(
                 onClick = onDismiss,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Close")
+                Text("Close", color = MaterialTheme.colorScheme.onSurface)
             }
         }
     )

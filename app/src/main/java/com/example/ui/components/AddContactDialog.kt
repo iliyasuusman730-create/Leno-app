@@ -276,7 +276,7 @@ fun AddContactDialog(
                                         text = "Leno user found",
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.Bold,
-                                        color = LenoPrimaryDark
+                                        color = Color(0xFF111111)
                                     )
                                 }
 
@@ -337,7 +337,7 @@ fun AddContactDialog(
                                             Text(
                                                 text = "@${foundUser.username}",
                                                 style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.primary,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 fontWeight = FontWeight.Medium
                                             )
                                             if (foundUser.linoId.isNotBlank()) {
@@ -346,7 +346,7 @@ fun AddContactDialog(
                                                     fontFamily = FontFamily.Monospace,
                                                     fontWeight = FontWeight.SemiBold,
                                                     fontSize = 12.sp,
-                                                    color = MaterialTheme.colorScheme.primary
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
                                             }
                                         }
@@ -360,7 +360,7 @@ fun AddContactDialog(
                                     Text(
                                         text = "This is your own account.",
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.primary,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.align(Alignment.CenterHorizontally)
                                     )
                                     Spacer(modifier = Modifier.height(8.dp))

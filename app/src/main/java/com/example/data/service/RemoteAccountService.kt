@@ -16,12 +16,18 @@ import com.example.util.LessonProgressManager
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.firestore.DocumentChange
+import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -35,12 +41,15 @@ import java.util.UUID
  */
 open class RemoteAccountService {
 
+    private val _lessonSeenByMap = MutableStateFlow<Map<String, Set<String>>>(emptyMap())
+    val lessonSeenByMap: StateFlow<Map<String, Set<String>>> = _lessonSeenByMap.asStateFlow()
+
     fun getFirestoreSafe(): FirebaseFirestore? {
         try {
             com.example.LenoApplication.ensureFirebaseInitialized()
         } catch (_: Throwable) {}
         return firestore ?: try {
-            FirebaseFirestore.getInstance()
+            com.example.LenoApplication.getFirestoreInstance()
         } catch (e: Throwable) {
             null
         }
@@ -70,7 +79,7 @@ open class RemoteAccountService {
     private val firestore: FirebaseFirestore? by lazy {
         try {
             com.example.LenoApplication.ensureFirebaseInitialized()
-            FirebaseFirestore.getInstance()
+            com.example.LenoApplication.getFirestoreInstance()
         } catch (e: Throwable) {
             Log.w(TAG, "Firebase Firestore is not initialized on this environment: ${e.message}")
             null
@@ -94,7 +103,7 @@ open class RemoteAccountService {
      * Registers an authentication state listener with Firebase Authentication.
      */
     open fun addAuthStateListener(listener: (FirebaseUser?) -> Unit): FirebaseAuth.AuthStateListener? {
-        val fbAuth = auth ?: return null
+        val fbAuth = getAuthSafe() ?: return null
         val authListener = FirebaseAuth.AuthStateListener { a ->
             listener(a.currentUser)
         }
@@ -107,7 +116,7 @@ open class RemoteAccountService {
      */
     open fun removeAuthStateListener(listener: FirebaseAuth.AuthStateListener?) {
         if (listener != null) {
-            auth?.removeAuthStateListener(listener)
+            getAuthSafe()?.removeAuthStateListener(listener)
         }
     }
 
@@ -191,38 +200,13 @@ open class RemoteAccountService {
         }
 
         val fbAuth = getAuthSafe()
-        var resolvedUid: String? = null
+        val currentFbUser = fbAuth?.currentUser
+        val uid = currentFbUser?.uid
+            ?: return@withContext Result.failure(
+                Exception("Please sign in with Google to create your cloud account.")
+            )
 
-        // 1. Attempt to create Firebase Auth user
-        if (fbAuth != null) {
-            try {
-                Log.i(TAG, "🔥 [Firebase Auth SignUp] Registering with email: $cleanEmail")
-                val authResult = withTimeoutOrNull(8000L) {
-                    fbAuth.createUserWithEmailAndPassword(cleanEmail, cleanPassword).await()
-                }
-                resolvedUid = authResult?.user?.uid
-                if (resolvedUid != null) {
-                    Log.i(TAG, "✅ [Firebase Auth SignUp SUCCESS] Created user with permanent UID: $resolvedUid")
-                }
-            } catch (e: Exception) {
-                val err = e.message ?: ""
-                Log.w(TAG, "⚠️ [Firebase Auth SignUp Notice] ${e.localizedMessage}")
-                val isAlreadyInUse = err.contains("already in use", ignoreCase = true) ||
-                        err.contains("already-in-use", ignoreCase = true) ||
-                        err.contains("EMAIL_EXISTS", ignoreCase = true)
-                if (isAlreadyInUse) {
-                    return@withContext Result.failure(
-                        Exception("This email address is already registered. Please log in with your password.", e)
-                    )
-                }
-                if (!isProviderDisabled(e)) {
-                    return@withContext Result.failure(e)
-                }
-            }
-        }
-
-        val uid = resolvedUid ?: "usr_${originalUsername.lowercase()}_${UUID.randomUUID().toString().take(6)}"
-
+        val now = System.currentTimeMillis()
         // 2. Build userMap with exact required fields
         val userMap = hashMapOf<String, Any>(
             "uid" to uid,
@@ -237,10 +221,10 @@ open class RemoteAccountService {
             "fullName" to originalDisplayName,
             "email" to cleanEmail,
             "searchable" to true,
-            "createdAt" to FieldValue.serverTimestamp(),
-            "updatedAt" to System.currentTimeMillis(),
+            "createdAt" to now,
+            "updatedAt" to now,
             "isOnline" to true,
-            "lastSeen" to System.currentTimeMillis(),
+            "lastSeen" to now,
             "statusMessage" to "Hey there! I am using Leno.",
             "bio" to "Connecting on Leno ✨",
             "role" to "USER",
@@ -250,37 +234,26 @@ open class RemoteAccountService {
             "teacherStatus" to "NOT_APPLIED"
         )
 
-        // 3. Write userMap to Firestore: document(uid) and document(lenId)
+        // 3. Write canonical userMap to Firestore users/{uid} plus usernames/leno_ids index
         try {
             val db = getFirestoreSafe()
             if (db != null) {
-                db.collection("users").document(uid).set(userMap, SetOptions.merge())
-                    .addOnSuccessListener {
-                        Log.i("Leno", "Leno: User written")
-                    }
-                    .addOnFailureListener { e ->
-                        Log.e("Leno", "Leno: User write error: ${e.message}", e)
-                    }
-
-                db.collection("users").document(formattedLenoId).set(userMap, SetOptions.merge())
-                    .addOnSuccessListener {
-                        Log.i("Leno", "Leno: User written")
-                    }
-                    .addOnFailureListener { e ->
-                        Log.e("Leno", "Leno: User write error: ${e.message}", e)
-                    }
-
-                try {
-                    db.collection(COLLECTION_USERNAMES).document(originalUsername.lowercase())
-                        .set(mapOf("uid" to uid, "ownerUid" to uid, "username" to originalUsername.lowercase()), SetOptions.merge())
-                    db.collection(COLLECTION_LENO_IDS).document(formattedLenoId)
-                        .set(mapOf("uid" to uid, "ownerUid" to uid, "lenoId" to formattedLenoId), SetOptions.merge())
-                } catch (_: Exception) {}
-
-                withTimeoutOrNull(4000L) {
+                withTimeoutOrNull(8000L) {
                     try {
-                        db.collection("users").document(uid).set(userMap, SetOptions.merge()).await()
-                        db.collection("users").document(formattedLenoId).set(userMap, SetOptions.merge()).await()
+                        db.collection(COLLECTION_USERS).document(uid).set(userMap, SetOptions.merge()).await()
+                        Log.i("Leno", "Leno: User written (uid=$uid)")
+                    } catch (e: Exception) {
+                        Log.e("Leno", "Leno: User write error: ${e.message}", e)
+                    }
+                    try {
+                        db.collection(COLLECTION_USERNAMES).document(originalUsername.lowercase())
+                            .set(mapOf("uid" to uid, "ownerUid" to uid, "username" to originalUsername.lowercase()), SetOptions.merge())
+                            .await()
+                    } catch (_: Exception) {}
+                    try {
+                        db.collection(COLLECTION_LENO_IDS).document(formattedLenoId)
+                            .set(mapOf("uid" to uid, "ownerUid" to uid, "lenoId" to formattedLenoId), SetOptions.merge())
+                            .await()
                     } catch (_: Exception) {}
                 }
             }
@@ -296,7 +269,7 @@ open class RemoteAccountService {
      * Returns the permanent Firebase UID on success.
      */
     open suspend fun signInWithFirebaseAuth(email: String, password: String): Result<String> = withContext(Dispatchers.IO) {
-        val fbAuth = auth ?: return@withContext Result.failure(Exception("Firebase Authentication is not available on this device."))
+        val fbAuth = getAuthSafe() ?: return@withContext Result.failure(Exception("Firebase Authentication is not available on this device."))
         val cleanEmail = email.trim().lowercase()
         val cleanPassword = password.trim()
 
@@ -333,54 +306,13 @@ open class RemoteAccountService {
             return@withContext Result.failure(Exception("Incorrect credentials. Please verify your username/Leno ID and password."))
         }
 
-        try {
-            Log.i(TAG, "🔥 [Firebase Auth SignIn] Authenticating with email: $cleanEmail")
-            val authResult = withTimeoutOrNull(if (isTestEnvironment()) 500L else 12000L) {
-                try {
-                    fbAuth.signInWithEmailAndPassword(cleanEmail, cleanPassword).await()
-                } catch (e: Exception) {
-                    if (isTestEnvironment()) null else throw e
-                }
-            }
-
-            if (authResult == null && isTestEnvironment()) {
-                val testUid = "uid_${cleanEmail.replace("@", "_").replace(".", "_")}"
-                return@withContext Result.success(testUid)
-            }
-            if (authResult == null) {
-                return@withContext Result.failure(Exception("Firebase Authentication timed out. Please check your network connection."))
-            }
-
-            val uid = authResult.user?.uid
-            if (uid != null) {
-                Log.i(TAG, "✅ [Firebase Auth SignIn SUCCESS] Authenticated user with UID: $uid")
-                Result.success(uid)
-            } else {
-                Result.failure(Exception("Firebase Auth returned an empty UID."))
-            }
-        } catch (e: Exception) {
-            val err = e.message ?: ""
-            if (isProviderDisabled(e)) {
-                Log.w(TAG, "⚠️ [Firebase Auth Blocked] Email/Password provider is disabled in Firebase Console: ${e.message}")
-                return@withContext Result.failure(Exception("Firebase Authentication error: Email/Password sign-in provider is disabled in Firebase Console for project 'leno-9235f'. Please enable it under Authentication > Sign-in method in Firebase Console.", e))
-            }
-            Log.w(TAG, "⚠️ [Firebase Auth SignIn Notice] ${e.localizedMessage}")
-            val friendlyMessage = when {
-                err.contains("invalid-credential", ignoreCase = true) ||
-                err.contains("INVALID_LOGIN_CREDENTIALS", ignoreCase = true) ||
-                err.contains("supplied auth credential is incorrect", ignoreCase = true) ||
-                err.contains("malformed", ignoreCase = true) ||
-                err.contains("expired", ignoreCase = true) ||
-                err.contains("user-not-found", ignoreCase = true) ||
-                err.contains("wrong-password", ignoreCase = true) ||
-                err.contains("password is invalid", ignoreCase = true) ->
-                    "Incorrect credentials. Please verify your username/Leno ID and password."
-                err.contains("network error", ignoreCase = true) ->
-                    "Network error connecting to Firebase Authentication. Please check your connection."
-                else -> e.localizedMessage ?: "Firebase Authentication failed."
-            }
-            Result.failure(Exception(friendlyMessage, e))
+        val currentUser = fbAuth.currentUser
+        if (currentUser != null) {
+            return@withContext Result.success(currentUser.uid)
         }
+        return@withContext Result.failure(
+            Exception("Please tap 'Sign in with Google' to verify your cloud session.")
+        )
     }
 
     /**
@@ -394,7 +326,7 @@ open class RemoteAccountService {
             return@withContext testEmails.containsKey(cleanEmail) || testUsers.values.any { it.email.equals(cleanEmail, ignoreCase = true) }
         }
 
-        val fbAuth = auth ?: return@withContext false
+        val fbAuth = getAuthSafe() ?: return@withContext false
         try {
             val methods = withTimeoutOrNull(if (isTestEnvironment()) 300L else 4000L) {
                 fbAuth.fetchSignInMethodsForEmail(cleanEmail).await().signInMethods
@@ -417,7 +349,7 @@ open class RemoteAccountService {
     open suspend fun updateFirebasePassword(newPassword: String): Result<Unit> = withContext(Dispatchers.IO) {
         if (isTestEnvironment()) {
             val cleanPass = newPassword.trim()
-            val currUid = auth?.currentUser?.uid ?: testUsers.keys.firstOrNull()
+            val currUid = getAuthSafe()?.currentUser?.uid ?: testUsers.keys.firstOrNull()
             if (currUid != null) {
                 testPasswords[currUid] = cleanPass
                 val salt = AuthSecurity.generateSalt()
@@ -428,7 +360,7 @@ open class RemoteAccountService {
             }
             return@withContext Result.success(Unit)
         }
-        val fbAuth = auth ?: return@withContext Result.failure(Exception("Firebase Authentication is not available."))
+        val fbAuth = getAuthSafe() ?: return@withContext Result.failure(Exception("Firebase Authentication is not available."))
         val currentUser = fbAuth.currentUser ?: return@withContext Result.failure(Exception("No active Firebase session."))
         try {
             currentUser.updatePassword(newPassword.trim()).await()
@@ -446,14 +378,14 @@ open class RemoteAccountService {
     open suspend fun updateFirebaseEmail(newEmail: String, targetUid: String? = null): Result<Unit> = withContext(Dispatchers.IO) {
         val clean = newEmail.trim().lowercase()
         if (isTestEnvironment()) {
-            val currUid = targetUid ?: auth?.currentUser?.uid
+            val currUid = targetUid ?: getAuthSafe()?.currentUser?.uid
             if (currUid != null) {
                 testEmails.entries.removeIf { it.value == currUid }
                 testEmails[clean] = currUid
             }
             return@withContext Result.success(Unit)
         }
-        val fbAuth = auth ?: return@withContext Result.failure(Exception("Firebase Authentication is not available."))
+        val fbAuth = getAuthSafe() ?: return@withContext Result.failure(Exception("Firebase Authentication is not available."))
         val currentUser = fbAuth.currentUser ?: return@withContext Result.failure(Exception("No active Firebase session."))
         try {
             currentUser.updateEmail(clean).await()
@@ -469,7 +401,7 @@ open class RemoteAccountService {
      * Sends password reset email via Firebase Authentication.
      */
     suspend fun sendPasswordResetEmail(email: String): Result<Unit> = withContext(Dispatchers.IO) {
-        val fbAuth = auth ?: return@withContext Result.failure(Exception("Firebase Authentication is not available."))
+        val fbAuth = getAuthSafe() ?: return@withContext Result.failure(Exception("Firebase Authentication is not available."))
         val cleanEmail = email.trim().lowercase()
         if (cleanEmail.isBlank()) return@withContext Result.failure(Exception("Email cannot be blank."))
         try {
@@ -498,7 +430,7 @@ open class RemoteAccountService {
      */
     open fun signOutFromFirebase() {
         try {
-            auth?.signOut()
+            getAuthSafe()?.signOut()
             Log.i(TAG, "FirebaseAuth signed out.")
         } catch (e: Exception) {
             Log.w(TAG, "FirebaseAuth sign out error: ${e.message}")
@@ -557,10 +489,10 @@ open class RemoteAccountService {
         if (!isFirestoreProvisioned) {
             return@withContext Result.success(Unit)
         }
-        val db = firestore ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe() ?: return@withContext Result.failure(Exception("Cloud Firestore is not available."))
 
         try {
-            val txResult = withTimeoutOrNull(2500L) {
+            val txResult = withTimeoutOrNull(4500L) {
                 db.runTransaction { transaction ->
                     val newDocRef = db.collection(COLLECTION_USERNAMES).document(cleanNew)
                     val newDocSnap = transaction.get(newDocRef)
@@ -594,7 +526,9 @@ open class RemoteAccountService {
                 }.await()
             }
             if (txResult == null) {
-                Log.w(TAG, "Firestore username transaction timed out. Queuing with local confirmation.")
+                db.collection(COLLECTION_USERNAMES).document(cleanNew)
+                    .set(mapOf("ownerUid" to uid, "uid" to uid, "username" to cleanNew, "claimedAt" to System.currentTimeMillis()), SetOptions.merge())
+                    .await()
             }
             Result.success(Unit)
         } catch (e: Exception) {
@@ -604,11 +538,10 @@ open class RemoteAccountService {
                 Result.failure(Exception("Username @$cleanNew is already taken.", e))
             } else if (isDatabaseNotProvisioned(e)) {
                 markDatabaseNotProvisioned()
-                Log.w(TAG, "Cloud Firestore database not provisioned yet in project 'leno-9235f'. Continuing with local claim.")
-                Result.success(Unit)
+                Result.failure(e)
             } else {
                 Log.w(TAG, "claimUsernameAtomic notice: ${e.message}")
-                Result.success(Unit)
+                Result.failure(e)
             }
         }
     }
@@ -646,10 +579,10 @@ open class RemoteAccountService {
         if (!isFirestoreProvisioned) {
             return@withContext Result.success(Unit)
         }
-        val db = firestore ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe() ?: return@withContext Result.failure(Exception("Cloud Firestore is not available."))
 
         try {
-            val txResult = withTimeoutOrNull(2500L) {
+            val txResult = withTimeoutOrNull(4500L) {
                 db.runTransaction { transaction ->
                     val newDocRef = db.collection(COLLECTION_LENO_IDS).document(cleanNew)
                     val newDocSnap = transaction.get(newDocRef)
@@ -682,7 +615,9 @@ open class RemoteAccountService {
                 }.await()
             }
             if (txResult == null) {
-                Log.w(TAG, "Firestore Leno ID transaction timed out. Queued with local confirmation.")
+                db.collection(COLLECTION_LENO_IDS).document(cleanNew)
+                    .set(mapOf("ownerUid" to uid, "uid" to uid, "lenoId" to cleanNew, "claimedAt" to System.currentTimeMillis()), SetOptions.merge())
+                    .await()
             }
             Result.success(Unit)
         } catch (e: Exception) {
@@ -691,11 +626,10 @@ open class RemoteAccountService {
                 Result.failure(Exception("Leno ID $cleanNew is already taken.", e))
             } else if (isDatabaseNotProvisioned(e)) {
                 markDatabaseNotProvisioned()
-                Log.w(TAG, "Cloud Firestore database not provisioned yet in project 'leno-9235f'. Continuing with local claim.")
-                Result.success(Unit)
+                Result.failure(e)
             } else {
                 Log.w(TAG, "claimLenoIdAtomic notice: ${e.message}")
-                Result.success(Unit)
+                Result.failure(e)
             }
         }
     }
@@ -712,47 +646,42 @@ open class RemoteAccountService {
                     testUsernames.containsKey(clean)
             return@withContext existsInTest
         }
-        val db = firestore ?: return@withContext false
+        val db = getFirestoreSafe() ?: return@withContext false
         try {
-            // 1. Query 'users' collection by lowercase clean username
-            val querySnapshot = withTimeoutOrNull(6000L) {
-                db.collection(COLLECTION_USERS)
-                    .whereEqualTo("username", clean)
-                    .limit(1)
-                    .get()
-                    .await()
-            }
-            if (querySnapshot != null && !querySnapshot.isEmpty) {
-                Log.w(TAG, "Username '$clean' exists in 'users' collection.")
-                return@withContext true
-            }
-
-            // 1b. Check with original casing if different
-            val orig = username.trim().removePrefix("@")
-            if (orig != clean) {
-                val origSnapshot = withTimeoutOrNull(4000L) {
-                    db.collection(COLLECTION_USERS)
-                        .whereEqualTo("username", orig)
-                        .limit(1)
-                        .get()
-                        .await()
+            // Check in parallel across users (lowercase & original) and usernames index
+            coroutineScope {
+                val orig = username.trim().removePrefix("@")
+                val q1 = async {
+                    withTimeoutOrNull(5000L) {
+                        db.collection(COLLECTION_USERS).whereEqualTo("username_lowercase", clean).limit(1).get().await()
+                    }
                 }
-                if (origSnapshot != null && !origSnapshot.isEmpty) {
-                    Log.w(TAG, "Username '$orig' exists in 'users' collection.")
-                    return@withContext true
+                val q2 = async {
+                    withTimeoutOrNull(5000L) {
+                        db.collection(COLLECTION_USERS).whereEqualTo("username", clean).limit(1).get().await()
+                    }
                 }
+                val q3 = async {
+                    if (orig != clean) {
+                        withTimeoutOrNull(5000L) {
+                            db.collection(COLLECTION_USERS).whereEqualTo("username", orig).limit(1).get().await()
+                        }
+                    } else null
+                }
+                val q4 = async {
+                    withTimeoutOrNull(5000L) {
+                        db.collection(COLLECTION_USERNAMES).document(clean).get().await()
+                    }
+                }
+                val r1 = q1.await()
+                val r2 = q2.await()
+                val r3 = q3.await()
+                val r4 = q4.await()
+                (r1 != null && !r1.isEmpty) ||
+                    (r2 != null && !r2.isEmpty) ||
+                    (r3 != null && !r3.isEmpty) ||
+                    (r4 != null && r4.exists())
             }
-
-            // 2. Also check reservation in 'usernames' collection
-            val unameDoc = withTimeoutOrNull(4000L) {
-                db.collection(COLLECTION_USERNAMES).document(clean).get().await()
-            }
-            if (unameDoc != null && unameDoc.exists()) {
-                Log.w(TAG, "Username '$clean' exists in 'usernames' collection.")
-                return@withContext true
-            }
-
-            false
         } catch (e: Exception) {
             Log.w(TAG, "isUsernameTakenInUsersCollection notice: ${e.message}")
             false
@@ -771,24 +700,34 @@ open class RemoteAccountService {
             val byUser = testUsers.values.firstOrNull { it.username.equals(clean, ignoreCase = true) }
             return@withContext byUser != null && byUser.userId != currentUid
         }
-        val db = firestore ?: return@withContext false
+        val db = getFirestoreSafe() ?: return@withContext false
         try {
-            // 1. Check usernames reservation collection
             val unameDoc = db.collection(COLLECTION_USERNAMES).document(clean).get().await()
             if (unameDoc.exists()) {
                 val ownerUid = unameDoc.getString("ownerUid") ?: unameDoc.getString("uid")
                 if (ownerUid != null && ownerUid != currentUid) return@withContext true
             }
-            // 2. Check users collection
             val snapshot = withTimeoutOrNull(6000L) {
                 db.collection(COLLECTION_USERS)
-                    .whereEqualTo("username", clean)
+                    .whereEqualTo("username_lowercase", clean)
                     .limit(1)
                     .get()
                     .await()
             }
             if (snapshot != null && !snapshot.isEmpty) {
                 val doc = snapshot.documents[0]
+                val docUid = doc.getString("userId") ?: doc.id
+                return@withContext docUid != currentUid
+            }
+            val snapshotOrig = withTimeoutOrNull(6000L) {
+                db.collection(COLLECTION_USERS)
+                    .whereEqualTo("username", clean)
+                    .limit(1)
+                    .get()
+                    .await()
+            }
+            if (snapshotOrig != null && !snapshotOrig.isEmpty) {
+                val doc = snapshotOrig.documents[0]
                 val docUid = doc.getString("userId") ?: doc.id
                 return@withContext docUid != currentUid
             }
@@ -812,9 +751,13 @@ open class RemoteAccountService {
             return@withContext byUser != null
         }
         if (!isFirestoreProvisioned) return@withContext false
-        val db = firestore ?: return@withContext false
+        val db = getFirestoreSafe() ?: return@withContext false
         try {
-            val snapshot = withTimeoutOrNull(6000L) {
+            val lenoDoc = withTimeoutOrNull(5000L) {
+                db.collection(COLLECTION_LENO_IDS).document(formatted).get().await()
+            }
+            if (lenoDoc != null && lenoDoc.exists()) return@withContext true
+            val snapshot = withTimeoutOrNull(5000L) {
                 db.collection(COLLECTION_USERS)
                     .whereEqualTo("linoId", formatted)
                     .limit(1)
@@ -850,6 +793,7 @@ open class RemoteAccountService {
         val formattedLenoId = if (!lenId.trim().uppercase().startsWith("LEN-")) "LEN-${lenId.trim().uppercase()}" else lenId.trim().uppercase()
         val cleanDisplayName = displayName.trim()
         val cleanEmail = email.trim().lowercase()
+        val now = System.currentTimeMillis()
 
         val userMap = hashMapOf<String, Any>(
             "uid" to uid,
@@ -864,10 +808,10 @@ open class RemoteAccountService {
             "fullName" to cleanDisplayName,
             "email" to cleanEmail,
             "searchable" to true,
-            "createdAt" to FieldValue.serverTimestamp(),
-            "updatedAt" to System.currentTimeMillis(),
+            "createdAt" to now,
+            "updatedAt" to now,
             "isOnline" to true,
-            "lastSeen" to System.currentTimeMillis(),
+            "lastSeen" to now,
             "statusMessage" to "Hey there! I am using Leno.",
             "bio" to "Connecting on Leno ✨",
             "role" to "USER",
@@ -882,43 +826,28 @@ open class RemoteAccountService {
             val user = docToUser(userMap, uid)
             if (user != null) {
                 testUsers[uid] = user
-                testUsers[formattedLenoId] = user
                 testUsernames[cleanUsername.lowercase()] = uid
                 testLenoIds[formattedLenoId] = uid
             }
             return@withContext Result.success(Unit)
         }
 
-        val db = getFirestoreSafe() ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe()
+            ?: return@withContext Result.failure(Exception("Cloud database is not initialized. Please restart and try again."))
         try {
-            Log.i("Leno", "Writing user to Firestore: uid=$uid, lenId=$formattedLenoId, username=$cleanUsername")
-            
-            // 1. Write to document(uid) and document(lenId)
-            val docUidRef = db.collection(COLLECTION_USERS).document(uid)
-            withTimeoutOrNull(8000L) {
-                try {
-                    docUidRef.set(userMap, SetOptions.merge()).await()
-                    Log.i("Leno", "Leno: User written (uid: $uid)")
-                } catch (e: Exception) {
-                    Log.w("Leno", "Leno: User write notice (uid: $uid): ${e.message}")
-                }
+            Log.i("Leno", "Writing canonical user to Firestore: uid=$uid, lenId=$formattedLenoId, username=$cleanUsername")
+            val wrotePrimary = withTimeoutOrNull(10000L) {
+                db.collection(COLLECTION_USERS).document(uid)
+                    .set(userMap, SetOptions.merge())
+                    .await()
 
-                if (formattedLenoId.isNotBlank()) {
+                if (cleanUsername.isNotBlank()) {
                     try {
-                        val docLenIdRef = db.collection(COLLECTION_USERS).document(formattedLenoId)
-                        docLenIdRef.set(userMap, SetOptions.merge()).await()
-                        Log.i("Leno", "Leno: User written (lenId: $formattedLenoId)")
-                    } catch (e: Exception) {
-                        Log.w("Leno", "Leno: User write notice (lenId: $formattedLenoId): ${e.message}")
-                    }
+                        db.collection(COLLECTION_USERNAMES).document(cleanUsername.lowercase())
+                            .set(mapOf("uid" to uid, "ownerUid" to uid, "username" to cleanUsername.lowercase()), SetOptions.merge())
+                            .await()
+                    } catch (_: Exception) {}
                 }
-
-                // 3. Atomically update auxiliary reservation collections
-                try {
-                    db.collection(COLLECTION_USERNAMES).document(cleanUsername.lowercase())
-                        .set(mapOf("uid" to uid, "ownerUid" to uid, "username" to cleanUsername.lowercase()), SetOptions.merge())
-                        .await()
-                } catch (_: Exception) {}
 
                 if (formattedLenoId.isNotBlank()) {
                     try {
@@ -927,19 +856,26 @@ open class RemoteAccountService {
                             .await()
                     } catch (_: Exception) {}
                 }
+                true
+            }
+            if (wrotePrimary != true) {
+                return@withContext Result.failure(Exception("Timed out saving account to Leno Cloud. Please check your internet connection."))
             }
 
-            Log.i("Leno", "✅ Leno: User written successfully to both documents: $uid & $formattedLenoId")
+            Log.i("Leno", "✅ Leno: Canonical user written successfully: $uid")
             Result.success(Unit)
         } catch (e: Exception) {
+            if (isDatabaseNotProvisioned(e)) {
+                markDatabaseNotProvisioned()
+            }
             Log.e("Leno", "Leno: User write error: ${e.message}", e)
             Result.failure(e)
         }
     }
 
     /**
-     * Saves or updates a user account in the remote persistent cloud store (Firestore).
-     * Performs dual write to document(uid) and document(lenId).
+     * Saves or updates a user account in the remote persistent cloud store (Firestore)
+     * at canonical document users/{uid} plus lookup index collections.
      */
     open suspend fun saveUserToRemote(user: UserEntity): Result<Unit> = withContext(Dispatchers.IO) {
         val formattedLenoId = if (user.linoId.isNotBlank()) {
@@ -948,20 +884,18 @@ open class RemoteAccountService {
 
         if (isTestEnvironment()) {
             testUsers[user.userId] = user
-            if (formattedLenoId.isNotBlank()) testUsers[formattedLenoId] = user
             if (user.username.isNotBlank()) testUsernames[user.username.lowercase()] = user.userId
             if (formattedLenoId.isNotBlank()) {
                 testLenoIds[formattedLenoId] = user.userId
             }
             return@withContext Result.success(Unit)
         }
-        if (!isFirestoreProvisioned) {
-            return@withContext Result.success(Unit)
-        }
-        val db = getFirestoreSafe() ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe()
+            ?: return@withContext Result.failure(Exception("Cloud database is not initialized. Please check your connection."))
 
         try {
-            Log.i(TAG, "🔥 [Firestore Write: 'users'] Initiating write for user @${user.username} (UID: ${user.userId}, Leno ID: $formattedLenoId)...")
+            val now = System.currentTimeMillis()
+            Log.i(TAG, "🔥 [Firestore Write: 'users'] Initiating canonical write for user @${user.username} (UID: ${user.userId}, Leno ID: $formattedLenoId)...")
 
             val userMap = hashMapOf<String, Any>(
                 "userId" to user.userId,
@@ -986,8 +920,8 @@ open class RemoteAccountService {
                 "phoneNumber" to user.phoneNumber,
                 "normalizedPhoneNumber" to user.normalizedPhoneNumber,
                 "searchable" to true,
-                "createdAt" to (if (user.createdAt > 0) user.createdAt else FieldValue.serverTimestamp()),
-                "updatedAt" to System.currentTimeMillis(),
+                "createdAt" to (if (user.createdAt > 0) user.createdAt else now),
+                "updatedAt" to now,
                 "isOfficial" to user.isOfficial,
                 "googleEmail" to user.googleEmail.lowercase(),
                 "recoveryEmail" to user.recoveryEmail.lowercase(),
@@ -1004,51 +938,40 @@ open class RemoteAccountService {
                 "approvedSubject" to (if (user.isTeacher) user.effectiveSubject else "")
             )
 
-            // 1. Write to document(uid) and document(lenId)
-            val docUidRef = db.collection(COLLECTION_USERS).document(user.userId)
-            withTimeoutOrNull(8000L) {
-                try {
-                    docUidRef.set(userMap, SetOptions.merge()).await()
-                    Log.i("Leno", "Leno: User written (uid: ${user.userId})")
-                } catch (e: Exception) {
-                    Log.w("Leno", "Leno: User write notice (uid: ${user.userId}): ${e.message}")
-                }
-
-                if (formattedLenoId.isNotBlank()) {
-                    try {
-                        val docLenRef = db.collection(COLLECTION_USERS).document(formattedLenoId)
-                        docLenRef.set(userMap, SetOptions.merge()).await()
-                        Log.i("Leno", "Leno: User written (lenId: $formattedLenoId)")
-                    } catch (e: Exception) {
-                        Log.w("Leno", "Leno: User write notice (lenId: $formattedLenoId): ${e.message}")
-                    }
-                }
+            val wrote = withTimeoutOrNull(10000L) {
+                db.collection(COLLECTION_USERS).document(user.userId)
+                    .set(userMap, SetOptions.merge())
+                    .await()
 
                 if (user.username.isNotBlank()) {
                     try {
                         db.collection(COLLECTION_USERNAMES).document(user.username.lowercase())
-                            .set(mapOf("uid" to user.userId, "ownerUid" to user.userId, "username" to user.username.lowercase(), "updatedAt" to System.currentTimeMillis()), SetOptions.merge())
+                            .set(mapOf("uid" to user.userId, "ownerUid" to user.userId, "username" to user.username.lowercase(), "updatedAt" to now), SetOptions.merge())
                             .await()
                     } catch (_: Exception) {}
                 }
                 if (formattedLenoId.isNotBlank()) {
                     try {
                         db.collection(COLLECTION_LENO_IDS).document(formattedLenoId)
-                            .set(mapOf("uid" to user.userId, "ownerUid" to user.userId, "lenoId" to formattedLenoId, "updatedAt" to System.currentTimeMillis()), SetOptions.merge())
+                            .set(mapOf("uid" to user.userId, "ownerUid" to user.userId, "lenoId" to formattedLenoId, "updatedAt" to now), SetOptions.merge())
                             .await()
                     } catch (_: Exception) {}
                 }
+                true
+            }
+
+            if (wrote != true) {
+                return@withContext Result.failure(Exception("Timed out saving profile to Leno Cloud."))
             }
 
             Result.success(Unit)
         } catch (e: Exception) {
+            com.example.util.handleFirestoreError(e, com.example.util.OperationType.WRITE, "$COLLECTION_USERS/${user.userId}")
             if (isDatabaseNotProvisioned(e)) {
                 markDatabaseNotProvisioned()
-                Log.w(TAG, "Cloud Firestore database not provisioned yet in project 'leno-9235f'. User profile safely saved locally.")
-                return@withContext Result.success(Unit)
             }
-            Log.w(TAG, "⚠️ [Firestore Write Notice] ${e.localizedMessage}")
-            Result.success(Unit)
+            Log.w(TAG, "⚠️ [Firestore Write Failure] ${e.localizedMessage}")
+            Result.failure(e)
         }
     }
 
@@ -1057,6 +980,13 @@ open class RemoteAccountService {
      */
     open suspend fun ensureOfficialAccountsInFirestore(): Unit = withContext(Dispatchers.IO) {
         try {
+            val fbUser = getCurrentAuthUser() ?: return@withContext
+            val isBootstrapAdmin = fbUser.isEmailVerified &&
+                fbUser.email.equals("iliyasuusman730@gmail.com", ignoreCase = true)
+            if (!isBootstrapAdmin) {
+                return@withContext
+            }
+
             val officialJaiby = UserEntity(
                 userId = "usr_officialjaiby_2026",
                 username = "officialjaiby",
@@ -1066,6 +996,7 @@ open class RemoteAccountService {
                 email = "officialjaiby@leno.chat",
                 role = "OWNER",
                 isOfficial = true,
+                isVerified = true,
                 isOnline = true,
                 createdAt = 1700000000000L
             )
@@ -1084,55 +1015,10 @@ open class RemoteAccountService {
                 email = "official@leno.app",
                 role = "OFFICIAL",
                 isOfficial = true,
+                isVerified = true,
                 linoId = "LEN-00000001"
             )
             saveUserToRemote(officialLeno)
-
-            val db = getFirestoreSafe() ?: return@withContext
-            val jaibyMap = hashMapOf<String, Any>(
-                "uid" to "usr_officialjaiby_2026",
-                "userId" to "usr_officialjaiby_2026",
-                "username" to "officialjaiby",
-                "username_lowercase" to "officialjaiby",
-                "lenId" to "LEN-50638964",
-                "linoId" to "LEN-50638964",
-                "lenId_lowercase" to "len-50638964",
-                "displayName" to "Official Jaiby",
-                "displayName_lowercase" to "official jaiby",
-                "fullName" to "Official Jaiby",
-                "email" to "officialjaiby@leno.chat",
-                "searchable" to true,
-                "role" to "OWNER",
-                "isOfficial" to true,
-                "isOnline" to true,
-                "createdAt" to 1700000000000L
-            )
-            db.collection("users").document("usr_officialjaiby_2026").set(jaibyMap, SetOptions.merge())
-            db.collection("users").document("LEN-50638964").set(jaibyMap, SetOptions.merge())
-            db.collection("users").document("officialjaiby").set(jaibyMap, SetOptions.merge())
-            db.collection("users").document("50638964").set(jaibyMap, SetOptions.merge())
-
-            val lenoMap = hashMapOf<String, Any>(
-                "uid" to "official_leno_account",
-                "userId" to "official_leno_account",
-                "username" to "leno",
-                "username_lowercase" to "leno",
-                "lenId" to "LEN-00000001",
-                "linoId" to "LEN-00000001",
-                "lenId_lowercase" to "len-00000001",
-                "displayName" to "Official Leno",
-                "displayName_lowercase" to "official leno",
-                "fullName" to "Official Leno",
-                "email" to "official@leno.app",
-                "searchable" to true,
-                "role" to "OFFICIAL",
-                "isOfficial" to true,
-                "isOnline" to true,
-                "createdAt" to 1700000000000L
-            )
-            db.collection("users").document("official_leno_account").set(lenoMap, SetOptions.merge())
-            db.collection("users").document("LEN-00000001").set(lenoMap, SetOptions.merge())
-            db.collection("users").document("leno").set(lenoMap, SetOptions.merge())
 
             Log.i("Leno", "Ensured Official Jaiby and Official Leno exist in Cloud Firestore.")
         } catch (e: Exception) {
@@ -1144,8 +1030,8 @@ open class RemoteAccountService {
      * Explicit verification method to inspect if a given userId exists in Firestore 'users'.
      */
     open suspend fun verifyUserInFirestore(userId: String): Result<Boolean> = withContext(Dispatchers.IO) {
-        if (!isFirestoreProvisioned) return@withContext Result.success(true)
-        val db = firestore ?: return@withContext Result.failure(Exception("Firestore not initialized."))
+        if (isTestEnvironment()) return@withContext Result.success(testUsers.containsKey(userId))
+        val db = getFirestoreSafe() ?: return@withContext Result.failure(Exception("Firestore not initialized."))
         try {
             val doc = db.collection(COLLECTION_USERS).document(userId).get().await()
             val exists = doc.exists()
@@ -1154,7 +1040,6 @@ open class RemoteAccountService {
         } catch (e: Exception) {
             if (isDatabaseNotProvisioned(e)) {
                 markDatabaseNotProvisioned()
-                return@withContext Result.success(true)
             }
             Log.w(TAG, "🔍 [Firestore Verification Failed] ${e.message}")
             Result.failure(e)
@@ -1162,8 +1047,73 @@ open class RemoteAccountService {
     }
 
     /**
+     * Deduplicates user documents from Firestore so canonical `users/{uid}` documents
+     * take precedence over legacy `users/LEN-...` alias documents, and strips invalid/demo entries.
+     */
+    internal fun deduplicateCanonicalUsers(pairs: List<Pair<String, UserEntity>>): List<UserEntity> {
+        val ignoredUsernames = setOf("bello_maths", "ibrahim_quran", "fatima_english", "usman_skills", "jibril")
+        return pairs
+            .filter { (_, u) ->
+                u.userId.isNotBlank() &&
+                    !u.userId.endsWith("_teacher") &&
+                    u.userId != "user_len_50638964" &&
+                    u.userId != "test_dummy_user_to_purge" &&
+                    u.username.lowercase() !in ignoredUsernames
+            }
+            .groupBy { (_, u) -> u.userId }
+            .values
+            .map { candidates ->
+                candidates
+                    .sortedWith(
+                        compareByDescending<Pair<String, UserEntity>> { (docId, u) -> docId == u.userId }
+                            .thenByDescending { (_, u) -> u.updatedAt }
+                            .thenByDescending { (_, u) -> u.username.isNotBlank() }
+                    )
+                    .first()
+                    .second
+            }
+    }
+
+    private suspend fun fetchAllUserDocsPaginated(
+        db: FirebaseFirestore,
+        maxDocs: Int = 2500
+    ): List<Pair<String, UserEntity>> {
+        val collected = mutableListOf<Pair<String, UserEntity>>()
+        try {
+            var lastDoc: com.google.firebase.firestore.DocumentSnapshot? = null
+            val pageSize = 500L
+            while (collected.size < maxDocs) {
+                var query = db.collection(COLLECTION_USERS)
+                    .orderBy(FieldPath.documentId())
+                    .limit(pageSize)
+                if (lastDoc != null) {
+                    query = query.startAfter(lastDoc)
+                }
+                val snap = query.get().await()
+                if (snap.isEmpty) break
+                snap.documents.forEach { doc ->
+                    docToUser(doc.data, doc.id)?.let { collected.add(doc.id to it) }
+                }
+                if (snap.documents.size < pageSize) break
+                lastDoc = snap.documents.last()
+            }
+            return collected
+        } catch (e: Exception) {
+            Log.w(TAG, "Paginated user fetch fallback (${e.message})")
+            try {
+                val snap = db.collection(COLLECTION_USERS).limit(maxDocs.toLong()).get().await()
+                return snap.documents.mapNotNull { doc ->
+                    docToUser(doc.data, doc.id)?.let { doc.id to it }
+                }
+            } catch (_: Exception) {
+                return collected
+            }
+        }
+    }
+
+    /**
      * Finds a user in the remote cloud store by username, 8-digit Leno ID, email, display name, or user ID.
-     * Searches case-insensitively and utilizes dual document lookup.
+     * Executes indexed lookups concurrently and falls back to paginated scan so mobile connections never time out.
      */
     open suspend fun findRemoteUser(identifier: String): UserEntity? = withContext(Dispatchers.IO) {
         val clean = identifier.trim().removePrefix("@").trim()
@@ -1186,7 +1136,7 @@ open class RemoteAccountService {
 
         // 0. Instant resolution for Official Accounts across any device
         if (cleanLower == "officialjaiby" || cleanLower == "official jaiby" || cleanLower == "50638964" || cleanUpper == "LEN-50638964" || cleanLower.contains("officialjaiby")) {
-            val officialJaiby = UserEntity(
+            return@withContext UserEntity(
                 userId = "usr_officialjaiby_2026",
                 username = "officialjaiby",
                 displayName = "Official Jaiby",
@@ -1198,11 +1148,9 @@ open class RemoteAccountService {
                 isOnline = true,
                 createdAt = 1700000000000L
             )
-            try { saveUserToRemote(officialJaiby) } catch (_: Exception) {}
-            return@withContext officialJaiby
         }
         if (cleanLower == "leno" || cleanLower == "official leno" || cleanUpper == "LEN-00000001" || cleanUpper == "LEN-00000000" || cleanLower.contains("official leno")) {
-            val officialLeno = UserEntity(
+            return@withContext UserEntity(
                 userId = "official_leno_account",
                 username = "leno",
                 displayName = "Official Leno",
@@ -1217,8 +1165,6 @@ open class RemoteAccountService {
                 isOfficial = true,
                 linoId = "LEN-00000001"
             )
-            try { saveUserToRemote(officialLeno) } catch (_: Exception) {}
-            return@withContext officialLeno
         }
 
         if (isTestEnvironment()) {
@@ -1228,173 +1174,131 @@ open class RemoteAccountService {
             if (unameUid != null && testUsers[unameUid] != null) return@withContext testUsers[unameUid]
             val lenoUid = if (formattedLenoId.isNotEmpty()) testLenoIds[formattedLenoId] ?: testLenoIds[cleanUpper] else null
             if (lenoUid != null && testUsers[lenoUid] != null) return@withContext testUsers[lenoUid]
-            val matched = testUsers.values.firstOrNull {
+            return@withContext testUsers.values.firstOrNull {
                 it.username.equals(clean, ignoreCase = true) ||
-                (formattedLenoId.isNotEmpty() && it.linoId.equals(formattedLenoId, ignoreCase = true)) ||
-                (isNumericLeno && it.linoId.replace("-", "").equals(rawLenoDigits, ignoreCase = true)) ||
-                it.displayName.equals(clean, ignoreCase = true) ||
-                it.email.equals(clean, ignoreCase = true) ||
-                it.googleEmail.equals(clean, ignoreCase = true) ||
-                it.recoveryEmail.equals(clean, ignoreCase = true) ||
-                it.userId.equals(clean, ignoreCase = true)
+                    (formattedLenoId.isNotEmpty() && it.linoId.equals(formattedLenoId, ignoreCase = true)) ||
+                    (isNumericLeno && it.linoId.replace("-", "").equals(rawLenoDigits, ignoreCase = true)) ||
+                    it.displayName.equals(clean, ignoreCase = true) ||
+                    it.email.equals(clean, ignoreCase = true) ||
+                    it.googleEmail.equals(clean, ignoreCase = true) ||
+                    it.recoveryEmail.equals(clean, ignoreCase = true) ||
+                    it.userId.equals(clean, ignoreCase = true)
             }
-            return@withContext matched
         }
 
-        if (!isFirestoreProvisioned) return@withContext null
         val db = getFirestoreSafe() ?: return@withContext null
 
         try {
             withTimeoutOrNull(10000L) {
-                // 1. Direct O(1) lookup in usernames index collection (guaranteed lowercase)
-                try {
-                    val unameDoc = db.collection(COLLECTION_USERNAMES).document(cleanLower).get().await()
-                    if (unameDoc.exists()) {
-                        val ownerUid = unameDoc.getString("ownerUid") ?: unameDoc.getString("uid") ?: unameDoc.getString("userId")
-                        if (!ownerUid.isNullOrBlank()) {
-                            val userDoc = db.collection(COLLECTION_USERS).document(ownerUid).get().await()
-                            if (userDoc.exists()) {
-                                docToUser(userDoc.data, userDoc.id)?.let { return@withTimeoutOrNull it }
-                            }
-                        }
-                    }
-                } catch (_: Exception) {}
-
-                // 2. Query users collection by username_lowercase (indexed)
-                try {
-                    val byUnameLower = db.collection(COLLECTION_USERS)
-                        .whereEqualTo("username_lowercase", cleanLower)
-                        .limit(1)
-                        .get()
-                        .await()
-                    if (!byUnameLower.isEmpty) {
-                        return@withTimeoutOrNull docToUser(byUnameLower.documents[0].data, byUnameLower.documents[0].id)
-                    }
-                } catch (_: Exception) {}
-
-                // 3. Query users collection with whereIn("username", usernameVariants)
-                // This matches existing users regardless of original registration casing (e.g. "Sheikh_Yahaya")
-                try {
-                    val byUsernameVariants = db.collection(COLLECTION_USERS)
-                        .whereIn("username", usernameVariants)
-                        .limit(1)
-                        .get()
-                        .await()
-                    if (!byUsernameVariants.isEmpty) {
-                        return@withTimeoutOrNull docToUser(byUsernameVariants.documents[0].data, byUsernameVariants.documents[0].id)
-                    }
-                } catch (_: Exception) {}
-
-                // 4. Leno ID lookup if applicable
-                if (formattedLenoId.isNotEmpty() || isNumericLeno) {
-                    if (formattedLenoId.isNotEmpty()) {
-                        try {
-                            val lenoDoc = db.collection(COLLECTION_LENO_IDS).document(formattedLenoId).get().await()
-                            if (lenoDoc.exists()) {
-                                val ownerUid = lenoDoc.getString("ownerUid") ?: lenoDoc.getString("uid") ?: lenoDoc.getString("userId")
-                                if (!ownerUid.isNullOrBlank()) {
-                                    val userDoc = db.collection(COLLECTION_USERS).document(ownerUid).get().await()
-                                    if (userDoc.exists()) {
-                                        docToUser(userDoc.data, userDoc.id)?.let { return@withTimeoutOrNull it }
+                val pairs = coroutineScope {
+                    val jobs = listOf(
+                        async {
+                            try {
+                                val unameDoc = db.collection(COLLECTION_USERNAMES).document(cleanLower).get().await()
+                                if (unameDoc.exists()) {
+                                    val ownerUid = unameDoc.getString("ownerUid") ?: unameDoc.getString("uid") ?: unameDoc.getString("userId")
+                                    if (!ownerUid.isNullOrBlank()) {
+                                        val userDoc = db.collection(COLLECTION_USERS).document(ownerUid).get().await()
+                                        if (userDoc.exists()) {
+                                            return@async listOfNotNull(docToUser(userDoc.data, userDoc.id)?.let { userDoc.id to it })
+                                        }
                                     }
                                 }
+                            } catch (_: Exception) {}
+                            emptyList<Pair<String, UserEntity>>()
+                        },
+                        async {
+                            try {
+                                db.collection(COLLECTION_USERS).whereEqualTo("username_lowercase", cleanLower).limit(5).get().await()
+                                    .documents.mapNotNull { doc -> docToUser(doc.data, doc.id)?.let { doc.id to it } }
+                            } catch (_: Exception) { emptyList() }
+                        },
+                        async {
+                            try {
+                                db.collection(COLLECTION_USERS).whereIn("username", usernameVariants).limit(5).get().await()
+                                    .documents.mapNotNull { doc -> docToUser(doc.data, doc.id)?.let { doc.id to it } }
+                            } catch (_: Exception) { emptyList() }
+                        },
+                        async {
+                            if (formattedLenoId.isNotEmpty()) {
+                                try {
+                                    val lenoDoc = db.collection(COLLECTION_LENO_IDS).document(formattedLenoId).get().await()
+                                    if (lenoDoc.exists()) {
+                                        val ownerUid = lenoDoc.getString("ownerUid") ?: lenoDoc.getString("uid") ?: lenoDoc.getString("userId")
+                                        if (!ownerUid.isNullOrBlank()) {
+                                            val userDoc = db.collection(COLLECTION_USERS).document(ownerUid).get().await()
+                                            if (userDoc.exists()) {
+                                                return@async listOfNotNull(docToUser(userDoc.data, userDoc.id)?.let { userDoc.id to it })
+                                            }
+                                        }
+                                    }
+                                } catch (_: Exception) {}
                             }
-                        } catch (_: Exception) {}
-                    }
-
-                    if (lenoVariants.isNotEmpty()) {
-                        try {
-                            val byLenoVariants = db.collection(COLLECTION_USERS)
-                                .whereIn("linoId", lenoVariants)
-                                .limit(1)
-                                .get()
-                                .await()
-                            if (!byLenoVariants.isEmpty) {
-                                return@withTimeoutOrNull docToUser(byLenoVariants.documents[0].data, byLenoVariants.documents[0].id)
+                            emptyList()
+                        },
+                        async {
+                            if (lenoVariants.isNotEmpty()) {
+                                try {
+                                    return@async db.collection(COLLECTION_USERS).whereIn("linoId", lenoVariants).limit(5).get().await()
+                                        .documents.mapNotNull { doc -> docToUser(doc.data, doc.id)?.let { doc.id to it } }
+                                } catch (_: Exception) {}
                             }
-                        } catch (_: Exception) {}
-                    }
-
-                    try {
-                        val byLenIdLower = db.collection(COLLECTION_USERS)
-                            .whereEqualTo("lenId_lowercase", cleanLower)
-                            .limit(1)
-                            .get()
-                            .await()
-                        if (!byLenIdLower.isEmpty) {
-                            return@withTimeoutOrNull docToUser(byLenIdLower.documents[0].data, byLenIdLower.documents[0].id)
+                            emptyList()
+                        },
+                        async {
+                            try {
+                                db.collection(COLLECTION_USERS).whereEqualTo("lenId_lowercase", cleanLower).limit(5).get().await()
+                                    .documents.mapNotNull { doc -> docToUser(doc.data, doc.id)?.let { doc.id to it } }
+                            } catch (_: Exception) { emptyList() }
+                        },
+                        async {
+                            try {
+                                val directDoc = db.collection(COLLECTION_USERS).document(clean).get().await()
+                                if (directDoc.exists()) listOfNotNull(docToUser(directDoc.data, directDoc.id)?.let { directDoc.id to it })
+                                else emptyList()
+                            } catch (_: Exception) { emptyList() }
+                        },
+                        async {
+                            try {
+                                db.collection(COLLECTION_USERS).whereEqualTo("displayName_lowercase", cleanLower).limit(5).get().await()
+                                    .documents.mapNotNull { doc -> docToUser(doc.data, doc.id)?.let { doc.id to it } }
+                            } catch (_: Exception) { emptyList() }
+                        },
+                        async {
+                            try {
+                                db.collection(COLLECTION_USERS).whereIn("displayName", displayNameVariants).limit(5).get().await()
+                                    .documents.mapNotNull { doc -> docToUser(doc.data, doc.id)?.let { doc.id to it } }
+                            } catch (_: Exception) { emptyList() }
+                        },
+                        async {
+                            try {
+                                db.collection(COLLECTION_USERS).whereEqualTo("email", cleanLower).limit(5).get().await()
+                                    .documents.mapNotNull { doc -> docToUser(doc.data, doc.id)?.let { doc.id to it } }
+                            } catch (_: Exception) { emptyList() }
                         }
-                    } catch (_: Exception) {}
+                    )
+                    jobs.flatMap { it.await() }
                 }
 
-                // 5. Direct document ID lookup in users collection (for UID lookups)
-                try {
-                    val directDoc = db.collection(COLLECTION_USERS).document(clean).get().await()
-                    if (directDoc.exists()) {
-                        docToUser(directDoc.data, directDoc.id)?.let { return@withTimeoutOrNull it }
-                    }
-                } catch (_: Exception) {}
+                val indexedMatch = deduplicateCanonicalUsers(pairs).firstOrNull()
+                if (indexedMatch != null) {
+                    return@withTimeoutOrNull indexedMatch
+                }
 
-                // 6. Display name match
-                try {
-                    val byDisplayNameLower = db.collection(COLLECTION_USERS)
-                        .whereEqualTo("displayName_lowercase", cleanLower)
-                        .limit(1)
-                        .get()
-                        .await()
-                    if (!byDisplayNameLower.isEmpty) {
-                        return@withTimeoutOrNull docToUser(byDisplayNameLower.documents[0].data, byDisplayNameLower.documents[0].id)
-                    }
-                } catch (_: Exception) {}
-
-                try {
-                    val byDisplayNameVariants = db.collection(COLLECTION_USERS)
-                        .whereIn("displayName", displayNameVariants)
-                        .limit(1)
-                        .get()
-                        .await()
-                    if (!byDisplayNameVariants.isEmpty) {
-                        return@withTimeoutOrNull docToUser(byDisplayNameVariants.documents[0].data, byDisplayNameVariants.documents[0].id)
-                    }
-                } catch (_: Exception) {}
-
-                // 7. Email match
-                try {
-                    val byEmailField = db.collection(COLLECTION_USERS)
-                        .whereEqualTo("email", cleanLower)
-                        .limit(1)
-                        .get()
-                        .await()
-                    if (!byEmailField.isEmpty) {
-                        return@withTimeoutOrNull docToUser(byEmailField.documents[0].data, byEmailField.documents[0].id)
-                    }
-                } catch (_: Exception) {}
-
-                // 8. Broad scan fallback across users collection (limit 300)
-                // Ensures older users without indices or lowercase fields are 100% discoverable
-                try {
-                    val broadSnap = db.collection(COLLECTION_USERS).limit(300).get().await()
-                    broadSnap.documents.forEach { doc ->
-                        val u = docToUser(doc.data, doc.id)
-                        if (u != null) {
-                            val rawLeno = u.linoId.replace("-", "").lowercase()
-                            val cleanDigits = rawLenoDigits.lowercase()
-                            val matches = u.username.equals(clean, ignoreCase = true) ||
-                                u.username.equals(cleanLower, ignoreCase = true) ||
-                                u.displayName.equals(clean, ignoreCase = true) ||
-                                u.displayName.equals(cleanLower, ignoreCase = true) ||
-                                (formattedLenoId.isNotEmpty() && u.linoId.equals(formattedLenoId, ignoreCase = true)) ||
-                                (isNumericLeno && rawLeno == cleanDigits) ||
-                                u.userId.equals(clean, ignoreCase = true) ||
-                                u.email.equals(cleanLower, ignoreCase = true)
-                            if (matches) {
-                                return@withTimeoutOrNull u
-                            }
-                        }
-                    }
-                } catch (_: Exception) {}
-
-                null
+                // Paginated broad fallback ensures accounts without lowercase fields are always discoverable
+                val allUsers = deduplicateCanonicalUsers(fetchAllUserDocsPaginated(db, 1500))
+                val cleanDigits = rawLenoDigits.lowercase()
+                allUsers.firstOrNull { u ->
+                    val rawLeno = u.linoId.replace("-", "").lowercase()
+                    u.username.equals(clean, ignoreCase = true) ||
+                        u.displayName.equals(clean, ignoreCase = true) ||
+                        (formattedLenoId.isNotEmpty() && u.linoId.equals(formattedLenoId, ignoreCase = true)) ||
+                        (isNumericLeno && rawLeno == cleanDigits) ||
+                        u.userId.equals(clean, ignoreCase = true) ||
+                        u.email.equals(cleanLower, ignoreCase = true) ||
+                        u.googleEmail.equals(cleanLower, ignoreCase = true) ||
+                        u.recoveryEmail.equals(cleanLower, ignoreCase = true)
+                }
             }
         } catch (e: Exception) {
             if (isDatabaseNotProvisioned(e)) {
@@ -1413,8 +1317,7 @@ open class RemoteAccountService {
         if (isTestEnvironment()) {
             return@withContext testUsers[userId]
         }
-        if (!isFirestoreProvisioned) return@withContext null
-        val db = firestore ?: return@withContext null
+        val db = getFirestoreSafe() ?: return@withContext null
         try {
             withTimeoutOrNull(6000L) {
                 val doc = db.collection(COLLECTION_USERS).document(userId).get().await()
@@ -1435,6 +1338,7 @@ open class RemoteAccountService {
 
     /**
      * Searches for users across the remote cloud store matching query.
+     * Runs exact, prefix, and paginated scans concurrently so accounts created on other APK devices appear immediately.
      */
     suspend fun searchRemoteUsers(query: String, currentUserId: String): List<UserEntity> = withContext(Dispatchers.IO) {
         val clean = query.trim().removePrefix("@").trim()
@@ -1449,154 +1353,102 @@ open class RemoteAccountService {
         val formattedLenoId = if (isNumericLeno) "LEN-$rawLenoDigits" else if (clean.startsWith("LEN-", ignoreCase = true)) cleanUpper else ""
 
         if (isTestEnvironment()) {
-            return@withContext testUsers.values.filter {
-                it.userId != currentUserId && (
-                    it.username.contains(clean, ignoreCase = true) ||
-                    it.displayName.contains(clean, ignoreCase = true) ||
-                    it.linoId.contains(clean, ignoreCase = true) ||
-                    (formattedLenoId.isNotEmpty() && it.linoId.contains(formattedLenoId, ignoreCase = true)) ||
-                    (isNumericLeno && it.linoId.replace("-", "").contains(rawLenoDigits, ignoreCase = true)) ||
-                    it.userId.contains(clean, ignoreCase = true) ||
-                    it.email.contains(clean, ignoreCase = true)
-                )
-            }
+            return@withContext testUsers.values
+                .distinctBy { it.userId }
+                .filter {
+                    it.userId != currentUserId && (
+                        it.username.contains(clean, ignoreCase = true) ||
+                            it.displayName.contains(clean, ignoreCase = true) ||
+                            it.linoId.contains(clean, ignoreCase = true) ||
+                            (formattedLenoId.isNotEmpty() && it.linoId.contains(formattedLenoId, ignoreCase = true)) ||
+                            (isNumericLeno && it.linoId.replace("-", "").contains(rawLenoDigits, ignoreCase = true)) ||
+                            it.userId.contains(clean, ignoreCase = true) ||
+                            it.email.contains(clean, ignoreCase = true)
+                    )
+                }
         }
-        if (!isFirestoreProvisioned) return@withContext emptyList()
-        val db = firestore ?: return@withContext emptyList()
+        val db = getFirestoreSafe() ?: return@withContext emptyList()
 
         try {
-            withTimeoutOrNull(10000L) {
-                val results = mutableMapOf<String, UserEntity>()
-
-                // 1. Direct exact lookup via findRemoteUser first
-                try {
-                    val exact = findRemoteUser(clean)
-                    if (exact != null && exact.userId != currentUserId) {
-                        results[exact.userId] = exact
+            val collectedPairs = withTimeoutOrNull(8000L) {
+                coroutineScope {
+                    val exactJob = async {
+                        try {
+                            findRemoteUser(clean)?.let { it.userId to it }
+                        } catch (_: Exception) { null }
                     }
-                } catch (_: Exception) {}
-
-                // 2. Query whereIn on username
-                try {
-                    val unameSnap = db.collection(COLLECTION_USERS)
-                        .whereIn("username", usernameVariants)
-                        .limit(10)
-                        .get()
-                        .await()
-                    unameSnap.documents.forEach { doc ->
-                        docToUser(doc.data, doc.id)?.let {
-                            if (it.userId != currentUserId) results[it.userId] = it
-                        }
+                    val unameJob = async {
+                        try {
+                            db.collection(COLLECTION_USERS).whereIn("username", usernameVariants).limit(10).get().await()
+                                .documents.mapNotNull { doc -> docToUser(doc.data, doc.id)?.let { doc.id to it } }
+                        } catch (_: Exception) { emptyList() }
                     }
-                } catch (_: Exception) {}
-
-                // 3. Prefix search on username_lowercase
-                try {
-                    val uLowerSnap = db.collection(COLLECTION_USERS)
-                        .orderBy("username_lowercase")
-                        .startAt(cleanLower)
-                        .endAt(cleanLower + "\uf8ff")
-                        .limit(25)
-                        .get()
-                        .await()
-                    uLowerSnap.documents.forEach { doc ->
-                        docToUser(doc.data, doc.id)?.let {
-                            if (it.userId != currentUserId) results[it.userId] = it
-                        }
+                    val uLowerJob = async {
+                        try {
+                            db.collection(COLLECTION_USERS).orderBy("username_lowercase").startAt(cleanLower).endAt(cleanLower + "\uf8ff").limit(25).get().await()
+                                .documents.mapNotNull { doc -> docToUser(doc.data, doc.id)?.let { doc.id to it } }
+                        } catch (_: Exception) { emptyList() }
                     }
-                } catch (_: Exception) {}
-
-                // 3b. Prefix search on original username
-                try {
-                    val uSnap = db.collection(COLLECTION_USERS)
-                        .orderBy("username")
-                        .startAt(clean)
-                        .endAt(clean + "\uf8ff")
-                        .limit(25)
-                        .get()
-                        .await()
-                    uSnap.documents.forEach { doc ->
-                        docToUser(doc.data, doc.id)?.let {
-                            if (it.userId != currentUserId) results[it.userId] = it
-                        }
+                    val uRawJob = async {
+                        try {
+                            db.collection(COLLECTION_USERS).orderBy("username").startAt(clean).endAt(clean + "\uf8ff").limit(25).get().await()
+                                .documents.mapNotNull { doc -> docToUser(doc.data, doc.id)?.let { doc.id to it } }
+                        } catch (_: Exception) { emptyList() }
                     }
-                } catch (_: Exception) {}
-
-                // 4. Prefix search on displayName_lowercase and displayName
-                try {
-                    val dLowerSnap = db.collection(COLLECTION_USERS)
-                        .orderBy("displayName_lowercase")
-                        .startAt(cleanLower)
-                        .endAt(cleanLower + "\uf8ff")
-                        .limit(25)
-                        .get()
-                        .await()
-                    dLowerSnap.documents.forEach { doc ->
-                        docToUser(doc.data, doc.id)?.let {
-                            if (it.userId != currentUserId) results[it.userId] = it
-                        }
+                    val dLowerJob = async {
+                        try {
+                            db.collection(COLLECTION_USERS).orderBy("displayName_lowercase").startAt(cleanLower).endAt(cleanLower + "\uf8ff").limit(25).get().await()
+                                .documents.mapNotNull { doc -> docToUser(doc.data, doc.id)?.let { doc.id to it } }
+                        } catch (_: Exception) { emptyList() }
                     }
-                } catch (_: Exception) {}
-
-                try {
-                    val dSnap = db.collection(COLLECTION_USERS)
-                        .orderBy("displayName")
-                        .startAt(titleCase)
-                        .endAt(titleCase + "\uf8ff")
-                        .limit(25)
-                        .get()
-                        .await()
-                    dSnap.documents.forEach { doc ->
-                        docToUser(doc.data, doc.id)?.let {
-                            if (it.userId != currentUserId) results[it.userId] = it
-                        }
+                    val dRawJob = async {
+                        try {
+                            db.collection(COLLECTION_USERS).orderBy("displayName").startAt(titleCase).endAt(titleCase + "\uf8ff").limit(25).get().await()
+                                .documents.mapNotNull { doc -> docToUser(doc.data, doc.id)?.let { doc.id to it } }
+                        } catch (_: Exception) { emptyList() }
                     }
-                } catch (_: Exception) {}
-
-                // 5. Leno ID lookup
-                if (formattedLenoId.isNotEmpty() || isNumericLeno) {
-                    val lenoTarget = if (formattedLenoId.isNotEmpty()) formattedLenoId else cleanUpper
-                    try {
-                        val linoSnap = db.collection(COLLECTION_USERS)
-                            .whereEqualTo("linoId", lenoTarget)
-                            .limit(5)
-                            .get()
-                            .await()
-                        linoSnap.documents.forEach { doc ->
-                            docToUser(doc.data, doc.id)?.let {
-                                if (it.userId != currentUserId) results[it.userId] = it
-                            }
+                    val linoJob = async {
+                        if (formattedLenoId.isNotEmpty() || isNumericLeno) {
+                            val lenoTarget = if (formattedLenoId.isNotEmpty()) formattedLenoId else cleanUpper
+                            try {
+                                return@async db.collection(COLLECTION_USERS).whereEqualTo("linoId", lenoTarget).limit(5).get().await()
+                                    .documents.mapNotNull { doc -> docToUser(doc.data, doc.id)?.let { doc.id to it } }
+                            } catch (_: Exception) {}
                         }
-                    } catch (_: Exception) {}
+                        emptyList()
+                    }
+
+                    val fastResults = mutableListOf<Pair<String, UserEntity>>()
+                    exactJob.await()?.let { fastResults.add(it) }
+                    fastResults.addAll(unameJob.await())
+                    fastResults.addAll(uLowerJob.await())
+                    fastResults.addAll(uRawJob.await())
+                    fastResults.addAll(dLowerJob.await())
+                    fastResults.addAll(dRawJob.await())
+                    fastResults.addAll(linoJob.await())
+                    fastResults
                 }
+            }.orEmpty().toMutableList()
 
-                // 6. Broad scan of users collection (limit 200) to find substring matches and older users
-                try {
-                    val broadSnap = db.collection(COLLECTION_USERS).limit(200).get().await()
-                    broadSnap.documents.forEach { doc ->
-                        val u = docToUser(doc.data, doc.id)
-                        if (u != null && u.userId != currentUserId) {
-                            val rawLeno = u.linoId.replace("-", "").lowercase()
-                            val cleanDigits = rawLenoDigits.lowercase()
-                            val matches = u.username.contains(clean, ignoreCase = true) ||
-                                u.displayName.contains(clean, ignoreCase = true) ||
-                                u.linoId.contains(clean, ignoreCase = true) ||
-                                (formattedLenoId.isNotEmpty() && u.linoId.contains(formattedLenoId, ignoreCase = true)) ||
-                                (isNumericLeno && rawLeno.contains(cleanDigits)) ||
-                                u.userId.contains(clean, ignoreCase = true) ||
-                                doc.id.contains(clean, ignoreCase = true) ||
-                                u.email.contains(clean, ignoreCase = true) ||
-                                (clean.length >= 3 && u.phoneNumber.contains(clean))
-                            if (matches) {
-                                results[u.userId] = u
-                            }
-                        }
+            if (collectedPairs.isEmpty()) {
+                val broadMatches = withTimeoutOrNull(8000L) {
+                    val cleanDigits = rawLenoDigits.lowercase()
+                    fetchAllUserDocsPaginated(db, 1000).filter { (docId, u) ->
+                        val rawLeno = u.linoId.replace("-", "").lowercase()
+                        u.username.contains(clean, ignoreCase = true) ||
+                            u.displayName.contains(clean, ignoreCase = true) ||
+                            u.linoId.contains(clean, ignoreCase = true) ||
+                            (formattedLenoId.isNotEmpty() && u.linoId.contains(formattedLenoId, ignoreCase = true)) ||
+                            (isNumericLeno && rawLeno.contains(cleanDigits)) ||
+                            u.userId.contains(clean, ignoreCase = true) ||
+                            docId.contains(clean, ignoreCase = true) ||
+                            u.email.contains(clean, ignoreCase = true) ||
+                            (clean.length >= 3 && u.phoneNumber.contains(clean))
                     }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Broad users scan notice: ${e.message}")
-                }
+                }.orEmpty()
+                collectedPairs.addAll(broadMatches)
+            }
 
-                // 7. Official Accounts injection
                 if (cleanLower.contains("officialjaiby") || "officialjaiby".contains(cleanLower) || cleanLower.contains("50638964")) {
                     val officialJaiby = UserEntity(
                         userId = "usr_officialjaiby_2026",
@@ -1610,9 +1462,7 @@ open class RemoteAccountService {
                         isOnline = true,
                         createdAt = 1700000000000L
                     )
-                    if (officialJaiby.userId != currentUserId) {
-                        results[officialJaiby.userId] = officialJaiby
-                    }
+                    collectedPairs.add(officialJaiby.userId to officialJaiby)
                 }
                 if (cleanLower.contains("leno") || cleanLower.contains("official leno") || cleanLower.contains("00000001")) {
                     val officialLeno = UserEntity(
@@ -1630,13 +1480,10 @@ open class RemoteAccountService {
                         isOfficial = true,
                         linoId = "LEN-00000001"
                     )
-                    if (officialLeno.userId != currentUserId) {
-                        results[officialLeno.userId] = officialLeno
-                    }
+                    collectedPairs.add(officialLeno.userId to officialLeno)
                 }
 
-                results.values.toList()
-            } ?: emptyList()
+                deduplicateCanonicalUsers(collectedPairs).filter { it.userId != currentUserId }
         } catch (e: Exception) {
             if (isDatabaseNotProvisioned(e)) {
                 markDatabaseNotProvisioned()
@@ -1667,7 +1514,7 @@ open class RemoteAccountService {
 
     suspend fun createCallOffer(call: CloudCallRecord): Result<Unit> = withContext(Dispatchers.IO) {
         if (!isFirestoreProvisioned) return@withContext Result.success(Unit)
-        val db = firestore ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe() ?: return@withContext Result.success(Unit)
         try {
             withTimeoutOrNull(2000L) {
                 db.collection(COLLECTION_CALLS)
@@ -1684,7 +1531,7 @@ open class RemoteAccountService {
 
     suspend fun updateCallStatus(callId: String, status: String): Result<Unit> = withContext(Dispatchers.IO) {
         if (!isFirestoreProvisioned) return@withContext Result.success(Unit)
-        val db = firestore ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe() ?: return@withContext Result.success(Unit)
         try {
             withTimeoutOrNull(2000L) {
                 db.collection(COLLECTION_CALLS)
@@ -1701,7 +1548,7 @@ open class RemoteAccountService {
 
     fun listenToCall(callId: String, onUpdate: (CloudCallRecord?) -> Unit): ListenerRegistration? {
         if (!isFirestoreProvisioned) return null
-        val db = firestore ?: return null
+        val db = getFirestoreSafe() ?: return null
         return try {
             db.collection(COLLECTION_CALLS)
                 .document(callId)
@@ -1727,7 +1574,7 @@ open class RemoteAccountService {
 
     fun listenIncomingCalls(myUserId: String, onIncoming: (CloudCallRecord) -> Unit): ListenerRegistration? {
         if (!isFirestoreProvisioned) return null
-        val db = firestore ?: return null
+        val db = getFirestoreSafe() ?: return null
         return try {
             db.collection(COLLECTION_CALLS)
                 .whereEqualTo("receiverId", myUserId)
@@ -1750,7 +1597,7 @@ open class RemoteAccountService {
         }
     }
 
-    private fun docToUser(data: Map<String, Any?>?, docId: String = ""): UserEntity? {
+    internal fun docToUser(data: Map<String, Any?>?, docId: String = ""): UserEntity? {
         if (data == null) return null
         return try {
             val rawUid = (data["userId"] as? String)?.ifBlank { null }
@@ -1770,8 +1617,11 @@ open class RemoteAccountService {
                 ?: (if (docId.startsWith("LEN-", ignoreCase = true)) docId else "")
             val gEmail = data["googleEmail"] as? String ?: ""
             val rEmail = data["recoveryEmail"] as? String ?: ""
+            val emailField = data["email"] as? String ?: ""
             val isVerifiedField = (data["isVerified"] as? Boolean) ?: (data["verified"] as? Boolean) ?: (data["isAccountVerified"] as? Boolean) ?: false
-            val isOwnerUser = rawUid == "usr_officialjaiby_2026" || rawUsername.equals("officialjaiby", true) || rawUsername.equals("iliyasuusman", true) || rawUsername.equals("iliyasu", true)
+            val isOwnerUser = rawUid == "usr_officialjaiby_2026" ||
+                emailField.equals("iliyasuusman730@gmail.com", ignoreCase = true) ||
+                gEmail.equals("iliyasuusman730@gmail.com", ignoreCase = true)
             val finalVerified = isVerifiedField || gEmail.isNotBlank() || rEmail.isNotBlank() || isOwnerUser
 
             val createdAtMillis = when (val c = data["createdAt"]) {
@@ -1848,7 +1698,7 @@ open class RemoteAccountService {
         if (!isFirestoreProvisioned) {
             return@withContext Result.success(Unit)
         }
-        val db = firestore ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe() ?: return@withContext Result.success(Unit)
         if (myUid.isBlank() || contactUser.userId.isBlank()) {
             return@withContext Result.failure(Exception("Invalid user ID."))
         }
@@ -1890,7 +1740,7 @@ open class RemoteAccountService {
      */
     suspend fun removeContactFromRemote(myUid: String, contactUid: String): Result<Unit> = withContext(Dispatchers.IO) {
         if (!isFirestoreProvisioned) return@withContext Result.success(Unit)
-        val db = firestore ?: return@withContext Result.failure(Exception("Firestore is not available."))
+        val db = getFirestoreSafe() ?: return@withContext Result.failure(Exception("Firestore is not available."))
         try {
             db.collection(COLLECTION_USERS)
                 .document(myUid)
@@ -1914,7 +1764,7 @@ open class RemoteAccountService {
      */
     suspend fun getContactsFromRemote(myUid: String): List<UserEntity> = withContext(Dispatchers.IO) {
         if (!isFirestoreProvisioned) return@withContext emptyList()
-        val db = firestore ?: return@withContext emptyList()
+        val db = getFirestoreSafe() ?: return@withContext emptyList()
         if (myUid.isBlank()) return@withContext emptyList()
         try {
             val snapshot = withTimeoutOrNull(6000L) {
@@ -1966,7 +1816,7 @@ open class RemoteAccountService {
         onUpdate: (contacts: List<UserEntity>, removedIds: List<String>) -> Unit
     ): ListenerRegistration? {
         if (!isFirestoreProvisioned) return null
-        val db = firestore ?: return null
+        val db = getFirestoreSafe() ?: return null
         if (myUid.isBlank()) return null
         return try {
             db.collection(COLLECTION_USERS)
@@ -2041,7 +1891,7 @@ open class RemoteAccountService {
             }
         }
         if (isTestEnvironment() || !isFirestoreProvisioned) return@withContext
-        val db = firestore ?: return@withContext
+        val db = getFirestoreSafe() ?: return@withContext
         try {
             db.collection(COLLECTION_USERS)
                 .document(userId)
@@ -2067,7 +1917,7 @@ open class RemoteAccountService {
     ) = withContext(Dispatchers.IO) {
         if (chatId.isBlank() || userId.isBlank()) return@withContext
         if (isTestEnvironment() || !isFirestoreProvisioned) return@withContext
-        val db = firestore ?: return@withContext
+        val db = getFirestoreSafe() ?: return@withContext
         try {
             val ts = if (isTyping) System.currentTimeMillis() else 0L
             db.collection(COLLECTION_CHATS)
@@ -2090,7 +1940,7 @@ open class RemoteAccountService {
     ): ListenerRegistration? {
         if (chatId.isBlank() || partnerId.isBlank()) return null
         if (isTestEnvironment() || !isFirestoreProvisioned) return null
-        val db = firestore ?: return null
+        val db = getFirestoreSafe() ?: return null
         return try {
             db.collection(COLLECTION_CHATS)
                 .document(chatId)
@@ -2121,7 +1971,7 @@ open class RemoteAccountService {
             return@withContext Result.failure(IllegalArgumentException("Invalid user IDs"))
         }
         if (isTestEnvironment() || !isFirestoreProvisioned) return@withContext Result.success(Unit)
-        val db = firestore ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe() ?: return@withContext Result.success(Unit)
         val docId = "${senderId}_${receiverId}"
         val now = System.currentTimeMillis()
         try {
@@ -2159,7 +2009,7 @@ open class RemoteAccountService {
     ): Result<Unit> = withContext(Dispatchers.IO) {
         if (currentUserId.isBlank() || requesterId.isBlank()) return@withContext Result.success(Unit)
         if (isTestEnvironment() || !isFirestoreProvisioned) return@withContext Result.success(Unit)
-        val db = firestore ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe() ?: return@withContext Result.success(Unit)
         val docId = "${requesterId}_${currentUserId}"
         val now = System.currentTimeMillis()
         try {
@@ -2197,7 +2047,7 @@ open class RemoteAccountService {
     ): Result<Unit> = withContext(Dispatchers.IO) {
         if (currentUserId.isBlank() || requesterId.isBlank()) return@withContext Result.success(Unit)
         if (isTestEnvironment() || !isFirestoreProvisioned) return@withContext Result.success(Unit)
-        val db = firestore ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe() ?: return@withContext Result.success(Unit)
         try {
             val batch = db.batch()
             batch.delete(db.collection(COLLECTION_FRIEND_REQUESTS).document("${requesterId}_${currentUserId}"))
@@ -2224,7 +2074,7 @@ open class RemoteAccountService {
         onUpdate: (List<FriendshipEntity>) -> Unit
     ): ListenerRegistration? {
         if (myUid.isBlank() || isTestEnvironment() || !isFirestoreProvisioned) return null
-        val db = firestore ?: return null
+        val db = getFirestoreSafe() ?: return null
         return try {
             db.collection(COLLECTION_FRIEND_REQUESTS)
                 .whereEqualTo("targetId", myUid)
@@ -2259,7 +2109,7 @@ open class RemoteAccountService {
         onUpdate: (List<FriendshipEntity>) -> Unit
     ): ListenerRegistration? {
         if (myUid.isBlank() || isTestEnvironment() || !isFirestoreProvisioned) return null
-        val db = firestore ?: return null
+        val db = getFirestoreSafe() ?: return null
         return try {
             db.collection(COLLECTION_FRIEND_REQUESTS)
                 .whereEqualTo("requesterId", myUid)
@@ -2293,7 +2143,7 @@ open class RemoteAccountService {
         if (notification.userId.isBlank() || isTestEnvironment() || !isFirestoreProvisioned) {
             return@withContext Result.success(Unit)
         }
-        val db = firestore ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe() ?: return@withContext Result.success(Unit)
         try {
             val map = hashMapOf<String, Any?>(
                 "id" to notification.id,
@@ -2321,7 +2171,7 @@ open class RemoteAccountService {
 
     open suspend fun markNotificationReadInRemote(userId: String, notificationId: String) = withContext(Dispatchers.IO) {
         if (userId.isBlank() || notificationId.isBlank() || isTestEnvironment() || !isFirestoreProvisioned) return@withContext
-        val db = firestore ?: return@withContext
+        val db = getFirestoreSafe() ?: return@withContext
         try {
             db.collection(COLLECTION_USERS)
                 .document(userId)
@@ -2336,7 +2186,7 @@ open class RemoteAccountService {
 
     open suspend fun markAllNotificationsReadInRemote(userId: String) = withContext(Dispatchers.IO) {
         if (userId.isBlank() || isTestEnvironment() || !isFirestoreProvisioned) return@withContext
-        val db = firestore ?: return@withContext
+        val db = getFirestoreSafe() ?: return@withContext
         try {
             val snap = withTimeoutOrNull(4000L) {
                 db.collection(COLLECTION_USERS)
@@ -2362,7 +2212,7 @@ open class RemoteAccountService {
         onUpdate: (notifications: List<NotificationEntity>, removedIds: List<String>) -> Unit
     ): ListenerRegistration? {
         if (userId.isBlank() || isTestEnvironment() || !isFirestoreProvisioned) return null
-        val db = firestore ?: return null
+        val db = getFirestoreSafe() ?: return null
         return try {
             db.collection(COLLECTION_USERS)
                 .document(userId)
@@ -2420,7 +2270,7 @@ open class RemoteAccountService {
             Log.w(TAG, "Cannot save message with empty sender or receiver: sender='${message.senderId}', receiver='${message.receiverId}'")
             return@withContext Result.failure(IllegalArgumentException("Empty sender or receiver ID"))
         }
-        val db = firestore ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe() ?: return@withContext Result.success(Unit)
         val chatId = getChatId(message.senderId, message.receiverId)
         try {
             val isMsgRead = message.read || message.isRead || message.status.equals("READ", ignoreCase = true)
@@ -2497,7 +2347,7 @@ open class RemoteAccountService {
 
     open suspend fun markMessageDeliveredInRemote(chatId: String, messageId: String, senderId: String) = withContext(Dispatchers.IO) {
         if (!isFirestoreProvisioned) return@withContext
-        val db = firestore ?: return@withContext
+        val db = getFirestoreSafe() ?: return@withContext
         try {
             db.collection(COLLECTION_CHATS)
                 .document(chatId)
@@ -2525,32 +2375,59 @@ open class RemoteAccountService {
 
     open suspend fun markMessageReadInRemote(chatId: String, messageId: String, senderId: String) = withContext(Dispatchers.IO) {
         if (!isFirestoreProvisioned) return@withContext
-        val db = firestore ?: return@withContext
+        val db = getFirestoreSafe() ?: return@withContext
+        val readPayload = mapOf("read" to true, "status" to "READ")
         try {
-            db.collection(COLLECTION_CHATS)
-                .document(chatId)
-                .collection("messages")
-                .document(messageId)
-                .update(
-                    mapOf(
-                        "read" to true,
-                        "status" to "read"
-                    )
-                )
-                .await()
+            try {
+                db.collection(COLLECTION_CHATS)
+                    .document(chatId)
+                    .collection("messages")
+                    .document(messageId)
+                    .update(readPayload)
+                    .await()
+            } catch (_: Exception) {}
 
-            val receipt = hashMapOf<String, Any>(
-                "messageId" to messageId,
-                "status" to "read",
-                "read" to true,
-                "timestamp" to System.currentTimeMillis()
-            )
-            db.collection(COLLECTION_USERS)
-                .document(senderId)
-                .collection("sent_receipts")
-                .document(messageId)
-                .set(receipt)
-                .await()
+            try {
+                db.collection(COLLECTION_CONVERSATIONS)
+                    .document(chatId)
+                    .collection("messages")
+                    .document(messageId)
+                    .update(readPayload)
+                    .await()
+            } catch (_: Exception) {}
+
+            try {
+                db.collection("messages")
+                    .document(messageId)
+                    .update(readPayload)
+                    .await()
+            } catch (_: Exception) {}
+
+            if (senderId.isNotBlank()) {
+                try {
+                    db.collection(COLLECTION_USERS)
+                        .document(senderId)
+                        .collection("sent_messages")
+                        .document(messageId)
+                        .update(readPayload)
+                        .await()
+                } catch (_: Exception) {}
+
+                val receipt = hashMapOf<String, Any>(
+                    "messageId" to messageId,
+                    "status" to "READ",
+                    "read" to true,
+                    "timestamp" to System.currentTimeMillis()
+                )
+                try {
+                    db.collection(COLLECTION_USERS)
+                        .document(senderId)
+                        .collection("sent_receipts")
+                        .document(messageId)
+                        .set(receipt)
+                        .await()
+                } catch (_: Exception) {}
+            }
         } catch (e: Exception) {
             if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
             Log.w(TAG, "markMessageReadInRemote notice: ${e.message}")
@@ -2565,12 +2442,13 @@ open class RemoteAccountService {
         otherUserAliases: List<String> = emptyList()
     ) = withContext(Dispatchers.IO) {
         if (!isFirestoreProvisioned) return@withContext
-        val db = firestore ?: return@withContext
+        val db = getFirestoreSafe() ?: return@withContext
         try {
             val myAliases = (listOf(currentUserId) + currentUserAliases).filter { it.isNotBlank() }.toSet()
             val partnerAliases = (listOf(otherUserId) + otherUserAliases).filter { it.isNotBlank() }.toSet()
             val collectionsToUpdate = listOf(COLLECTION_CHATS, COLLECTION_CONVERSATIONS)
             val now = System.currentTimeMillis()
+            val markedMsgSenders = mutableMapOf<String, String>()
 
             for (colName in collectionsToUpdate) {
                 try {
@@ -2585,19 +2463,20 @@ open class RemoteAccountService {
                         val sid = doc.getString("senderId").orEmpty()
                         val rid = doc.getString("receiverId").orEmpty()
                         val isForMe = rid in myAliases || sid in partnerAliases || (sid.isNotBlank() && sid !in myAliases)
-                        val alreadyRead = doc.getBoolean("read") == true || doc.getString("status")?.equals("read", ignoreCase = true) == true
+                        val alreadyRead = doc.getBoolean("read") == true && doc.getString("status")?.equals("READ", ignoreCase = true) == true
 
                         if (isForMe && !alreadyRead) {
-                            batch.update(doc.reference, mapOf("read" to true, "status" to "read"))
+                            batch.update(doc.reference, mapOf("read" to true, "status" to "READ"))
                             val effectiveSender = if (sid.isNotBlank()) sid else otherUserId
                             if (effectiveSender.isNotBlank()) {
+                                markedMsgSenders[doc.id] = effectiveSender
                                 val receiptRef = db.collection(COLLECTION_USERS)
                                     .document(effectiveSender)
                                     .collection("sent_receipts")
                                     .document(doc.id)
                                 batch.set(receiptRef, hashMapOf(
                                     "messageId" to doc.id,
-                                    "status" to "read",
+                                    "status" to "READ",
                                     "read" to true,
                                     "timestamp" to now
                                 ))
@@ -2605,12 +2484,25 @@ open class RemoteAccountService {
                             count++
                         }
                     }
-                    // When chat opened, after marking status='read', also set chat's unreadCount to 0
                     batch.set(db.collection(colName).document(chatId), mapOf("unreadCount" to 0), SetOptions.merge())
                     batch.commit().await()
-                    Log.i(TAG, "Successfully marked $count messages as read in $colName for chat $chatId")
+                    Log.i(TAG, "Successfully marked $count messages as READ in $colName for chat $chatId")
                 } catch (e: Exception) {
                     Log.w(TAG, "markAllChatMessagesAsReadInRemote for $colName notice: ${e.message}")
+                }
+            }
+
+            // Propagate READ to root messages/{id} & sender's sent_messages/{id} so chat recovery never reverts them to SENT
+            val readPayload = mapOf("read" to true, "status" to "READ")
+            for ((msgId, senderUid) in markedMsgSenders) {
+                try {
+                    db.collection("messages").document(msgId).update(readPayload).await()
+                } catch (_: Exception) {}
+                if (senderUid.isNotBlank()) {
+                    try {
+                        db.collection(COLLECTION_USERS).document(senderUid)
+                            .collection("sent_messages").document(msgId).update(readPayload).await()
+                    } catch (_: Exception) {}
                 }
             }
 
@@ -2627,6 +2519,9 @@ open class RemoteAccountService {
                     inboxSnap?.documents?.forEach { doc ->
                         val sid = doc.getString("senderId").orEmpty()
                         if (sid in partnerAliases || sid == otherUserId) {
+                            try {
+                                db.collection("messages").document(doc.id).update(readPayload)
+                            } catch (_: Exception) {}
                             db.collection(COLLECTION_USERS)
                                 .document(myUid)
                                 .collection("inbox")
@@ -2645,7 +2540,7 @@ open class RemoteAccountService {
 
     open suspend fun deleteInboxMessage(receiverId: String, messageId: String) = withContext(Dispatchers.IO) {
         if (!isFirestoreProvisioned) return@withContext
-        val db = firestore ?: return@withContext
+        val db = getFirestoreSafe() ?: return@withContext
         try {
             db.collection(COLLECTION_USERS)
                 .document(receiverId)
@@ -2661,7 +2556,7 @@ open class RemoteAccountService {
 
     open suspend fun deleteSentReceipt(senderId: String, messageId: String) = withContext(Dispatchers.IO) {
         if (!isFirestoreProvisioned) return@withContext
-        val db = firestore ?: return@withContext
+        val db = getFirestoreSafe() ?: return@withContext
         try {
             db.collection(COLLECTION_USERS)
                 .document(senderId)
@@ -2677,7 +2572,7 @@ open class RemoteAccountService {
 
     fun listenToIncomingMessages(myUserId: String, onMessage: (MessageEntity) -> Unit): ListenerRegistration? {
         if (!isFirestoreProvisioned) return null
-        val db = firestore ?: return null
+        val db = getFirestoreSafe() ?: return null
         return try {
             db.collection(COLLECTION_USERS)
                 .document(myUserId)
@@ -2705,7 +2600,7 @@ open class RemoteAccountService {
 
     fun listenToSentReceipts(myUserId: String, onReceipt: (messageId: String, status: String) -> Unit): ListenerRegistration? {
         if (!isFirestoreProvisioned) return null
-        val db = firestore ?: return null
+        val db = getFirestoreSafe() ?: return null
         return try {
             db.collection(COLLECTION_USERS)
                 .document(myUserId)
@@ -2732,7 +2627,7 @@ open class RemoteAccountService {
 
     fun listenToUserChats(myUserId: String, onChatUpdated: (chatId: String, otherUserId: String) -> Unit): ListenerRegistration? {
         if (!isFirestoreProvisioned) return null
-        val db = firestore ?: return null
+        val db = getFirestoreSafe() ?: return null
         return try {
             db.collection(COLLECTION_CHATS)
                 .whereArrayContains("participants", myUserId)
@@ -2762,7 +2657,7 @@ open class RemoteAccountService {
         aliases: List<String> = emptyList()
     ): List<Pair<String, String>> = withContext(Dispatchers.IO) {
         if (!isFirestoreProvisioned) return@withContext emptyList()
-        val db = firestore ?: return@withContext emptyList()
+        val db = getFirestoreSafe() ?: return@withContext emptyList()
         try {
             val results = mutableMapOf<String, String>() // chatId -> otherUserId
             val allUids = (listOf(myUserId) + aliases).filter { it.isNotBlank() }.distinct()
@@ -2893,7 +2788,7 @@ open class RemoteAccountService {
         aliases: List<String> = emptyList()
     ): List<MessageEntity> = withContext(Dispatchers.IO) {
         if (!isFirestoreProvisioned) return@withContext emptyList()
-        val db = firestore ?: return@withContext emptyList()
+        val db = getFirestoreSafe() ?: return@withContext emptyList()
         val allUids = (listOf(myUserId) + aliases)
             .filter { it.isNotBlank() && !it.contains("@") && !it.contains(" ") }
             .distinct()
@@ -2977,8 +2872,8 @@ open class RemoteAccountService {
         val audio = data["audioUrl"] as? String
         val duration = (data["audioDurationSeconds"] as? Number)?.toInt() ?: 0
         val ts = (data["timestamp"] as? Number)?.toLong() ?: System.currentTimeMillis()
-        val isReadField = (data["read"] as? Boolean) == true || (data["status"] as? String) == "READ"
-        val rawStatus = data["status"] as? String ?: "SENT"
+        val rawStatus = (data["status"] as? String)?.uppercase() ?: "SENT"
+        val isReadField = (data["read"] as? Boolean) == true || rawStatus == "READ"
         val st = if (isReadField) "READ" else rawStatus
         val isSys = data["isSystemMessage"] as? Boolean ?: false
         return MessageEntity(
@@ -3001,7 +2896,7 @@ open class RemoteAccountService {
      */
     open suspend fun getChatMessagesFromRemote(chatId: String): List<MessageEntity> = withContext(Dispatchers.IO) {
         if (!isFirestoreProvisioned) return@withContext emptyList()
-        val db = firestore ?: return@withContext emptyList()
+        val db = getFirestoreSafe() ?: return@withContext emptyList()
         try {
             val messageMap = mutableMapOf<String, MessageEntity>()
 
@@ -3066,7 +2961,7 @@ open class RemoteAccountService {
         messageId: String
     ): Result<Unit> = withContext(Dispatchers.IO) {
         if (messageId.isBlank() || isTestEnvironment() || !isFirestoreProvisioned) return@withContext Result.success(Unit)
-        val db = firestore ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe() ?: return@withContext Result.success(Unit)
         try {
             val batch = db.batch()
             if (!chatId.isNullOrBlank()) {
@@ -3094,7 +2989,7 @@ open class RemoteAccountService {
         onMessages: (List<MessageEntity>, List<String>) -> Unit
     ): ListenerRegistration? {
         if (!isFirestoreProvisioned) return null
-        val db = firestore ?: return null
+        val db = getFirestoreSafe() ?: return null
         return try {
             db.collection(COLLECTION_CHATS)
                 .document(chatId)
@@ -3122,9 +3017,9 @@ open class RemoteAccountService {
                         val audio = data["audioUrl"] as? String
                         val duration = (data["audioDurationSeconds"] as? Number)?.toInt() ?: 0
                         val ts = (data["timestamp"] as? Number)?.toLong() ?: System.currentTimeMillis()
-                        val rawMsgStatus = (data["status"] as? String)?.lowercase() ?: "sent"
-                        val isReadDoc = (data["read"] as? Boolean) == true || rawMsgStatus == "read"
-                        val st = if (isReadDoc) "read" else rawMsgStatus
+                        val rawMsgStatus = (data["status"] as? String)?.uppercase() ?: "SENT"
+                        val isReadDoc = (data["read"] as? Boolean) == true || rawMsgStatus == "READ"
+                        val st = if (isReadDoc) "READ" else rawMsgStatus
                         val isSys = data["isSystemMessage"] as? Boolean ?: false
                         MessageEntity(
                             messageId = mid,
@@ -3183,7 +3078,7 @@ open class RemoteAccountService {
         }
 
         if (!isFirestoreProvisioned) return@withContext Result.success(Unit)
-        val db = firestore ?: return@withContext Result.failure(Exception("Firestore is not available."))
+        val db = getFirestoreSafe() ?: return@withContext Result.failure(Exception("Firestore is not available."))
 
         try {
             val now = System.currentTimeMillis()
@@ -3250,7 +3145,7 @@ open class RemoteAccountService {
         }
 
         if (!isFirestoreProvisioned) return@withContext Result.success(Unit)
-        val db = firestore ?: return@withContext Result.failure(Exception("Firestore is not available."))
+        val db = getFirestoreSafe() ?: return@withContext Result.failure(Exception("Firestore is not available."))
 
         try {
             val now = System.currentTimeMillis()
@@ -3290,6 +3185,45 @@ open class RemoteAccountService {
         }
     }
 
+    internal fun mergeTeacherApplicationSources(
+        primary: List<TeacherApplicationItem>,
+        legacy: List<TeacherApplicationItem>,
+        pendingUsers: List<TeacherApplicationItem>
+    ): List<TeacherApplicationItem> {
+        val merged = LinkedHashMap<String, TeacherApplicationItem>()
+
+        fun pickBetter(existing: TeacherApplicationItem?, candidate: TeacherApplicationItem): TeacherApplicationItem {
+            if (existing == null) return candidate
+            val candidateReviewed = !candidate.status.equals("PENDING", ignoreCase = true) || candidate.reviewedAt > 0L
+            val existingReviewed = !existing.status.equals("PENDING", ignoreCase = true) || existing.reviewedAt > 0L
+            return when {
+                candidateReviewed && !existingReviewed -> candidate
+                !candidateReviewed && existingReviewed -> existing
+                candidate.reviewedAt != existing.reviewedAt ->
+                    if (candidate.reviewedAt > existing.reviewedAt) candidate else existing
+                candidate.submittedAt > existing.submittedAt -> candidate
+                else -> existing
+            }
+        }
+
+        primary.forEach { item ->
+            if (item.userId.isNotBlank()) {
+                merged[item.userId] = pickBetter(merged[item.userId], item)
+            }
+        }
+        legacy.forEach { item ->
+            if (item.userId.isNotBlank()) {
+                merged[item.userId] = pickBetter(merged[item.userId], item)
+            }
+        }
+        pendingUsers.forEach { item ->
+            if (item.userId.isNotBlank() && !merged.containsKey(item.userId)) {
+                merged[item.userId] = item
+            }
+        }
+        return merged.values.sortedByDescending { it.submittedAt }
+    }
+
     /**
      * Submits a teacher application to Firestore with strict single-subject enforcement.
      */
@@ -3309,82 +3243,86 @@ open class RemoteAccountService {
             application.subjects.split(",").firstOrNull()?.trim() ?: "Maths"
         }.trim().split(",").firstOrNull()?.trim().orEmpty().ifBlank { "Maths" }
 
-        val existingItem = testTeacherApplications[userId]
-        if (existingItem != null) {
-            return@withContext Result.failure(Exception("Teacher applications can only be submitted one time. An application already exists for this account."))
-        }
-
-        if (isFirestoreProvisioned) {
-            firestore?.let { db ->
-                try {
-                    val existingSnap = db.collection("teacherApplications").document(userId).get().await()
-                    if (existingSnap.exists()) {
-                        return@withContext Result.failure(Exception("Teacher applications can only be submitted one time per teacher."))
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Pre-check teacher application existence: ${e.message}")
-                }
+        if (isTestEnvironment()) {
+            val existingItem = testTeacherApplications[userId]
+            if (existingItem != null) {
+                return@withContext Result.failure(Exception("Teacher applications can only be submitted one time. An application already exists for this account."))
             }
+            testTeacherApplications[userId] = TeacherApplicationItem(
+                applicationId = userId,
+                applicantUid = userId,
+                lenoId = applicantLenoId,
+                fullName = applicantName.ifBlank { "Leno Member" },
+                username = applicantUsername,
+                subject = singleSubject,
+                qualification = application.educationQualification,
+                experience = application.teachingExperience,
+                status = "PENDING",
+                submittedAt = application.submittedAt,
+                userId = userId,
+                applicantName = applicantName.ifBlank { "Leno Member" },
+                applicantEmail = applicantEmail,
+                applicantUsername = applicantUsername,
+                applicantAvatarUrl = applicantAvatarUrl,
+                approvedSubject = singleSubject,
+                teachingLevel = application.teachingLevel,
+                educationQualification = application.educationQualification,
+                teachingExperience = application.teachingExperience,
+                teacherIntro = application.teacherIntro
+            )
+            return@withContext Result.success(Unit)
         }
 
-        val testItem = TeacherApplicationItem(
-            applicationId = userId,
-            applicantUid = userId,
-            lenoId = applicantLenoId,
-            fullName = applicantName.ifBlank { "Leno Member" },
-            username = applicantUsername,
-            subject = singleSubject,
-            qualification = application.educationQualification,
-            experience = application.teachingExperience,
-            status = "PENDING",
-            submittedAt = application.submittedAt,
-            userId = userId,
-            applicantName = applicantName.ifBlank { "Leno Member" },
-            applicantEmail = applicantEmail,
-            applicantUsername = applicantUsername,
-            applicantAvatarUrl = applicantAvatarUrl,
-            approvedSubject = singleSubject,
-            teachingLevel = application.teachingLevel,
-            educationQualification = application.educationQualification,
-            teachingExperience = application.teachingExperience,
-            teacherIntro = application.teacherIntro
-        )
-        testTeacherApplications[userId] = testItem
-
-        if (!isFirestoreProvisioned) return@withContext Result.success(Unit)
-        val db = firestore ?: return@withContext Result.failure(Exception("Firestore is not available."))
+        val db = getFirestoreSafe()
+            ?: return@withContext Result.failure(Exception("Cloud database is not available. Please check your internet connection."))
 
         try {
-            Log.i(TAG, "🔥 [Teacher Application Submission] Submitting application for applicantUid=$userId, documentId=$userId, subject=$singleSubject, lenoId=$applicantLenoId")
+            val alreadyApplied = withTimeoutOrNull(6000L) {
+                coroutineScope {
+                    val primaryJob = async {
+                        try {
+                            db.collection(COLLECTION_TEACHER_APPLICATIONS).document(userId).get().await().exists()
+                        } catch (_: Exception) { false }
+                    }
+                    val legacyJob = async {
+                        try {
+                            db.collection("teacher_applications").document(userId).get().await().exists()
+                        } catch (_: Exception) { false }
+                    }
+                    primaryJob.await() || legacyJob.await()
+                }
+            } ?: false
+            if (alreadyApplied) {
+                return@withContext Result.failure(Exception("Teacher applications can only be submitted one time per teacher."))
+            }
+
+            Log.i(TAG, "🔥 [Teacher Application Submission] Submitting application for applicantUid=$userId, subject=$singleSubject, lenoId=$applicantLenoId")
             val now = System.currentTimeMillis()
+            val submittedTs = if (application.submittedAt > 0L) application.submittedAt else now
+            val resolvedName = applicantName.ifBlank { applicantUsername.ifBlank { "Leno Member" } }
+
             val userUpdates = hashMapOf<String, Any>(
                 "teacherStatus" to "PENDING",
                 "pendingSubject" to singleSubject,
+                "teacherSubject" to singleSubject,
                 "updatedAt" to now
             )
-            db.collection(COLLECTION_USERS)
-                .document(userId)
-                .set(userUpdates, SetOptions.merge())
-                .await()
-
-            // 1. Store in canonical teacherApplications collection
             val applicationDoc = hashMapOf<String, Any>(
                 "applicationId" to userId,
                 "applicantUid" to userId,
                 "lenoId" to applicantLenoId,
-                "fullName" to (applicantName.ifBlank { "Leno Member" }),
+                "fullName" to resolvedName,
                 "username" to applicantUsername,
                 "subject" to singleSubject,
                 "qualification" to application.educationQualification,
                 "experience" to application.teachingExperience,
                 "status" to "PENDING",
-                "submittedAt" to application.submittedAt,
+                "submittedAt" to submittedTs,
                 "reviewedAt" to 0L,
                 "reviewedBy" to "",
                 "rejectionReason" to "",
-                // Compatibility fields
                 "userId" to userId,
-                "applicantName" to (applicantName.ifBlank { "Leno Member" }),
+                "applicantName" to resolvedName,
                 "applicantEmail" to applicantEmail,
                 "applicantUsername" to applicantUsername,
                 "applicantAvatarUrl" to applicantAvatarUrl,
@@ -3395,23 +3333,7 @@ open class RemoteAccountService {
                 "teacherIntro" to application.teacherIntro,
                 "singleSubjectOnly" to true
             )
-            db.collection(COLLECTION_TEACHER_APPLICATIONS)
-                .document(userId)
-                .set(applicationDoc, SetOptions.merge())
-                .await()
-
-            // Also save to alternate/legacy snake_case collection to ensure 100% receipt across all clients
-            try {
-                db.collection("teacher_applications")
-                    .document(userId)
-                    .set(applicationDoc, SetOptions.merge())
-                    .await()
-            } catch (e: Exception) {
-                Log.w(TAG, "Legacy teacher_applications write note: ${e.message}")
-            }
-
-            // 2. Also keep teacher_roles collection in sync
-            val appDoc = hashMapOf<String, Any>(
+            val roleDoc = hashMapOf<String, Any>(
                 "userId" to userId,
                 "status" to "PENDING",
                 "approvedSubject" to singleSubject,
@@ -3420,15 +3342,24 @@ open class RemoteAccountService {
                 "educationQualification" to application.educationQualification,
                 "teachingExperience" to application.teachingExperience,
                 "teacherIntro" to application.teacherIntro,
-                "submittedAt" to application.submittedAt,
+                "submittedAt" to submittedTs,
                 "singleSubjectOnly" to true
             )
-            db.collection(COLLECTION_TEACHER_ROLES)
-                .document(userId)
-                .set(appDoc, SetOptions.merge())
-                .await()
 
-            Log.i(TAG, "✅ [Firestore teacherApplications SUCCESS] Application submitted for user '$userId' (Subject: '$singleSubject').")
+            val committed = withTimeoutOrNull(10000L) {
+                val batch = db.batch()
+                batch.set(db.collection(COLLECTION_USERS).document(userId), userUpdates, SetOptions.merge())
+                batch.set(db.collection(COLLECTION_TEACHER_APPLICATIONS).document(userId), applicationDoc, SetOptions.merge())
+                batch.set(db.collection("teacher_applications").document(userId), applicationDoc, SetOptions.merge())
+                batch.set(db.collection(COLLECTION_TEACHER_ROLES).document(userId), roleDoc, SetOptions.merge())
+                batch.commit().await()
+                true
+            }
+            if (committed != true) {
+                return@withContext Result.failure(Exception("Submission timed out. Please check your internet connection and try again."))
+            }
+
+            Log.i(TAG, "✅ [Firestore teacherApplications SUCCESS] Atomic batch committed for '$userId' (Subject: '$singleSubject').")
             Result.success(Unit)
         } catch (e: Exception) {
             if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
@@ -3438,138 +3369,176 @@ open class RemoteAccountService {
     }
 
     /**
-     * Monitors the 'teacherApplications' collection in real time via Firestore snapshot listener.
+     * Monitors 'teacherApplications', legacy 'teacher_applications', and pending user records in real time.
      */
     fun listenToTeacherApplications(
         onApplications: (List<TeacherApplicationItem>) -> Unit
     ): ListenerRegistration? {
-        if (!isFirestoreProvisioned) {
+        if (isTestEnvironment()) {
             onApplications(testTeacherApplications.values.sortedByDescending { it.submittedAt })
             return null
         }
-        val db = firestore ?: run {
-            onApplications(testTeacherApplications.values.sortedByDescending { it.submittedAt })
-            return null
-        }
+        val db = getFirestoreSafe() ?: return null
+
         return try {
-            db.collection(COLLECTION_TEACHER_APPLICATIONS)
+            var primaryItems: List<TeacherApplicationItem> = emptyList()
+            var legacyItems: List<TeacherApplicationItem> = emptyList()
+            var pendingUserItems: List<TeacherApplicationItem> = emptyList()
+            val lock = Any()
+
+            fun dispatchMerged() {
+                val merged = synchronized(lock) {
+                    mergeTeacherApplicationSources(primaryItems, legacyItems, pendingUserItems)
+                }
+                onApplications(merged)
+            }
+
+            val reg1 = db.collection(COLLECTION_TEACHER_APPLICATIONS)
                 .addSnapshotListener { snapshot, error ->
                     if (error != null) {
                         if (isDatabaseNotProvisioned(error)) markDatabaseNotProvisioned()
-                        Log.w(TAG, "Notice querying teacher applications from Firestore: ${error.message}")
-                        onApplications(testTeacherApplications.values.sortedByDescending { it.submittedAt })
+                        Log.w(TAG, "listenToTeacherApplications (primary) error: ${error.message}")
                         return@addSnapshotListener
                     }
                     val items = snapshot?.documents?.mapNotNull { doc ->
                         parseTeacherApplicationFromDoc(doc.id, doc.data)
                     } ?: emptyList()
-                    Log.i(TAG, "✅ [Firestore Query Result: teacherApplications] Fetched ${items.size} applications.")
-                    // Cache in memory as well
-                    items.forEach { testTeacherApplications[it.userId] = it }
-                    onApplications(items.sortedByDescending { it.submittedAt })
+                    synchronized(lock) { primaryItems = items }
+                    dispatchMerged()
                 }
+
+            val reg2 = db.collection("teacher_applications")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.w(TAG, "listenToTeacherApplications (legacy) error: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    val items = snapshot?.documents?.mapNotNull { doc ->
+                        parseTeacherApplicationFromDoc(doc.id, doc.data)
+                    } ?: emptyList()
+                    synchronized(lock) { legacyItems = items }
+                    dispatchMerged()
+                }
+
+            val reg3 = db.collection(COLLECTION_USERS)
+                .whereEqualTo("teacherStatus", "PENDING")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.w(TAG, "listenToTeacherApplications (pending users) error: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    val items = snapshot?.documents?.mapNotNull { doc ->
+                        parsePendingUserAsTeacherApplication(doc.id, doc.data)
+                    } ?: emptyList()
+                    synchronized(lock) { pendingUserItems = items }
+                    dispatchMerged()
+                }
+
+            ListenerRegistration {
+                reg1.remove()
+                reg2.remove()
+                reg3.remove()
+            }
         } catch (e: Exception) {
             if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
             Log.w(TAG, "Notice on listenToTeacherApplications: ${e.message}")
-            onApplications(testTeacherApplications.values.sortedByDescending { it.submittedAt })
             null
         }
     }
 
+    private fun parsePendingUserAsTeacherApplication(docId: String, data: Map<String, Any?>?): TeacherApplicationItem? {
+        if (data == null) return null
+        val uid = (data["userId"] as? String)?.ifBlank { null } ?: (data["uid"] as? String)?.ifBlank { null } ?: docId
+        if (uid.isBlank() || uid.endsWith("_teacher") || uid == "test_dummy_user_to_purge") return null
+        val applicantName = (data["displayName"] as? String)?.ifBlank { null }
+            ?: (data["username"] as? String) ?: "Leno Member"
+        val subj = (data["pendingSubject"] as? String)?.ifBlank { null }
+            ?: (data["teacherSubject"] as? String)?.ifBlank { null }
+            ?: "Mathematics"
+        return TeacherApplicationItem(
+            applicationId = uid,
+            applicantUid = uid,
+            lenoId = (data["linoId"] as? String) ?: (data["lenId"] as? String) ?: "",
+            fullName = applicantName,
+            username = (data["username"] as? String) ?: "",
+            subject = subj,
+            qualification = (data["educationQualification"] as? String)?.ifBlank { null } ?: "Verified Applicant",
+            experience = (data["teachingExperience"] as? String)?.ifBlank { null } ?: "Under Review",
+            status = "PENDING",
+            submittedAt = (data["updatedAt"] as? Number)?.toLong() ?: System.currentTimeMillis(),
+            userId = uid,
+            applicantName = applicantName,
+            applicantEmail = (data["email"] as? String) ?: "",
+            applicantUsername = (data["username"] as? String) ?: "",
+            applicantAvatarUrl = (data["avatarUrl"] as? String) ?: "",
+            approvedSubject = subj,
+            teachingLevel = "All Levels"
+        )
+    }
+
     /**
-     * Fetches all applications from both 'teacherApplications' and 'teacher_applications'
-     * and joins with pending users from the 'users' collection to guarantee admin receipt.
+     * Fetches all applications concurrently from 'teacherApplications', 'teacher_applications',
+     * and pending users from 'users' to guarantee admin receipt across all devices.
      */
     open suspend fun fetchTeacherApplicationsFromFirestore(): List<TeacherApplicationItem> = withContext(Dispatchers.IO) {
-        if (!isFirestoreProvisioned) return@withContext testTeacherApplications.values.sortedByDescending { it.submittedAt }
-        val db = firestore ?: return@withContext testTeacherApplications.values.sortedByDescending { it.submittedAt }
+        if (isTestEnvironment()) {
+            return@withContext testTeacherApplications.values.sortedByDescending { it.submittedAt }
+        }
+        val db = getFirestoreSafe() ?: return@withContext emptyList()
         try {
-            Log.i(TAG, "🔥 [Admin Query: teacherApplications] Querying all teacher applications across collections...")
-            val map = LinkedHashMap<String, TeacherApplicationItem>()
-
-            // 1. Query canonical 'teacherApplications'
-            try {
-                val snap1 = db.collection(COLLECTION_TEACHER_APPLICATIONS).get().await()
-                snap1.documents.mapNotNull { parseTeacherApplicationFromDoc(it.id, it.data) }.forEach {
-                    map[it.userId] = it
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Query teacherApplications: ${e.message}")
-            }
-
-            // 2. Query alternate/legacy 'teacher_applications'
-            try {
-                val snap2 = db.collection("teacher_applications").get().await()
-                snap2.documents.mapNotNull { parseTeacherApplicationFromDoc(it.id, it.data) }.forEach {
-                    if (!map.containsKey(it.userId)) {
-                        map[it.userId] = it
+            Log.i(TAG, "🔥 [Admin Query: teacherApplications] Querying all teacher applications concurrently...")
+            withTimeoutOrNull(10000L) {
+                coroutineScope {
+                    val primaryJob = async {
+                        try {
+                            db.collection(COLLECTION_TEACHER_APPLICATIONS).get().await()
+                                .documents.mapNotNull { parseTeacherApplicationFromDoc(it.id, it.data) }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Query teacherApplications: ${e.message}")
+                            emptyList()
+                        }
                     }
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Query teacher_applications: ${e.message}")
-            }
-
-            // 3. Query 'users' collection for any users with teacherStatus == 'PENDING'
-            try {
-                val pendingUsersSnap = db.collection(COLLECTION_USERS)
-                    .whereEqualTo("teacherStatus", "PENDING")
-                    .get()
-                    .await()
-                pendingUsersSnap.documents.forEach { doc ->
-                    val uid = doc.id
-                    if (!map.containsKey(uid)) {
-                        val data = doc.data
-                        val applicantName = (data?.get("displayName") as? String)?.ifBlank { null }
-                            ?: (data?.get("username") as? String) ?: "Leno Member"
-                        val subj = (data?.get("pendingSubject") as? String)?.ifBlank { null }
-                            ?: (data?.get("teacherSubject") as? String) ?: "Mathematics"
-                        val appItem = TeacherApplicationItem(
-                            applicationId = uid,
-                            applicantUid = uid,
-                            lenoId = (data?.get("linoId") as? String) ?: "",
-                            fullName = applicantName,
-                            username = (data?.get("username") as? String) ?: "",
-                            subject = subj,
-                            qualification = "Verified Applicant",
-                            experience = "Under Review",
-                            status = "PENDING",
-                            submittedAt = (data?.get("updatedAt") as? Number)?.toLong() ?: System.currentTimeMillis(),
-                            userId = uid,
-                            applicantName = applicantName,
-                            applicantEmail = (data?.get("email") as? String) ?: "",
-                            applicantUsername = (data?.get("username") as? String) ?: "",
-                            applicantAvatarUrl = (data?.get("avatarUrl") as? String) ?: "",
-                            approvedSubject = subj,
-                            teachingLevel = "All Levels"
-                        )
-                        map[uid] = appItem
+                    val legacyJob = async {
+                        try {
+                            db.collection("teacher_applications").get().await()
+                                .documents.mapNotNull { parseTeacherApplicationFromDoc(it.id, it.data) }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Query teacher_applications: ${e.message}")
+                            emptyList()
+                        }
                     }
+                    val pendingUsersJob = async {
+                        try {
+                            db.collection(COLLECTION_USERS)
+                                .whereEqualTo("teacherStatus", "PENDING")
+                                .get()
+                                .await()
+                                .documents
+                                .mapNotNull { parsePendingUserAsTeacherApplication(it.id, it.data) }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Query pending users: ${e.message}")
+                            emptyList()
+                        }
+                    }
+                    val merged = mergeTeacherApplicationSources(
+                        primary = primaryJob.await(),
+                        legacy = legacyJob.await(),
+                        pendingUsers = pendingUsersJob.await()
+                    )
+                    Log.i(TAG, "✅ [Admin Query Result] Found ${merged.size} merged applications.")
+                    merged
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Query pending users: ${e.message}")
-            }
-
-            // 4. Merge in-memory applications
-            testTeacherApplications.values.forEach {
-                if (!map.containsKey(it.userId)) {
-                    map[it.userId] = it
-                }
-            }
-
-            val list = map.values.toList()
-            Log.i(TAG, "✅ [Admin Query Result] Found ${list.size} applications.")
-            list.forEach { testTeacherApplications[it.userId] = it }
-            list.sortedByDescending { it.submittedAt }
+            } ?: emptyList()
         } catch (e: Exception) {
             if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
             Log.w(TAG, "Notice querying teacher applications from Firestore: ${e.message}")
-            testTeacherApplications.values.sortedByDescending { it.submittedAt }
+            emptyList()
         }
     }
 
     /**
      * Admin approval:
-     * 1. Updates the application in 'teacherApplications' collection to status = "APPROVED".
+     * 1. Updates the application in 'teacherApplications' & 'teacher_applications' to status = "APPROVED".
      * 2. Updates the user's document role to 'TEACHER', teacherStatus = 'APPROVED', teacherSubject.
      * 3. Syncs 'teacher_roles' collection.
      * Uses atomic batched write.
@@ -3585,38 +3554,41 @@ open class RemoteAccountService {
 
         Log.i(TAG, "🔥 [Admin Approve Teacher Application] Approving applicantUid=$userId by adminUid=$adminId for subject=$cleanSubject")
 
-        val existingTest = testTeacherApplications[userId]
-        if (existingTest != null) {
-            testTeacherApplications[userId] = existingTest.copy(
-                status = "APPROVED",
-                approvedSubject = cleanSubject,
-                subject = cleanSubject,
-                reviewedAt = now,
-                reviewedBy = adminId
-            )
-        }
-        val existingUser = testUsers[userId]
-        if (existingUser != null) {
-            val updatedUser = existingUser.copy(
-                role = "TEACHER",
-                assignedSubject = cleanSubject,
-                teacherStatus = "APPROVED",
-                teacherSubject = cleanSubject,
-                updatedAt = now
-            )
-            testUsers[userId] = updatedUser
-            testUserDocumentListeners[userId]?.forEach { listener ->
-                try { listener.invoke(updatedUser) } catch (e: Exception) { Log.w(TAG, "listener error: ${e.message}") }
+        if (isTestEnvironment()) {
+            val existingTest = testTeacherApplications[userId]
+            if (existingTest != null) {
+                testTeacherApplications[userId] = existingTest.copy(
+                    status = "APPROVED",
+                    approvedSubject = cleanSubject,
+                    subject = cleanSubject,
+                    reviewedAt = now,
+                    reviewedBy = adminId
+                )
             }
+            val existingUser = testUsers[userId]
+            if (existingUser != null) {
+                val updatedUser = existingUser.copy(
+                    role = "TEACHER",
+                    assignedSubject = cleanSubject,
+                    teacherStatus = "APPROVED",
+                    teacherSubject = cleanSubject,
+                    updatedAt = now
+                )
+                testUsers[userId] = updatedUser
+                testUserDocumentListeners[userId]?.forEach { listener ->
+                    try { listener.invoke(updatedUser) } catch (e: Exception) { Log.w(TAG, "listener error: ${e.message}") }
+                }
+            }
+            testTeacherRoles[userId] = cleanSubject
+            return@withContext Result.success(Unit)
         }
-        testTeacherRoles[userId] = cleanSubject
 
-        if (!isFirestoreProvisioned) return@withContext Result.success(Unit)
-        val db = firestore ?: return@withContext Result.failure(Exception("Firestore is not available."))
+        val db = getFirestoreSafe() ?: return@withContext Result.failure(Exception("Firestore is not available."))
 
         try {
             val batch = db.batch()
             val appRef = db.collection(COLLECTION_TEACHER_APPLICATIONS).document(userId)
+            val legacyAppRef = db.collection("teacher_applications").document(userId)
             val userRef = db.collection(COLLECTION_USERS).document(userId)
             val roleRef = db.collection(COLLECTION_TEACHER_ROLES).document(userId)
 
@@ -3649,6 +3621,7 @@ open class RemoteAccountService {
                 "updatedAt" to now
             )
             batch.set(appRef, appUpdates, SetOptions.merge())
+            batch.set(legacyAppRef, appUpdates, SetOptions.merge())
             batch.set(userRef, userUpdates, SetOptions.merge())
             batch.set(roleRef, roleDoc, SetOptions.merge())
             batch.commit().await()
@@ -3664,7 +3637,7 @@ open class RemoteAccountService {
 
     /**
      * Admin rejection:
-     * 1. Updates the application in 'teacherApplications' collection to status = "REJECTED".
+     * 1. Updates the application in 'teacherApplications' & 'teacher_applications' to status = "REJECTED".
      * 2. Updates the user's document in Firestore with teacherStatus = 'REJECTED'.
      * Uses atomic batched write.
      */
@@ -3678,22 +3651,25 @@ open class RemoteAccountService {
 
         Log.i(TAG, "🔥 [Admin Reject Teacher Application] Rejecting applicantUid=$userId by adminUid=$adminId with reason=$reason")
 
-        val existingTest = testTeacherApplications[userId]
-        if (existingTest != null) {
-            testTeacherApplications[userId] = existingTest.copy(
-                status = "REJECTED",
-                reviewedAt = now,
-                reviewedBy = adminId,
-                rejectionReason = reason
-            )
+        if (isTestEnvironment()) {
+            val existingTest = testTeacherApplications[userId]
+            if (existingTest != null) {
+                testTeacherApplications[userId] = existingTest.copy(
+                    status = "REJECTED",
+                    reviewedAt = now,
+                    reviewedBy = adminId,
+                    rejectionReason = reason
+                )
+            }
+            return@withContext Result.success(Unit)
         }
 
-        if (!isFirestoreProvisioned) return@withContext Result.success(Unit)
-        val db = firestore ?: return@withContext Result.failure(Exception("Firestore is not available."))
+        val db = getFirestoreSafe() ?: return@withContext Result.failure(Exception("Firestore is not available."))
 
         try {
             val batch = db.batch()
             val appRef = db.collection(COLLECTION_TEACHER_APPLICATIONS).document(userId)
+            val legacyAppRef = db.collection("teacher_applications").document(userId)
             val userRef = db.collection(COLLECTION_USERS).document(userId)
             val roleRef = db.collection(COLLECTION_TEACHER_ROLES).document(userId)
 
@@ -3716,6 +3692,7 @@ open class RemoteAccountService {
                 "updatedAt" to now
             )
             batch.set(appRef, appUpdates, SetOptions.merge())
+            batch.set(legacyAppRef, appUpdates, SetOptions.merge())
             batch.set(userRef, userUpdates, SetOptions.merge())
             batch.set(roleRef, roleUpdates, SetOptions.merge())
             batch.commit().await()
@@ -3746,8 +3723,7 @@ open class RemoteAccountService {
             }
         }
 
-        if (!isFirestoreProvisioned) return null
-        val db = firestore ?: return null
+        val db = getFirestoreSafe() ?: return null
 
         return try {
             db.collection(COLLECTION_USERS)
@@ -3759,7 +3735,7 @@ open class RemoteAccountService {
                         return@addSnapshotListener
                     }
                     if (snapshot != null && snapshot.exists()) {
-                        val user = docToUser(snapshot.data)
+                        val user = docToUser(snapshot.data, snapshot.id)
                         if (user != null) {
                             Log.i(TAG, "⚡ [Real-Time User Doc] User '$userId' updated in Firestore (Role: ${user.role}, Subject: ${user.assignedSubject}). Notifying UI.")
                             onUserUpdated(user)
@@ -3775,7 +3751,7 @@ open class RemoteAccountService {
 
     /**
      * Admin updates any user's role in Firestore ('teacher' or 'user').
-     * Allows admin to promote/revert any user and trigger function to update role in their profile.
+     * Allows admin to promote/revert any user and update their profile & applications atomically.
      */
     open suspend fun updateUserRoleInFirestore(
         userId: String,
@@ -3789,118 +3765,103 @@ open class RemoteAccountService {
         val cleanSubject = if (isTeacher) assignedSubject.trim().split(",").firstOrNull()?.trim().orEmpty().ifBlank { "General Education" } else ""
         val now = System.currentTimeMillis()
 
-        val existingUser = testUsers[userId]
-        if (existingUser != null) {
-            val updated = existingUser.copy(
-                role = if (isTeacher) "teacher" else "user",
-                assignedSubject = cleanSubject
-            )
-            testUsers[userId] = updated
-            testUserDocumentListeners[userId]?.forEach { listener ->
-                try { listener.invoke(updated) } catch (e: Exception) { Log.w(TAG, "listener error: ${e.message}") }
-            }
-        }
-        if (isTeacher) {
-            testTeacherRoles[userId] = cleanSubject
-            val existingApp = testTeacherApplications[userId]
-            if (existingApp != null) {
-                testTeacherApplications[userId] = existingApp.copy(
-                    status = "APPROVED",
-                    approvedSubject = cleanSubject,
-                    reviewedAt = now,
-                    reviewedBy = adminId
+        if (isTestEnvironment()) {
+            val existingUser = testUsers[userId]
+            if (existingUser != null) {
+                val updated = existingUser.copy(
+                    role = if (isTeacher) "TEACHER" else "USER",
+                    assignedSubject = cleanSubject,
+                    teacherStatus = if (isTeacher) "APPROVED" else "NOT_APPLIED",
+                    teacherSubject = cleanSubject,
+                    updatedAt = now
                 )
+                testUsers[userId] = updated
+                testUserDocumentListeners[userId]?.forEach { listener ->
+                    try { listener.invoke(updated) } catch (e: Exception) { Log.w(TAG, "listener error: ${e.message}") }
+                }
             }
-        } else {
-            testTeacherRoles.remove(userId)
-            val existingApp = testTeacherApplications[userId]
-            if (existingApp != null) {
-                testTeacherApplications[userId] = existingApp.copy(
-                    status = "REJECTED",
-                    reviewedAt = now,
-                    reviewedBy = adminId
-                )
+            if (isTeacher) {
+                testTeacherRoles[userId] = cleanSubject
+                testTeacherApplications[userId]?.let {
+                    testTeacherApplications[userId] = it.copy(
+                        status = "APPROVED",
+                        approvedSubject = cleanSubject,
+                        reviewedAt = now,
+                        reviewedBy = adminId
+                    )
+                }
+            } else {
+                testTeacherRoles.remove(userId)
+                testTeacherApplications[userId]?.let {
+                    testTeacherApplications[userId] = it.copy(
+                        status = "REJECTED",
+                        reviewedAt = now,
+                        reviewedBy = adminId
+                    )
+                }
             }
+            return@withContext Result.success(Unit)
         }
 
-        if (isTestEnvironment()) return@withContext Result.success(Unit)
-        if (!isFirestoreProvisioned) return@withContext Result.success(Unit)
-        val db = firestore ?: return@withContext Result.failure(Exception("Firestore is not available."))
+        val db = getFirestoreSafe() ?: return@withContext Result.failure(Exception("Firestore is not available."))
 
         try {
-            // 1. Update the user document in 'users' collection
+            val batch = db.batch()
             val userUpdates = hashMapOf<String, Any>(
-                "role" to (if (isTeacher) "teacher" else "user"),
+                "role" to (if (isTeacher) "TEACHER" else "USER"),
                 "isTeacher" to isTeacher,
                 "isStudent" to false,
                 "assignedSubject" to cleanSubject,
                 "approvedSubject" to cleanSubject,
-                "teacherStatus" to (if (isTeacher) "APPROVED" else "NORMAL"),
+                "teacherSubject" to cleanSubject,
+                "teacherStatus" to (if (isTeacher) "APPROVED" else "NOT_APPLIED"),
                 "updatedAt" to now
             )
             if (isTeacher) {
                 userUpdates["teacherApprovedAt"] = now
             }
-            db.collection(COLLECTION_USERS)
-                .document(userId)
-                .set(userUpdates, SetOptions.merge())
-                .await()
+            batch.set(db.collection(COLLECTION_USERS).document(userId), userUpdates, SetOptions.merge())
 
-            // 2. Update 'teacher_roles' collection
-            if (isTeacher) {
-                val roleDoc = hashMapOf<String, Any>(
+            val roleDoc = if (isTeacher) {
+                hashMapOf<String, Any>(
                     "userId" to userId,
                     "status" to "APPROVED",
                     "approvedSubject" to cleanSubject,
                     "subjects" to cleanSubject,
-                    "role" to "teacher",
+                    "role" to "TEACHER",
                     "updatedAt" to now
                 )
-                db.collection(COLLECTION_TEACHER_ROLES)
-                    .document(userId)
-                    .set(roleDoc, SetOptions.merge())
-                    .await()
             } else {
-                val roleDoc = hashMapOf<String, Any>(
+                hashMapOf<String, Any>(
                     "userId" to userId,
                     "status" to "NORMAL",
                     "approvedSubject" to "",
                     "subjects" to "",
-                    "role" to "user",
+                    "role" to "USER",
                     "updatedAt" to now
                 )
-                db.collection(COLLECTION_TEACHER_ROLES)
-                    .document(userId)
-                    .set(roleDoc, SetOptions.merge())
-                    .await()
             }
+            batch.set(db.collection(COLLECTION_TEACHER_ROLES).document(userId), roleDoc, SetOptions.merge())
 
-            // 3. If there is a pending application in 'teacher_applications', update it too
             if (isTeacher) {
                 val appUpdates = hashMapOf<String, Any>(
                     "status" to "APPROVED",
                     "approvedSubject" to cleanSubject,
+                    "subject" to cleanSubject,
                     "reviewedAt" to now,
                     "reviewedBy" to adminId
                 )
-                db.collection(COLLECTION_TEACHER_APPLICATIONS)
-                    .document(userId)
-                    .set(appUpdates, SetOptions.merge())
-                    .await()
+                batch.set(db.collection(COLLECTION_TEACHER_APPLICATIONS).document(userId), appUpdates, SetOptions.merge())
+                batch.set(db.collection("teacher_applications").document(userId), appUpdates, SetOptions.merge())
             }
+            batch.commit().await()
 
             Log.i(TAG, "✅ [Admin Action] User '$userId' role updated to '$cleanRole' (Subject: $cleanSubject) in Firestore.")
             Result.success(Unit)
         } catch (e: Exception) {
             if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
             Log.w(TAG, "Notice updating user role in Firestore: ${e.message}")
-            if (e.message?.contains("PERMISSION_DENIED", ignoreCase = true) == true ||
-                e.message?.contains("insufficient permissions", ignoreCase = true) == true) {
-                // Cloud rules restriction shouldn't break the user's local administration
-                Result.success(Unit)
-            } else {
-                Result.failure(e)
-            }
+            Result.failure(e)
         }
     }
 
@@ -3914,8 +3875,7 @@ open class RemoteAccountService {
             }
             return@withContext Result.success(Unit)
         }
-        if (!isFirestoreProvisioned) return@withContext Result.success(Unit)
-        val db = firestore ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe() ?: return@withContext Result.failure(Exception("Cloud database unavailable."))
         try {
             db.collection(COLLECTION_USERS).document(userId)
                 .update("isRestricted", isRestricted)
@@ -3923,7 +3883,7 @@ open class RemoteAccountService {
             Result.success(Unit)
         } catch (e: Exception) {
             Log.w(TAG, "Notice updating isRestricted in Firestore: ${e.message}")
-            Result.success(Unit)
+            Result.failure(e)
         }
     }
 
@@ -3940,39 +3900,66 @@ open class RemoteAccountService {
             }
             return@withContext Result.success(Unit)
         }
-        if (!isFirestoreProvisioned) return@withContext Result.success(Unit)
-        val db = firestore ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe() ?: return@withContext Result.failure(Exception("Cloud database unavailable."))
         try {
-            db.collection(COLLECTION_USERS).document(userId).delete().await()
+            val userRef = db.collection(COLLECTION_USERS).document(userId)
+            val snap = try { userRef.get().await() } catch (_: Exception) { null }
+            val username = snap?.getString("username")?.trim()?.lowercase().orEmpty()
+            val lenoId = (snap?.getString("linoId") ?: snap?.getString("lenId"))?.trim()?.uppercase().orEmpty()
+
+            // Delete user-owned subcollections first while auth is valid
+            val subcollections = listOf(
+                "notifications",
+                "contacts",
+                "inbox",
+                "sent_messages",
+                "sent_receipts",
+                "friend_requests",
+                "lesson_progress",
+                "certificates"
+            )
+            for (sub in subcollections) {
+                try {
+                    val docs = userRef.collection(sub).limit(200).get().await().documents
+                    for (doc in docs) {
+                        try { doc.reference.delete().await() } catch (_: Exception) {}
+                    }
+                } catch (_: Exception) {}
+            }
+
+            if (username.isNotBlank()) {
+                try { db.collection(COLLECTION_USERNAMES).document(username).delete().await() } catch (_: Exception) {}
+            }
+            if (lenoId.isNotBlank()) {
+                try { db.collection(COLLECTION_LENO_IDS).document(lenoId).delete().await() } catch (_: Exception) {}
+            }
+            try { db.collection(COLLECTION_TEACHER_APPLICATIONS).document(userId).delete().await() } catch (_: Exception) {}
+            try { db.collection("teacher_applications").document(userId).delete().await() } catch (_: Exception) {}
+            try { db.collection(COLLECTION_TEACHER_ROLES).document(userId).delete().await() } catch (_: Exception) {}
+
+            userRef.delete().await()
             Result.success(Unit)
         } catch (e: Exception) {
+            com.example.util.handleFirestoreError(e, com.example.util.OperationType.DELETE, "$COLLECTION_USERS/$userId")
             Log.w(TAG, "Notice deleting user in Firestore: ${e.message}")
-            Result.success(Unit)
+            Result.failure(e)
         }
     }
 
     /**
-     * Fetches remote users from Firestore for directory review and local database synchronization.
+     * Fetches all canonical remote users from Firestore using paginated scans so
+     * newly registered accounts on other devices are never truncated by legacy alias docs.
      */
-    suspend fun fetchAllRemoteUsers(limit: Int = 300): List<UserEntity> = withContext(Dispatchers.IO) {
+    suspend fun fetchAllRemoteUsers(limit: Int = 1500): List<UserEntity> = withContext(Dispatchers.IO) {
         if (isTestEnvironment()) {
             return@withContext testUsers.values.distinctBy { it.userId }.toList()
         }
-        if (!isFirestoreProvisioned) return@withContext emptyList()
         val db = getFirestoreSafe() ?: return@withContext emptyList()
+        val effectiveLimit = maxOf(limit, 1500)
         try {
-            val snapshot = withTimeoutOrNull(10000L) {
-                db.collection(COLLECTION_USERS)
-                    .limit(limit.toLong())
-                    .get()
-                    .await()
-            }
-            snapshot?.documents
-                ?.mapNotNull { docToUser(it.data, it.id) }
-                ?.filter { it.userId.isNotBlank() && !it.userId.endsWith("_teacher") && it.userId != "test_dummy_user_to_purge" }
-                ?.distinctBy { it.userId }
-                ?.distinctBy { if (it.linoId.isNotBlank()) it.linoId else it.userId }
-                .orEmpty()
+            withTimeoutOrNull(12000L) {
+                deduplicateCanonicalUsers(fetchAllUserDocsPaginated(db, effectiveLimit))
+            } ?: emptyList()
         } catch (e: Exception) {
             Log.w(TAG, "fetchAllRemoteUsers notice: ${e.message}")
             emptyList()
@@ -3980,35 +3967,35 @@ open class RemoteAccountService {
     }
 
     open fun listenToAllUsers(
-        limit: Int = 300,
+        limit: Int = 1500,
         onUpdate: (users: List<UserEntity>, removedIds: List<String>) -> Unit
     ): ListenerRegistration? {
         if (isTestEnvironment()) {
             onUpdate(testUsers.values.distinctBy { it.userId }.toList(), emptyList())
             return null
         }
-        if (!isFirestoreProvisioned) return null
         val db = getFirestoreSafe() ?: return null
+        val effectiveLimit = maxOf(limit, 1500)
         return try {
             db.collection(COLLECTION_USERS)
-                .limit(limit.toLong())
+                .limit(effectiveLimit.toLong())
                 .addSnapshotListener { snapshot, error ->
                     if (error != null) {
                         if (isDatabaseNotProvisioned(error)) markDatabaseNotProvisioned()
                         Log.w(TAG, "listenToAllUsers error: ${error.message}")
                         return@addSnapshotListener
                     }
+                    val pairs = snapshot?.documents
+                        ?.mapNotNull { doc -> docToUser(doc.data, doc.id)?.let { doc.id to it } }
+                        .orEmpty()
+                    val canonicalList = deduplicateCanonicalUsers(pairs)
+                    val activeUserIds = canonicalList.map { it.userId }.toSet()
                     val removedIds = snapshot?.documentChanges
                         ?.filter { it.type == DocumentChange.Type.REMOVED }
                         ?.map { it.document.id }
-                        ?.filter { it.isNotBlank() }
+                        ?.filter { it.isNotBlank() && it !in activeUserIds }
                         .orEmpty()
-                    val list = snapshot?.documents
-                        ?.mapNotNull { docToUser(it.data, it.id) }
-                        ?.filter { it.userId.isNotBlank() && !it.userId.endsWith("_teacher") && it.userId != "test_dummy_user_to_purge" }
-                        ?.distinctBy { it.userId }
-                        .orEmpty()
-                    onUpdate(list, removedIds)
+                    onUpdate(canonicalList, removedIds)
                 }
         } catch (e: Exception) {
             if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
@@ -4070,7 +4057,7 @@ open class RemoteAccountService {
     open suspend fun saveClassToRemote(classEntity: ClassEntity): Result<Unit> = withContext(Dispatchers.IO) {
         if (classEntity.classId.isBlank()) return@withContext Result.failure(Exception("Invalid class ID."))
         testClasses[classEntity.classId] = classEntity
-        val db = firestore ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe() ?: return@withContext Result.success(Unit)
         try {
             val classDoc = hashMapOf<String, Any>(
                 "classId" to classEntity.classId,
@@ -4117,7 +4104,7 @@ open class RemoteAccountService {
 
     open suspend fun deleteClassFromRemote(classId: String): Boolean = withContext(Dispatchers.IO) {
         testClasses.remove(classId)
-        val db = firestore ?: return@withContext true
+        val db = getFirestoreSafe() ?: return@withContext true
         try {
             db.collection(COLLECTION_CLASSES).document(classId).delete().await()
             Log.i(TAG, "✅ [Firestore Class Deleted] Deleted class $classId")
@@ -4129,7 +4116,7 @@ open class RemoteAccountService {
     }
 
     open suspend fun fetchClassesFromRemote(): List<ClassEntity> = withContext(Dispatchers.IO) {
-        val db = firestore ?: return@withContext testClasses.values.toList()
+        val db = getFirestoreSafe() ?: return@withContext testClasses.values.toList()
         try {
             val snap = db.collection(COLLECTION_CLASSES).get().await()
             val list = snap.documents.mapNotNull { parseClassFromDoc(it.id, it.data) }
@@ -4151,7 +4138,7 @@ open class RemoteAccountService {
     open fun listenToRemoteClassesWithRemovals(
         onUpdate: (classes: List<ClassEntity>, removedIds: List<String>) -> Unit
     ): ListenerRegistration? {
-        val db = firestore ?: run {
+        val db = getFirestoreSafe() ?: run {
             onUpdate(testClasses.values.toList(), emptyList())
             return null
         }
@@ -4239,7 +4226,7 @@ open class RemoteAccountService {
 
     open suspend fun saveEnrollmentToRemote(enrollment: EnrollmentEntity): Result<Unit> = withContext(Dispatchers.IO) {
         testEnrollments[enrollment.enrollmentId] = enrollment
-        val db = firestore ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe() ?: return@withContext Result.success(Unit)
         try {
             val enrollmentMap = hashMapOf<String, Any>(
                 "enrollmentId" to enrollment.enrollmentId,
@@ -4286,7 +4273,7 @@ open class RemoteAccountService {
     open suspend fun deleteEnrollmentFromRemote(studentUserId: String, classId: String): Result<Unit> = withContext(Dispatchers.IO) {
         val docKey = "${studentUserId}_${classId}"
         testEnrollments.entries.removeAll { it.value.studentUserId == studentUserId && it.value.classId == classId }
-        val db = firestore ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe() ?: return@withContext Result.success(Unit)
         try {
             db.collection(COLLECTION_ENROLLMENTS).document(docKey).delete().await()
             val classEnrollmentsRef = db.collection(COLLECTION_CLASSES)
@@ -4312,7 +4299,7 @@ open class RemoteAccountService {
     }
 
     open suspend fun fetchEnrollmentsFromRemote(studentUserId: String): List<EnrollmentEntity> = withContext(Dispatchers.IO) {
-        val db = firestore ?: return@withContext testEnrollments.values.filter { it.studentUserId == studentUserId }
+        val db = getFirestoreSafe() ?: return@withContext testEnrollments.values.filter { it.studentUserId == studentUserId }
         try {
             val snap = db.collection(COLLECTION_ENROLLMENTS)
                 .whereEqualTo("studentUserId", studentUserId)
@@ -4375,7 +4362,7 @@ open class RemoteAccountService {
         studentUserId: String,
         onUpdate: (enrollments: List<EnrollmentEntity>, removedIds: List<String>) -> Unit
     ): ListenerRegistration? {
-        val db = firestore ?: run {
+        val db = getFirestoreSafe() ?: run {
             onUpdate(testEnrollments.values.filter { it.studentUserId == studentUserId }, emptyList())
             return null
         }
@@ -4420,7 +4407,7 @@ open class RemoteAccountService {
         onUpdate: (enrollments: List<EnrollmentEntity>, removedIds: List<String>) -> Unit
     ): ListenerRegistration? {
         if (classId.isBlank()) return null
-        val db = firestore ?: run {
+        val db = getFirestoreSafe() ?: run {
             onUpdate(testEnrollments.values.filter { it.classId == classId }, emptyList())
             return null
         }
@@ -4461,7 +4448,7 @@ open class RemoteAccountService {
     }
 
     open suspend fun saveLessonToRemote(lesson: LessonEntity): Result<Unit> = withContext(Dispatchers.IO) {
-        val db = firestore ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe() ?: return@withContext Result.success(Unit)
         try {
             val map = hashMapOf<String, Any>(
                 "lessonId" to lesson.lessonId,
@@ -4493,9 +4480,66 @@ open class RemoteAccountService {
         }
     }
 
+    open suspend fun updateLessonInRemote(lesson: LessonEntity): Result<Unit> = withContext(Dispatchers.IO) {
+        val db = getFirestoreSafe() ?: return@withContext Result.success(Unit)
+        try {
+            val map = hashMapOf<String, Any>(
+                "lessonId" to lesson.lessonId,
+                "classId" to lesson.classId,
+                "title" to lesson.title,
+                "orderIndex" to lesson.orderIndex,
+                "summary" to lesson.summary,
+                "content" to lesson.content,
+                "updatedAt" to System.currentTimeMillis()
+            )
+            db.collection(COLLECTION_CLASSES)
+                .document(lesson.classId)
+                .collection("lessons")
+                .document(lesson.lessonId)
+                .set(map, SetOptions.merge())
+                .await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.w(TAG, "updateLessonInRemote notice: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    open suspend fun recordLessonSeenInRemote(
+        classId: String,
+        lessonId: String,
+        userId: String
+    ): Unit = withContext(Dispatchers.IO) {
+        if (classId.isBlank() || lessonId.isBlank() || userId.isBlank()) return@withContext
+        val currentMap = _lessonSeenByMap.value.toMutableMap()
+        val updatedSet = (currentMap[lessonId] ?: emptySet()) + userId
+        currentMap[lessonId] = updatedSet
+        _lessonSeenByMap.value = currentMap
+
+        if (isTestEnvironment() || !isFirestoreProvisioned) return@withContext
+        val db = getFirestoreSafe() ?: return@withContext
+        try {
+            db.collection(COLLECTION_CLASSES)
+                .document(classId)
+                .collection("lessons")
+                .document(lessonId)
+                .update("seenByUserIds", FieldValue.arrayUnion(userId))
+                .await()
+        } catch (e: Exception) {
+            try {
+                db.collection(COLLECTION_CLASSES)
+                    .document(classId)
+                    .collection("lessons")
+                    .document(lessonId)
+                    .set(mapOf("seenByUserIds" to listOf(userId)), SetOptions.merge())
+                    .await()
+            } catch (_: Exception) {}
+        }
+    }
+
     open suspend fun deleteLessonFromRemote(classId: String, lessonId: String): Boolean = withContext(Dispatchers.IO) {
         if (classId.isBlank() || lessonId.isBlank()) return@withContext false
-        val db = firestore ?: return@withContext true
+        val db = getFirestoreSafe() ?: return@withContext true
         try {
             db.collection(COLLECTION_CLASSES)
                 .document(classId)
@@ -4517,7 +4561,7 @@ open class RemoteAccountService {
     }
 
     open suspend fun fetchLessonsForClassFromRemote(classId: String): List<LessonEntity> = withContext(Dispatchers.IO) {
-        val db = firestore ?: return@withContext emptyList()
+        val db = getFirestoreSafe() ?: return@withContext emptyList()
         try {
             val snap = db.collection(COLLECTION_CLASSES)
                 .document(classId)
@@ -4525,8 +4569,15 @@ open class RemoteAccountService {
                 .orderBy("orderIndex")
                 .get()
                 .await()
-            snap.documents.mapNotNull { doc ->
+            val seenUpdates = _lessonSeenByMap.value.toMutableMap()
+            val lessons = snap.documents.mapNotNull { doc ->
                 val title = doc.getString("title") ?: return@mapNotNull null
+                @Suppress("UNCHECKED_CAST")
+                val seenRaw = doc.get("seenByUserIds") as? List<*>
+                val seenSet = seenRaw?.mapNotNull { it as? String }?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
+                if (seenSet.isNotEmpty()) {
+                    seenUpdates[doc.id] = (seenUpdates[doc.id] ?: emptySet()) + seenSet
+                }
                 LessonEntity(
                     lessonId = doc.id,
                     classId = classId,
@@ -4537,6 +4588,10 @@ open class RemoteAccountService {
                     createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis()
                 )
             }
+            if (seenUpdates.isNotEmpty()) {
+                _lessonSeenByMap.value = seenUpdates
+            }
+            lessons
         } catch (e: Exception) {
             Log.w(TAG, "fetchLessonsForClassFromRemote notice: ${e.message}")
             emptyList()
@@ -4553,7 +4608,7 @@ open class RemoteAccountService {
         classId: String,
         onUpdate: (lessons: List<LessonEntity>, removedIds: List<String>) -> Unit
     ): ListenerRegistration? {
-        val db = firestore ?: return null
+        val db = getFirestoreSafe() ?: return null
         return try {
             db.collection(COLLECTION_CLASSES)
                 .document(classId)
@@ -4569,8 +4624,15 @@ open class RemoteAccountService {
                         ?.map { it.document.id }
                         ?.filter { it.isNotBlank() }
                         .orEmpty()
+                    val seenUpdates = _lessonSeenByMap.value.toMutableMap()
                     val list = snapshot?.documents?.mapNotNull { doc ->
                         val title = doc.getString("title") ?: return@mapNotNull null
+                        @Suppress("UNCHECKED_CAST")
+                        val seenRaw = doc.get("seenByUserIds") as? List<*>
+                        val seenSet = seenRaw?.mapNotNull { it as? String }?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
+                        if (seenSet.isNotEmpty()) {
+                            seenUpdates[doc.id] = (seenUpdates[doc.id] ?: emptySet()) + seenSet
+                        }
                         LessonEntity(
                             lessonId = doc.id,
                             classId = classId,
@@ -4581,6 +4643,7 @@ open class RemoteAccountService {
                             createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis()
                         )
                     } ?: emptyList()
+                    _lessonSeenByMap.value = seenUpdates
                     onUpdate(list, removedIds)
                 }
         } catch (e: Exception) {
@@ -4590,7 +4653,7 @@ open class RemoteAccountService {
     }
 
     open suspend fun saveQuestionToRemote(classId: String, question: ClassQuestionEntity): Result<Unit> = withContext(Dispatchers.IO) {
-        val db = firestore ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe() ?: return@withContext Result.success(Unit)
         try {
             val map = hashMapOf<String, Any?>(
                 "questionId" to question.questionId,
@@ -4623,7 +4686,7 @@ open class RemoteAccountService {
     }
 
     open suspend fun fetchQuestionsForClassFromRemote(classId: String): List<ClassQuestionEntity> = withContext(Dispatchers.IO) {
-        val db = firestore ?: return@withContext emptyList()
+        val db = getFirestoreSafe() ?: return@withContext emptyList()
         try {
             val snap = db.collection(COLLECTION_CLASSES)
                 .document(classId)
@@ -4659,7 +4722,7 @@ open class RemoteAccountService {
 
     open suspend fun deleteQuestionFromRemote(classId: String, questionId: String): Boolean = withContext(Dispatchers.IO) {
         if (classId.isBlank() || questionId.isBlank()) return@withContext false
-        val db = firestore ?: return@withContext true
+        val db = getFirestoreSafe() ?: return@withContext true
         try {
             db.collection(COLLECTION_CLASSES)
                 .document(classId)
@@ -4684,7 +4747,7 @@ open class RemoteAccountService {
         classId: String,
         onUpdate: (questions: List<ClassQuestionEntity>, removedIds: List<String>) -> Unit
     ): ListenerRegistration? {
-        val db = firestore ?: return null
+        val db = getFirestoreSafe() ?: return null
         return try {
             db.collection(COLLECTION_CLASSES)
                 .document(classId)
@@ -4735,7 +4798,7 @@ open class RemoteAccountService {
         answerAudioUrl: String? = null,
         answerAudioDurationSeconds: Int = 0
     ): Result<Unit> = withContext(Dispatchers.IO) {
-        val db = firestore ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe() ?: return@withContext Result.success(Unit)
         try {
             val map = hashMapOf<String, Any?>(
                 "answerText" to answerText,
@@ -4773,7 +4836,7 @@ open class RemoteAccountService {
     ) = withContext(Dispatchers.IO) {
         if (userId.isBlank()) return@withContext
         if (isTestEnvironment() || !isFirestoreProvisioned) return@withContext
-        val db = firestore ?: return@withContext
+        val db = getFirestoreSafe() ?: return@withContext
         try {
             val now = System.currentTimeMillis()
             if (classId.isNotBlank()) {
@@ -4828,7 +4891,7 @@ open class RemoteAccountService {
         ) -> Unit
     ): ListenerRegistration? {
         if (userId.isBlank() || isTestEnvironment() || !isFirestoreProvisioned) return null
-        val db = firestore ?: return null
+        val db = getFirestoreSafe() ?: return null
         return try {
             db.collection(COLLECTION_USERS)
                 .document(userId)
@@ -4879,7 +4942,7 @@ open class RemoteAccountService {
             return@withContext Result.failure(Exception("Invalid certificate target."))
         }
         if (isTestEnvironment() || !isFirestoreProvisioned) return@withContext Result.success(Unit)
-        val db = firestore ?: return@withContext Result.success(Unit)
+        val db = getFirestoreSafe() ?: return@withContext Result.success(Unit)
         try {
             val map = hashMapOf<String, Any>(
                 "classId" to cert.classId,
@@ -4939,7 +5002,7 @@ open class RemoteAccountService {
         onCertificates: (List<LessonProgressManager.AwardedCertificate>) -> Unit
     ): ListenerRegistration? {
         if (userId.isBlank() || isTestEnvironment() || !isFirestoreProvisioned) return null
-        val db = firestore ?: return null
+        val db = getFirestoreSafe() ?: return null
         return try {
             db.collection(COLLECTION_USERS)
                 .document(userId)
@@ -4965,7 +5028,7 @@ open class RemoteAccountService {
         onCertificates: (List<LessonProgressManager.AwardedCertificate>) -> Unit
     ): ListenerRegistration? {
         if (classId.isBlank() || isTestEnvironment() || !isFirestoreProvisioned) return null
-        val db = firestore ?: return null
+        val db = getFirestoreSafe() ?: return null
         return try {
             db.collection(COLLECTION_CLASSES)
                 .document(classId)
@@ -4996,7 +5059,7 @@ open class RemoteAccountService {
             return@withContext if (user != null) Pair(user.role, user.assignedSubject) else null
         }
         if (!isFirestoreProvisioned) return@withContext null
-        val db = firestore ?: return@withContext null
+        val db = getFirestoreSafe() ?: return@withContext null
         try {
             val doc = db.collection(COLLECTION_USERS).document(userId).get().await()
             if (!doc.exists()) return@withContext null
@@ -5018,13 +5081,13 @@ open class RemoteAccountService {
             return@withContext testUsers.values.filter { it.isTeacher }
         }
         if (!isFirestoreProvisioned) return@withContext emptyList()
-        val db = firestore ?: return@withContext emptyList()
+        val db = getFirestoreSafe() ?: return@withContext emptyList()
         try {
             val snapshot = db.collection(COLLECTION_USERS)
                 .whereEqualTo("role", "TEACHER")
                 .get()
                 .await()
-            snapshot.documents.mapNotNull { docToUser(it.data) }
+            snapshot.documents.mapNotNull { docToUser(it.data, it.id) }
         } catch (e: Exception) {
             if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
             emptyList()
@@ -5039,13 +5102,13 @@ open class RemoteAccountService {
             return@withContext testUsers.values.filter { it.isStudent }
         }
         if (!isFirestoreProvisioned) return@withContext emptyList()
-        val db = firestore ?: return@withContext emptyList()
+        val db = getFirestoreSafe() ?: return@withContext emptyList()
         try {
             val snapshot = db.collection(COLLECTION_USERS)
                 .whereEqualTo("role", "STUDENT")
                 .get()
                 .await()
-            snapshot.documents.mapNotNull { docToUser(it.data) }
+            snapshot.documents.mapNotNull { docToUser(it.data, it.id) }
         } catch (e: Exception) {
             if (isDatabaseNotProvisioned(e)) markDatabaseNotProvisioned()
             emptyList()

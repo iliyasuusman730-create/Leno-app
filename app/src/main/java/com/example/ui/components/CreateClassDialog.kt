@@ -298,7 +298,7 @@ fun CreateClassDialog(
                             ) {
                                 Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, tint = LenoPrimary)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Upload Cover Picture from Gallery", fontSize = 12.sp, color = LenoPrimary, fontWeight = FontWeight.SemiBold)
+                                Text("Upload Cover Picture from Gallery", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
@@ -461,7 +461,7 @@ fun CreateClassDialog(
                     },
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Save Draft", fontSize = 12.sp)
+                    Text("Save Draft", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
                 }
 
                 Button(
@@ -506,7 +506,7 @@ fun CreateClassDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
             }
         }
     )
